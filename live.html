@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MD耐性リアルタイム</title>
+<style>
+:root{--bg:#f6f5f2;--panel:#fff;--ink:#1f2328;--muted:#6b6f76;--line:#e3e1dc}
+@media (prefers-color-scheme:dark){:root{--bg:#16181c;--panel:#1f2227;--ink:#e8e9eb;--muted:#9aa0a8;--line:#30343b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,"Hiragino Sans","Yu Gothic UI",Meiryo,sans-serif}
+.wrap{max-width:820px;margin:0 auto;padding:14px 16px 40px}
+h1{font-size:17px;margin:0 0 4px}.sub{color:var(--muted);font-size:12px}
+.where{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.chip{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;background:var(--panel);cursor:pointer}
+.chip.on{background:#3b5bdb;color:#fff;border-color:#3b5bdb}.chip.md{font-weight:700}
+.now{font-size:14px;margin:8px 0 10px}.now b{font-size:16px}
+.big .rz-t{font-size:15px}.big .rz-b{font-size:15px;padding:2px 10px}
+.out{padding:16px;border:1px dashed var(--line);border-radius:12px;color:var(--muted)}
+.warn{font-size:12px;color:#c92a2a;margin-top:6px}
+input{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);width:100%}
+details{margin-top:18px}summary{cursor:pointer;color:var(--muted);font-size:13px}
+
+</style></head><body><div class="wrap">
+<h1>MD耐性リアルタイム</h1>
+<div class="sub" id="st">ツールにつないでいます…</div>
+<div class="where" id="where"></div>
+<div id="main"></div>
+<details><summary>ほかのMDを見る</summary><p><input id="q" placeholder="MD名で検索"></p><div id="all"></div></details>
+</div>
+<script>
+// ===== MD耐性(共通部品) =====
+const RESIST_SHEET_DEFAULT = "1AFcb8-JhY5tklH2j-NntGX6ZvSmzix3GYTC6UaVVseA";
+const RESIST_HEAD = ["MD名", "判定キー(マップ名/MD内部名)", "場面", "鎧", "肩", "鎧の備考(反射・破損など)", "肩の備考(耐性%など)", "状態異常・その他", "ボス・注意点", "メモ", "信頼度", "出典"];
+const RESIST_DEFAULT = [["ゲフェン夜間闘技場", "夜間闘技場, 夜間", "ノーマル1-6戦目", "", "", "", "", "特に指定なし", "戦ごとに属性が異なる", "N/Hで分けて記載。ハード8/10戦目はfukoto未記載、ro-eagleより", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["ゲフェン夜間闘技場", "", "ノーマル7戦目(ハゼ)", "聖鎧", "", "", "", "", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ノーマル9戦目(ユメヒメ)", "", "念肩", "", "念耐性95%", "", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ノーマル10戦目(フェンリル)", "聖鎧", "水肩", "", "水耐性75%以上", "無属性耐性", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード5戦目(フェモン)", "念鎧", "", "", "", "", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード6戦目(黒魔)", "念鎧", "念肩", "", "", "SP回復剤", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード7戦目(レチェニエ)", "聖鎧", "念肩", "", "念耐性95%", "沈黙・睡眠対策", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード8戦目(ジュー)", "聖鎧", "", "", "", "", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード9戦目(カナビアン)", "念鎧", "念肩", "", "念耐性95%", "火レジストポーション", "", "", "", ""], ["ゲフェン夜間闘技場", "", "ハード10戦目(ディワイ)", "念鎧", "念肩", "反射耐性100%", "念耐性95%", "", "", "", "", ""], ["保安区域(ノーマル)", "security area, herbs2", "ボス前", "", "地肩", "", "", "", "ボスは闇GX(グランドクロス系)", "道中はspicaでは念鎧。miohapiは念鎧聖肩(抽出不安定)", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["保安区域(ノーマル)", "", "ボス戦", "闇鎧", "聖肩", "", "聖耐性90%程度", "", "", "", "", ""], ["保安区域(ハード)", "2nd security area, herbs3", "ボス前", "地鎧", "念肩", "", "", "地耐性", "ボスは念攻撃主体+闇", "道中鎧はfukoto地鎧/spica念鎧で割れる。ボス闇鎧念肩は複数一致(naonaoo 23/11は毒鎧+念肩も可)", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["保安区域(ハード)", "", "ボス戦", "闇鎧", "念肩", "", "念耐性90%程度", "", "", "", "", ""], ["水上植物園(ノーマル)", "", "ボス前", "聖鎧", "水肩", "", "", "凍結耐性", "", "", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["水上植物園(ノーマル)", "", "ボス戦", "毒鎧", "聖肩", "", "", "", "", "", "", ""], ["水上植物園(ハード)", "", "ボス前", "聖鎧", "水肩", "", "", "凍結耐性(アンフロ)", "ボスは念攻撃", "", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["水上植物園(ハード)", "", "ボス戦", "聖鎧", "念肩", "", "", "長引くなら水耐性", "", "", "", ""], ["聖域セスルムニル", "セスルムニル", "ボス前", "念鎧", "", "クリティカルスラッシュ対策", "", "", "ボス後半に火攻撃", "spicaは念鎧念肩・ラスボスはSWで可と記載(少数意見)", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["聖域セスルムニル", "", "ボス戦", "毒鎧", "火肩", "", "", "火耐性重要", "", "", "", ""], ["飛行船墜落地", "airship_crash_point, 墜落", "全体", "毒鎧", "念肩", "破損(鎧破壊)対策", "念耐性80%以上", "", "ボスが鎧破壊を使う", "", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["飛行船破壊作戦", "whl, 破壊作戦", "全体", "毒鎧", "聖肩", "", "聖耐性95%", "", "毒・聖攻撃が標準", "", "高", "https://fukoto.com/ragnarokonline-attribute-resistance/"], ["飛行船襲撃", "", "ボス戦", "", "火肩", "", "", "", "ワイバーン闇4/ペルロック闇2。敵は風・闇属性中心", "darayukuの必要耐性欄に「火」のみ(鎧/耐性どちらの欄か判別不能)。ペルロックのソウルブレイカー注意", "低", "https://darayuku.exblog.jp/243952915/"], ["シミュレーション戦闘", "jca_1, jca_2, シミュ", "全体", "念鎧", "聖肩", "", "聖耐性95%(最低90)", "精神衝撃(固定詠唱)対策、詠唱妨害不可", "", "", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["欺瞞の別荘", "Villa of Deception, advs", "MAP1-3", "聖鎧", "念肩", "", "", "マンドラ(状態異常)対策", "", "状態異常対策を多めに", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["欺瞞の別荘", "", "ボス戦", "念鎧", "聖肩", "", "", "", "", "", "", ""], ["悔恨の墓", "spa2", "MAP1", "毒鎧", "聖肩", "", "", "念肩も併用(聖念肩)、ノックバック耐性", "", "MAP1は毒服(毒鎧)。3MAP目はromechaでは毒鎧+聖念肩", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["悔恨の墓", "", "MAP2(姫)", "念鎧", "毒肩", "", "", "スタン対策(VIT120)", "", "", "", ""], ["悔恨の墓", "", "MAP3", "毒鎧", "念肩", "", "", "", "", "", "", ""], ["悔恨の墓", "", "ボス戦(サクライ)", "念鎧", "毒肩", "", "", "石化耐性、ウエポン等コート、STA100", "", "", "", ""], ["封じられた不死者", "", "全体", "念鎧", "毒肩", "", "毒耐性110-120%(STA100未満時)", "狂乱対策、HIT1400程度", "ボス(ラスガンド)は毒耐性を下げる毒攻撃", "", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["変えられない最後", "変えられない運命", "全体", "念鎧", "火肩", "ストリップヘルム対策", "", "闇耐性、精神衝撃対策、狂乱対策", "", "naonaooのみ。公式の「最後の部屋」(Lv140MD、火・風耐性)とは別物", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["星座の塔", "ct*", "全体", "聖鎧", "念肩", "", "", "毒霧は回避、石化対策(50F付近から)", "", "代替: 毒鎧+聖耐性(naonaoo富裕層案)、lawcemelo(2026)は毒鎧メインでナハト以降念鎧", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["星座の塔", "", "ナハト以降", "念鎧", "", "", "", "キリングオーラ対策", "", "", "", ""], ["夢幻の迷宮", "Labyrinth of Phantom, le100, 異形の迷宮, 幻影の迷宮", "異形10F(ロードオブデス)", "毒鎧", "", "", "", "", "階層ボスごとに属性が違う", "異形の迷宮の情報(2019年記事、95%上限化前)。試練は別項目", "低", "https://ro.dewassyoi.com/labyrinth/variant-boss/"], ["夢幻の迷宮", "", "異形40F(オークロード)", "", "", "", "", "ゴス服", "", "", "", ""], ["夢幻の迷宮", "", "異形50F(ミストレス)", "", "風肩", "", "風耐性100%", "ノックバック耐性", "", "", "", ""], ["夢幻の迷宮", "", "異形55F(シーラカンス)", "", "水肩", "", "水耐性100%", "ゴス服、石化耐性", "", "", "", ""], ["夢幻の迷宮", "", "異形60F(カトリーヌ)", "", "火肩", "", "火耐性95%", "", "", "", "", ""], ["呪われた次元（4th）", "ghc*, 呪われた次元, GHC4th", "全体", "毒鎧", "聖肩", "", "聖耐性95%(RoG対策)、毒耐性95%", "石化耐性、凍結耐性、詠唱妨害不可", "毒床(クラウドキル)・Mレイオブジェネシス", "ストリップウェポンあり(ro-challenge)", "中", "https://sumizakki.hatenablog.com/entry/2024/06/15/041330"], ["生命の殿堂", "", "MAP1-3", "毒鎧", "聖肩", "", "", "念肩併用(聖念肩)、スタン耐性、石化耐性", "リゲル: キリング+Mクラウドキル", "lawcemeloはボス念鎧+毒肩を基本形とする", "中", "https://ameblo.jp/romecha/entry-12961528194.html"], ["生命の殿堂", "", "MAP4(春)", "", "念肩", "", "", "", "", "", "", ""], ["生命の殿堂", "", "MAP4(夏)", "", "毒肩", "", "", "テトラ対策", "", "", "", ""], ["生命の殿堂", "", "MAP4(秋)", "", "聖肩", "", "", "", "", "", "", ""], ["生命の殿堂", "", "MAP4(冬)", "", "毒肩", "", "", "", "", "", "", ""], ["生命の殿堂", "", "ボス戦(春)", "念鎧", "念肩", "", "", "金盾", "", "", "", ""], ["生命の殿堂", "", "ボス戦(夏・冬)", "念鎧", "毒肩", "", "", "金盾", "", "", "", ""], ["生命の殿堂", "", "ボス戦(秋)", "念鎧", "聖肩", "", "", "金盾", "", "", "", ""], ["生命の殿堂", "", "ボス戦共通", "", "", "物理反射注意", "", "スタン・石化対策、頭・武器脱衣→コート", "", "", "", ""], ["特異点 名もなき島", "名もなき島, 名無し", "道中", "毒鎧", "聖肩", "", "念耐性95%", "スタン・沈黙対策、凍結・石化無効、Mレイオブジェネシス対策、ディレイカット(スロースキル)", "", "不死鎧はコラプトアンデッドがあるため不可(helldhuran)。強毒あり", "中", "https://naonaoo.hatenablog.com/entry/2025/06/11/060652"], ["特異点 名もなき島", "", "ボス戦", "念鎧", "", "", "", "キリングオーラ対策", "", "", "", ""], ["特異点 生体工学研究所", "特異点 生体", "第7区画", "念鎧", "", "", "", "", "", "1記事のみ・区画一部のみ。EDDA生体4thモード(念鎧+聖肩)とは別コンテンツ", "低", "https://helldhuran.hatenablog.com/entry/2025/11/26/165543"], ["特異点 生体工学研究所", "", "第8区画", "聖鎧", "", "反射対策", "", "", "", "", "", ""], ["特異点 タナトスタワー", "", "", "", "", "", "", "", "", "具体的な耐性情報が見つからず", "低", ""], ["浸食されたゲフェニア", "", "東部", "念鎧", "聖肩", "", "", "スタン・石化対策、鎧脱衣対策", "東部は聖攻撃(ホーリークロス等)が痛い", "MDではなく30分制限の挑戦ダンジョン", "中", "https://naonaoo.hatenablog.com/entry/2026/03/10/153058"], ["浸食されたゲフェニア", "", "西部", "念鎧", "闇肩+毒肩", "", "", "代替: 毒鎧+闇肩+無耐性、頭脱衣対策、スタン対策、Mクラウドキル", "", "", "", ""], ["破壊されたヴァルキリーレルム", "", "全体", "念鎧", "毒肩", "Mリフレクトダメージ(反射)対策", "", "代替: 毒鎧+無肩", "", "MDではなく30分制限の挑戦ダンジョン。1出典のみ", "低", "https://naonaoo.hatenablog.com/entry/2026/03/10/153058"], ["バルムントのバイオスフィア", "バイオスフィア, 標本環境", "死屍", "念鎧", "念肩", "", "", "", "エリアごとに異なる", "miohapiのみ・取得結果が不安定だったため要確認", "低", "https://miohapi.com/zokusei-soubi01/"], ["バルムントのバイオスフィア", "", "聖殿", "聖鎧", "念肩", "", "", "", "", "", "", ""], ["バルムントのバイオスフィア", "", "猛毒", "毒鎧", "毒肩", "", "", "", "", "", "", ""], ["バルムントのバイオスフィア", "", "霊魂", "念鎧", "念肩", "", "", "", "", "", "", ""], ["バルムントのバイオスフィア", "", "氷河", "", "", "", "", "精神衝撃・スローキャスト・ディスペル注意", "", "", "", ""], ["べたつく海", "slug", "全体", "念鎧", "毒肩", "", "", "", "", "武器は風付与推奨", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["バルター号捜索", "wtgsb, 旧バルター号捜索, 旧バルター号捜索", "全体", "毒鎧", "闇肩", "", "", "", "", "", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["魔神殿", "", "ブリナラネア戦", "", "水肩", "", "", "耐性不足なら風アンフロ鎧", "ブリナラ水/ムスペル火/モロクは風範囲+EQ", "", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["魔神殿", "", "ムスペルスコール戦", "", "火肩", "", "火耐性60%以上", "獄炎呪対策(永久霜)", "", "", "", ""], ["魔神殿", "", "モロク戦", "念鎧", "風肩", "", "風耐性40%以上", "ゴス服", "", "", "", ""], ["グラストヘイムの没落", "GH没落", "道中", "", "聖肩", "", "", "凍結対策(フロストダイバー)", "呪いを呑み込んだ王: 聖4", "", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["グラストヘイムの没落", "", "ボス戦", "", "聖肩+火肩", "", "", "石化対策(石化で地属性化)", "", "", "", ""], ["コルメモリアル", "コル", "ボス戦", "", "火肩", "", "", "念耐性、沈黙対策、火レジストポーション", "EL-A17T: 火4、念属性攻撃あり", "念鎧・不死鎧は避ける(darayuku)。ボスへは水属性武器", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["ヘイ！スウィーティ！", "スウィーティ", "全体", "念鎧", "念肩", "クリティカルスラッシュ対策", "", "呪い対策、ギミック回避", "", "", "高", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["ヴェルナーの痕跡", "ヴェルナー研究所, ヴェルナー研究所中央室", "道中", "闇鎧", "", "", "", "", "セイレン念1/CUTIE闇2", "darayukuはボス闇鎧+火耐性", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["ヴェルナーの痕跡", "", "ボス戦", "念鎧", "火肩", "", "", "DEF無視、ノックバック無効があると楽", "", "", "", ""], ["試練の迷宮/夢幻の迷宮", "試練の迷宮", "バフォメット", "闇鎧", "風肩", "", "", "風75%以上", "", "dewassyoiは2019年記事(上限95%化前)", "中", "https://naonaoo.hatenablog.com/entry/2023/01/06/192731"], ["試練の迷宮/夢幻の迷宮", "", "イフリート", "", "火肩", "", "", "火100%、ゴス服、ノックバック耐性", "", "", "", ""], ["試練の迷宮/夢幻の迷宮", "", "ジェジェリン/タートルジェネラル", "闇鎧", "水肩", "", "", "", "", "", "", ""], ["試練の迷宮/夢幻の迷宮", "", "オシリス", "闇鎧", "", "", "", "ノックバック耐性", "", "", "", ""], ["試練の迷宮/夢幻の迷宮", "", "シーラカンス", "", "水肩", "", "", "水100%", "", "", "", ""], ["試練の迷宮/夢幻の迷宮", "", "ルキフル", "毒鎧", "念肩", "", "水・念・毒耐性100%(壁)", "武器闇付与", "", "", "", ""], ["サラの記憶", "", "ボス戦", "", "", "", "", "無属性耐性", "大長老アイリン: 無1、素殴りのみ", "1出典", "低", "https://darayuku.exblog.jp/243589930/"], ["フェンリルとサラ", "FS", "道中", "火鎧", "", "", "", "火耐性", "サラ: 火・風魔法、後半闇化", "", "中", "https://ro-challenge.blog.jp/archives/1076135645.html"], ["フェンリルとサラ", "", "ボス戦", "風鎧", "火肩", "", "火耐性50-80%", "風耐性、石化注意(地属性化→メテオ)", "", "", "", ""], ["ゲフェン魔法大会", "", "全体", "", "", "", "", "凍結注意(フロストダイバー→サンダーストーム)", "", "耐性装備の明記なし", "低", "https://ro-challenge.blog.jp/archives/1057804776.html"], ["呪いの剣士", "Cursed Knight", "全体", "闇鎧", "地肩", "", "", "グランドダークネス/ダーククロス無効化", "ボス地3。敵は不死・闇中心(火3・風3も)", "", "中", "https://ro-challenge.blog.jp/archives/1076002984.html"], ["ホラーおもちゃ工場", "", "ボス戦", "不死鎧", "闇肩", "", "", "ノックバック対策、無属性耐性", "セリーヌ・キミ: 念1、闇JTで吹き飛ばし", "不死鎧はイビルドルイドカード服(mm1re)", "中", "https://darayuku.exblog.jp/243890042/"], ["悪夢のジターバグ", "ジターバグ", "なだらかな道", "火鎧", "", "", "", "火耐性", "ジターバグ: 不死2-3", "", "中", "https://darayuku.exblog.jp/244772469/"], ["悪夢のジターバグ", "", "険しい道", "闇鎧", "風肩", "", "", "凍結対策", "", "", "", ""], ["永劫の戦", "", "道中", "", "", "", "", "石化対策", "エレメス毒/ハワード水/マーガレッタ聖/カトリーヌ念、各状態異常(睡眠・スタン・沈黙・呪い)", "出典表で「風」が鎧欄か耐性欄か判別不能", "低", "https://darayuku.exblog.jp/243907596/"], ["永劫の戦", "", "ボス戦", "", "風肩", "", "", "凍結対策(凍結→JTコンボ)", "", "", "", ""], ["絶望の神", "", "", "", "", "", "", "", "", "単独MDとしての耐性情報なし。魔神殿のモロク戦は「魔神殿」参照", "低", ""], ["モルスの洞窟", "", "", "", "", "", "", "", "", "アンデッド多数・呪いトラップの記述のみ", "低", ""], ["ビオスの島", "", "ボス戦", "闇鎧", "火肩", "", "", "不死鎧も可、火or闇耐性", "死神アンク: 不死4、火・闇攻撃", "1出典", "低", "https://rolog.blog.jp/archives/19966220.html"], ["地下排水路", "", "お掃除エキスパート", "風鎧", "水肩", "", "", "凍結耐性、風耐性(6点盛り以上)、石化耐性(ギガミックス盛り)", "水・風攻撃(東西で属性が分かれる)", "", "中", "https://ro-challenge.blog.jp/archives/1077201279.html"], ["ファロス燈台地下迷宮", "infi, ファロス", "一般Mob", "闇鎧", "", "", "", "", "", "", "中", "https://mm1re.net/ro1-42/9255/"], ["ファロス燈台地下迷宮", "", "全体", "", "", "魔法反射対策、ストリップ対策(コート)", "ボスごとに水/火/地/念/聖/風耐性95%", "毒服(毒鎧)必須の場面あり、ゴス服(無)", "", "", "", ""], ["オズの迷路", "", "02", "念鎧", "", "ストリップヘルム注意", "", "", "敵は火1中心", "MDではなくフィールド", "中", "https://spica.tokyo.jp/spica_ro/professor/9933/"], ["古代神殿アケト", "アケト", "全体", "毒鎧", "闇肩", "", "", "火耐性", "", "", "中", "https://spica.tokyo.jp/spica_ro/study/equip/8547/"], ["ニブルヘイムカボチャ農場", "カボチャ農場", "全体", "毒鎧", "闇肩", "", "", "", "", "", "中", "https://spica.tokyo.jp/spica_ro/study/equip/8547/"], ["貯蔵庫タルタロス", "タルタロス", "下層", "火鎧", "", "", "", "", "", "1出典", "低", "https://spica.tokyo.jp/spica_ro/professor/9933/"], ["フェイスワームの巣", "", "第3エリア", "火鎧", "", "", "", "自爆対策", "女王: SG・LoV・EQ使用", "1出典", "低", "https://moco.mints.ne.jp/ro/freo/index.php/view/251"], ["フェイスワームの巣", "", "第4エリア", "毒鎧", "", "", "", "毒沼対策(不死鎧も可)", "", "", "", ""]];
+// シートのURL/IDから CSV のURLを作る
+function resistCsvUrl(s) {
+  s = String(s || "").trim();
+  if (!s) return "";
+  if (/output=csv|tqx=out:csv/.test(s)) return s;
+  const m = s.match(/\/d\/(e\/)?([\w-]{20,})/) || s.match(/^()([\w-]{20,})$/);
+  if (!m) return "";
+  if (m[1]) return `https://docs.google.com/spreadsheets/d/e/${m[2]}/pub?output=csv`;
+  const id = m[2];
+  return `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&headers=1&sheet=${encodeURIComponent("MD耐性")}`;
+}
+function parseCSV(t) {
+  const out = []; let row = [], f = "", q = false;
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (q) { if (c === '"') { if (t[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+    else if (c === '"') q = true;
+    else if (c === ",") { row.push(f); f = ""; }
+    else if (c === "\n" || c === "\r") { if (c === "\r" && t[i + 1] === "\n") i++; row.push(f); out.push(row); row = []; f = ""; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); out.push(row); }
+  return out;
+}
+// 表(1行目=見出し) → 項目名で読む。列の順番が入れ替わってもOK
+function resistFromTable(tbl) {
+  if (!tbl.length) return [];
+  const head = tbl[0].map((x) => x.trim());
+  const col = (name) => { const k = name.replace(/\(.*$/, ""); return head.findIndex((h) => h === name || h.replace(/\(.*$/, "") === k); };
+  const ix = RESIST_HEAD.map(col);
+  if (ix[0] < 0) throw new Error("見出し「MD名」が見つかりません");
+  return tbl.slice(1).map((r) => ix.map((i) => (i >= 0 ? (r[i] || "").trim() : ""))).filter((r) => r.some((x) => x));
+}
+// 行 → MDごとにまとめる
+function resistEntries(rows) {
+  const M = new Map(); let last = null;
+  for (const r of rows) {
+    const name = r[0] || (last && last.name) || "";
+    if (!name) continue;
+    let E = M.get(name);
+    if (!E) { E = { name, keys: [], phases: [], boss: [], memo: [], conf: "", src: [] }; M.set(name, E); }
+    last = E;
+    for (const k of r[1].split(/[,、，]/)) if (k.trim()) E.keys.push(k.trim());
+    if (r[2] || r[3] || r[4] || r[5] || r[6] || r[7]) E.phases.push({ when: r[2], armor: r[3], shoulder: r[4], anote: r[5], snote: r[6], other: r[7] });
+    if (r[8]) E.boss.push(r[8]);
+    if (r[9]) E.memo.push(r[9]);
+    if (r[10]) E.conf = r[10];
+    for (const u of r[11].split(/\s+/)) if (/^https?:/.test(u)) E.src.push(u);
+  }
+  return [...M.values()];
+}
+const rnorm = (s) => String(s || "").toLowerCase().replace(/[\s　_\-（）()]/g, "");
+// いる場所(マップ名・MD内部名) → 該当MD。見つからなければ null
+function resistMatch(entries, map, md) {
+  const base = String(map || "").replace(/^.*@/, "").toLowerCase();
+  const mdn = rnorm(md);
+  const hit = (k) => {
+    const kl = k.toLowerCase();
+    if (kl.endsWith("*")) { const p = kl.slice(0, -1); return base.startsWith(p) || (mdn && mdn.startsWith(rnorm(p))); }
+    if (base && base === kl) return true;
+    const kn = rnorm(k);
+    return !!(mdn && kn && (mdn === kn || (kn.length >= 4 && mdn.startsWith(kn)) || (mdn.length >= 6 && kn.startsWith(mdn))));
+  };
+  // MD内部名で先に探す(同じマップを使うMDがあるため) → マップ名
+  for (const E of entries) if (mdn && [E.name, ...E.keys].some((k) => !k.endsWith("*") && rnorm(k) && (rnorm(k) === mdn || (rnorm(k).length >= 4 && mdn.startsWith(rnorm(k))) || (mdn.length >= 6 && rnorm(k).startsWith(mdn))))) return E;
+  for (const E of entries) if (E.keys.some(hit)) return E;
+  return null;
+}
+// MDの名前(クエスト名から作った名前など) → 該当MD
+function resistFind(entries, name) {
+  const n = rnorm(name);
+  if (!n) return null;
+  const all = (E) => [E.name, ...E.keys.filter((k) => !k.endsWith("*"))].map(rnorm).filter(Boolean);
+  for (const E of entries) if (all(E).includes(n)) return E;
+  for (const E of entries) if (all(E).some((k) => k.length >= 3 && (n.includes(k) || k.includes(n)))) return E;
+  return null;
+}
+const EL_CLS = { 毒: "e-poi", 念: "e-gho", 聖: "e-hol", 闇: "e-dar", 火: "e-fir", 水: "e-wat", 風: "e-win", 地: "e-ear", 無: "e-neu", 不死: "e-und" };
+function elBadge(s) {
+  if (!s) return `<span class="rz-none">―</span>`;
+  return String(s).split(/\s*(?:\/|／|・|\+|＋|、|,|\bor\b|または)\s*/).map((x) => x.trim()).filter(Boolean).map((x) => {
+    const k = Object.keys(EL_CLS).find((e) => x.startsWith(e));
+    return `<span class="rz-b ${k ? EL_CLS[k] : ""}">${resc(x)}</span>`;
+  }).join(" ");
+}
+const resc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function resistCard(E, opt = {}) {
+  let h = `<div class="rz-card ${opt.hot ? "rz-hot" : ""}" data-rz="${resc(E.name)}">`;
+  h += `<div class="rz-h"><b>${resc(E.name)}</b>${E.conf ? `<span class="rz-conf c-${resc(E.conf)}">信頼度 ${resc(E.conf)}</span>` : ""}${opt.extra || ""}</div>`;
+  if (!E.phases.length) h += `<div class="rz-empty">まだ情報がありません（シートに書き足してね）</div>`;
+  else {
+    h += `<table class="rz-t"><thead><tr><th>場面</th><th>鎧</th><th>肩</th><th>備考</th></tr></thead><tbody>`;
+    for (const p of E.phases) {
+      const notes = [p.anote && `<span class="rz-n">鎧: ${resc(p.anote)}</span>`, p.snote && `<span class="rz-n">肩: ${resc(p.snote)}</span>`, p.other && `<span class="rz-n">${resc(p.other)}</span>`].filter(Boolean).join("");
+      h += `<tr><td class="rz-w">${resc(p.when || "全体")}</td><td>${elBadge(p.armor)}</td><td>${elBadge(p.shoulder)}</td><td>${notes}</td></tr>`;
+    }
+    h += `</tbody></table>`;
+  }
+  if (E.boss.length) h += `<div class="rz-m">ボス・注意: ${resc(E.boss.join(" / "))}</div>`;
+  if (E.memo.length && opt.memo !== false) h += `<div class="rz-m rz-memo">メモ: ${resc(E.memo.join(" / "))}</div>`;
+  if (E.src.length && opt.src !== false) h += `<div class="rz-m rz-src">出典: ${E.src.map((u, i) => `<a href="${resc(u)}" target="_blank" rel="noopener">${i + 1}</a>`).join(" ")}</div>`;
+  return h + `</div>`;
+}
+const RESIST_CSS = `
+.rz-card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:10px 12px;margin-bottom:10px}
+.rz-flash{animation:rzf 1.6s ease-out 2}@keyframes rzf{0%{box-shadow:0 0 0 6px rgba(59,91,219,.55)}100%{box-shadow:0 0 0 0 rgba(59,91,219,0)}}
+.rz-hot{border:2px solid #3b5bdb;box-shadow:0 0 0 3px rgba(59,91,219,.15)}
+.rz-h{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:15px}
+.rz-conf{font-size:11px;border-radius:999px;padding:1px 8px;background:var(--line);color:var(--muted)}
+.rz-conf.c-低{background:#fff3bf;color:#8a6d00}
+.rz-t{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+.rz-t th:nth-child(2),.rz-t th:nth-child(3){width:6.5em}
+.rz-t th{font-size:11px;color:var(--muted);text-align:left;font-weight:600;padding:4px 6px;border-bottom:1px solid var(--line);position:static;min-width:0;max-width:none;background:none}
+.rz-t td{padding:5px 6px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left;white-space:normal}
+.rz-t tr:last-child td{border-bottom:0}
+.rz-w{color:var(--muted);font-size:12px}
+.rz-t th:first-child{width:9em}
+.rz-n{display:inline-block;margin:0 6px 2px 0;font-size:12px}
+.rz-n+.rz-n::before{content:"／ ";color:var(--muted)}
+.rz-m{font-size:12px;color:var(--muted);margin-top:6px}
+.rz-src a{margin-right:4px}
+.rz-empty{font-size:13px;color:var(--muted)}
+.rz-none{color:var(--muted)}
+.rz-b{display:inline-block;font-weight:700;font-size:13px;padding:1px 8px;border-radius:6px;background:#e9ecef;color:#343a40;white-space:nowrap;margin:1px 0}
+.e-poi{background:#e5dbff;color:#5f3dc4}.e-gho{background:#dbe4ff;color:#364fc7}.e-hol{background:#fff3bf;color:#8a6d00}
+.e-dar{background:#343a40;color:#f1f3f5}.e-fir{background:#ffe3e3;color:#c92a2a}.e-wat{background:#d0ebff;color:#1864ab}
+.e-win{background:#d3f9d8;color:#2b8a3e}.e-ear{background:#f3e3cf;color:#7c4a16}.e-neu{background:#f1f3f5;color:#495057}.e-und{background:#e6d5ef;color:#5c2a74}
+@media (max-width:600px){.rz-t th:first-child{width:6em}.rz-t th:nth-child(2),.rz-t th:nth-child(3){width:5em}.rz-t{font-size:12px}}
+`;
+
+document.head.insertAdjacentHTML("beforeend", `<style>${RESIST_CSS}</style>`);
+const $ = (s) => document.querySelector(s);
+let ENTRIES = resistEntries(RESIST_DEFAULT), SHEET_ERR = "", NOW = null, PICK = null, FAIL = 0;
+async function loadSheet() {
+  try {
+    const r = await fetch("/sheet.csv", { cache: "no-store" });
+    if (!r.ok) throw new Error(await r.text());
+    const E = resistEntries(resistFromTable(parseCSV(await r.text())));
+    if (!E.length) throw new Error("シートが空です");
+    ENTRIES = E; SHEET_ERR = "";
+  } catch (e) { SHEET_ERR = "シートを読めないので、最初に入れた内容で表示中（" + e.message + "）"; }
+  draw(); drawAll();
+}
+async function poll() {
+  try {
+    const r = await fetch("/now.json", { cache: "no-store" });
+    NOW = await r.json(); FAIL = 0;
+  } catch (e) { FAIL++; }
+  draw();
+}
+function ago(t) { const s = Math.max(0, (NOW ? NOW.now : Date.now() / 1000) - t); return s < 60 ? "いま" : s < 3600 ? Math.floor(s / 60) + "分前" : Math.floor(s / 3600) + "時間前"; }
+function draw() {
+  if (FAIL > 2 || !NOW) { $("#st").textContent = FAIL ? "ツールが止まっているみたい（MDトラッカーを起動してね）" : "ツールにつないでいます…"; if (!NOW) return; }
+  const w = NOW.where || {};
+  const names = Object.keys(w).sort((a, b) => w[b].t - w[a].t);
+  // 見るキャラ: 選んだキャラ → いまプレイ中 → 最後に動いたキャラ
+  const cur = (PICK && w[PICK]) ? PICK : (NOW.current || []).find((n) => w[n]) || names[0];
+  $("#st").textContent = (FAIL > 2 ? "ツールが止まっているみたい / " : "") + "1秒ごとに更新中" + (SHEET_ERR ? "" : "・耐性はシートから");
+  $("#where").innerHTML = names.map((n) => `<span class="chip ${n === cur ? "on" : ""} ${w[n].map.includes("@") ? "md" : ""}" data-n="${resc(n)}">${resc(n)}：${resc(w[n].map.includes("@") ? (w[n].md || w[n].map) : w[n].map)}</span>`).join("");
+  let h = "";
+  if (!cur) h = `<div class="out">まだ場所がわかりません。ROでマップ移動すると出ます。</div>`;
+  else {
+    const p = w[cur], inMd = p.map.includes("@");
+    h += `<div class="now"><b>${resc(cur)}</b> は <b>${resc(inMd ? (p.md || "MD") : p.map)}</b> ${inMd ? `<span class="sub">(${resc(p.map)})</span>` : ""} <span class="sub">${ago(p.t)}</span></div>`;
+    if (!inMd) h += `<div class="out">MDの外にいます。MDに入ると、ここに必要な耐性が出ます。</div>`;
+    else {
+      const E = resistMatch(ENTRIES, p.map, p.md);
+      h += E ? `<div class="big">${resistCard(E, { hot: true })}</div>`
+             : `<div class="out">このMDはシートに見つかりませんでした。<br>シートの「判定キー」に <b>${resc(p.map.replace(/^.*@/, ""))}</b>${p.md ? ` か <b>${resc(p.md)}</b>` : ""} を書き足すと出るようになります。</div>`;
+    }
+  }
+  if (SHEET_ERR) h += `<div class="warn">${resc(SHEET_ERR)}</div>`;
+  $("#main").innerHTML = h;
+}
+function drawAll() {
+  const q = rnorm($("#q").value);
+  $("#all").innerHTML = ENTRIES.filter((E) => !q || rnorm(E.name + E.keys.join()).includes(q)).map((E) => resistCard(E)).join("");
+}
+$("#where").onclick = (e) => { const c = e.target.closest("[data-n]"); if (c) { PICK = PICK === c.dataset.n ? null : c.dataset.n; draw(); } };
+$("#q").oninput = drawAll;
+loadSheet(); poll();
+setInterval(poll, 1000); setInterval(loadSheet, 60000);
+</script></body></html>

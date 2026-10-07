@@ -1,0 +1,24 @@
+# 個人のデータ・設定は入れない
+設定.json
+表示の設定.json
+md_state.json
+char_state.json
+accounts.json
+被ダメ記録.json
+quest_names_cache.json
+nyar_fix.json*
+動作ログ.txt
+エラーログ.txt
+窓の位置.json
+画面のデータ/
+samples/
+*.jsonl
+_to_delete/
+__pycache__/
+build/
+build_dist/
+dist/
+配布用/
+*.spec
+*.exe
+GitHubトークン.txt
