@@ -57,11 +57,13 @@ def set_startup(on):
 
 
 class Tray(object):
-    def __init__(self, icon_path, url, live_url, web_url, log_file, folder, on_quit, status=None, open_main=None):
+    def __init__(self, icon_path, url, live_url, web_url, log_file, folder, on_quit, status=None, open_main=None,
+                 update=None):
         self.url, self.live_url, self.web_url = url, live_url, web_url
         self.log_file, self.folder, self.on_quit = log_file, folder, on_quit
         self.status = status or (lambda: "")
         self.open_main = open_main or (lambda: webbrowser.open(self.url))   # 専用の窓があればそれを出す
+        self.update = update      # (表示する文字を返す関数, 押したときの関数) / 無ければ出さない
         self.icon = None
         self.icon_path = icon_path
 
@@ -107,6 +109,10 @@ class Tray(object):
         if frozen and os.name == "nt":
             items.append(pystray.MenuItem("Windows起動時に自動で起動", lambda i, it: set_startup(not startup_enabled()),
                                           checked=lambda it: startup_enabled()))
+        if self.update:
+            text_fn, act = self.update
+            items += [pystray.Menu.SEPARATOR,
+                      pystray.MenuItem(lambda it: text_fn() or "アップデートを確認", lambda i, it: act())]
         items += [pystray.Menu.SEPARATOR, pystray.MenuItem("終了", self._quit)]
         self.icon = pystray.Icon("MDTracker", self._image(), "MDトラッカー", pystray.Menu(*items))
 

@@ -143,7 +143,12 @@ class Updater(object):
                     'tasklist /FI "PID eq {}" | find " {} " > nul && (timeout /t 1 /nobreak > nul & goto wait)'.format(pid, pid),
                     "set n=0",
                     ":retry",
-                    'move /y "{}" "{}" > nul || (set /a n+=1 & timeout /t 1 /nobreak > nul & if %n% lss 20 goto retry)'.format(new, exe),
+                    'move /y "{}" "{}" > nul && goto done'.format(new, exe),
+                    "set /a n+=1",
+                    "if %n% geq 20 goto done",
+                    "timeout /t 1 /nobreak > nul",
+                    "goto retry",
+                    ":done",
                     'start "" "{}"'.format(exe),
                     'del "%~f0"',
                     ""]))

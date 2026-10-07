@@ -469,6 +469,9 @@ document.head.insertAdjacentHTML("beforeend", `<style>${RESIST_CSS}
 .rz-chip.md{font-weight:700;border-color:#3b5bdb}
 .rz-out{padding:12px;border:1px dashed var(--line);border-radius:12px;color:var(--muted);font-size:13px;margin-bottom:10px}
 .rzgo{cursor:pointer}
+.updbar{margin:0 0 10px;padding:10px 12px;border-color:#3b5bdb;background:rgba(59,91,219,.06);font-size:14px}
+.updbar button{margin-left:8px}
+.updbar pre{white-space:pre-wrap;font-size:12px;margin:6px 0 0}
 .dm-box{margin-bottom:12px;padding:10px 12px;overflow-x:auto}
 .dm-h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;margin-bottom:6px}
 .dm-h .dm-rz{margin-left:auto;font-size:13px}
@@ -888,8 +891,15 @@ function renderSettings(groups) {
   });
   h += `</div><h2>耐性シート</h2><div class="panel list"><div class="row"><span class="nm">GoogleスプレッドシートのURL（空欄 = 最初に作った「MD耐性一覧」）</span>
     <input class="lbl" id="rzsheet" style="flex:1;min-width:240px" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(SETTINGS.resistSheet || "")}"></div></div>`;
+  if (typeof LOCAL !== "undefined" && LOCAL) {
+    const u = UPDATE || {};
+    h += `<h2>アップデート</h2><div class="panel list"><div class="row"><span class="nm">いまの版 v${esc(u.current || DATA.version || "?")}
+      <span class="muted">${u.state === "none" ? "（最新です）" : u.state === "available" ? `（新しい版 v${esc(u.latest.version)} があります）` : u.state === "error" ? "（" + esc(u.error) + "）" : ""}</span></span>
+      <button class="ghost" id="upchk">アップデートを確認</button></div></div>`;
+  }
   h += `<div class="err" id="serr"></div>`;
   $("#view").innerHTML = h;
+  if ($("#upchk")) $("#upchk").onclick = async () => { $("#upchk").textContent = "確認中…"; await checkUpdate(true); render(); };
   $("#rzsheet").onchange = (e) => { SETTINGS.resistSheet = e.target.value.trim(); saveSettings(); RZ.t = 0; };
 
   document.querySelectorAll("[data-kind]").forEach((el) => el.onchange = () => {
@@ -965,8 +975,40 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && DA
 
 // この PC のツール(MDトラッカー)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
+// ---------- アップデート(この PC のツールだけ) ----------
+let UPDATE = null;
+async function checkUpdate(force) {
+  try {
+    const r = await fetch("/api/update", force ? { method: "POST" } : {});
+    UPDATE = await r.json();
+  } catch { UPDATE = null; }
+  drawUpdate();
+}
+function drawUpdate() {
+  let el = $("#updbar");
+  if (!el) { $("#tabs").insertAdjacentHTML("beforebegin", `<div id="updbar"></div>`); el = $("#updbar"); }
+  const u = UPDATE;
+  if (!u || !["available", "downloading", "ready"].includes(u.state) && !(u.state === "error" && u.error && u.latest)) { el.innerHTML = ""; return; }
+  const v = u.latest ? "v" + u.latest.version : "";
+  let h = `<div class="panel updbar">`;
+  if (u.state === "available") h += `<b>新しい版 ${esc(v)} があります</b>（いまは v${esc(u.current)}）`
+    + (u.can_install ? ` <button id="upgo">今すぐアップデート</button>` : ` <span class="muted">exe 版のときにここから更新できます</span>`)
+    + (u.latest.notes ? `<details><summary>変更点</summary><pre>${esc(u.latest.notes)}</pre></details>` : "");
+  else if (u.state === "downloading") h += `<b>${esc(v)} をダウンロード中… ${u.progress}%</b>`;
+  else if (u.state === "ready") h += `<b>入れ替えて起動し直しています…</b> 少し待つと新しい版で開き直します。`;
+  else h += `<b>アップデートできませんでした</b> ${esc(u.error)} <button id="upgo">もう一度</button>`;
+  el.innerHTML = h + `</div>`;
+  const b = $("#upgo");
+  if (b) b.onclick = async () => {
+    b.disabled = true;
+    try { UPDATE = await (await fetch("/api/update?do=install", { method: "POST" })).json(); } catch {}
+    drawUpdate();
+    const t = setInterval(async () => { await checkUpdate(); if (!UPDATE || !["downloading"].includes(UPDATE.state)) clearInterval(t); }, 1000);
+  };
+}
 if (LOCAL) {
   PW = "local";
+  checkUpdate(); setInterval(() => checkUpdate(), 60000);
   $("#logout").hidden = true;
   document.querySelector("#app h1").insertAdjacentHTML("afterend", `<span class="tag on" title="この PC のツールから直接表示しています">この PC</span>`);
   setInterval(() => { if (!document.hidden && TAB !== "settings") load(); }, 5000);
