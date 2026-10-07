@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.2.0"
+VERSION = "2.2.1"
 CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
@@ -744,6 +744,8 @@ def main():
                                       on_found=lambda info: TRAY and TRAY.notify(
                                           "新しい版 v{} があります。画面の上か、右クリックの「アップデート」から更新できます。".format(info["version"]),
                                           "Fox_MD_Tracker"))
+                if UPD.frozen():
+                    UPD.cleanup()
                 if cfg.get("アップデートを確認", True) is not False:
                     UPD.start_background(stop)
             except Exception as e:

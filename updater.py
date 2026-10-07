@@ -31,6 +31,27 @@ def vtuple(v):
     return tuple(int(x) for x in nums[:4]) or (0,)
 
 
+def _same_exe(pid, exe):
+    """pid のプロセスが同じ exe ファイルかどうか(Windows)。わからなければ False。"""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        k = ctypes.windll.kernel32
+        h = k.OpenProcess(0x1000, False, pid)        # PROCESS_QUERY_LIMITED_INFORMATION
+        if not h:
+            return False
+        try:
+            buf = ctypes.create_unicode_buffer(1024)
+            n = wintypes.DWORD(1024)
+            if not k.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
+                return False
+            return os.path.normcase(os.path.abspath(buf.value)) == os.path.normcase(os.path.abspath(exe))
+        finally:
+            k.CloseHandle(h)
+    except Exception:
+        return False
+
+
 class Updater(object):
     def __init__(self, version, repo=None, folder=None, log=print, on_found=None):
         self.version = version
@@ -44,6 +65,17 @@ class Updater(object):
         self.progress = 0
         self.last_check = 0
         self.lock = threading.Lock()
+
+    def cleanup(self):
+        """前回のアップデートの残り(.new.exe / _update.bat)を片付ける。"""
+        for n in ("Fox_MD_Tracker.new.exe", "MDTracker.new.exe", "MDTracker_update.bat"):
+            p = os.path.join(self.folder, n)
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+                    self.log("[アップデート] 前回の残りを片付けました: " + n)
+            except OSError:
+                pass
 
     @staticmethod
     def frozen():
@@ -137,30 +169,54 @@ class Updater(object):
                 if f.read(2) != b"MZ":
                     raise ValueError("exe ではないファイルでした")
             bat = os.path.join(self.folder, "Fox_MD_Tracker_update.bat")
-            pid = os.getpid()
+            log = os.path.join(self.folder, "アップデートログ.txt")
+            pids = [os.getpid()]
+            try:
+                pp = os.getppid()          # exe(1つにまとめた形)は「親+子」の2つで動いている
+                if pp and pp != os.getpid() and _same_exe(pp, exe):
+                    pids.append(pp)        # 親も同じ exe のときだけ待つ(エクスプローラー等は絶対に止めない)
+            except Exception:
+                pass
+            # 黒い画面なしで動くので timeout は使えない → ping で1秒ずつ待つ
+            sleep1 = "ping -n 2 127.0.0.1 > nul"
+            lines = ["@echo off",
+                     "rem Fox_MD_Tracker のアップデート(自動で作られて、終わったら消えます)",
+                     'echo %date% %time% アップデート開始 >> "{}"'.format(log)]
+            for pid in pids:
+                lines += ["set n=0",
+                          ":wait{}".format(pid),
+                          'tasklist /FI "PID eq {0}" 2> nul | find " {0} " > nul || goto gone{0}'.format(pid),
+                          "set /a n+=1",
+                          'if %n% geq 25 (echo 終わらないので止めます {0} >> "{1}" & taskkill /F /PID {0} >> "{1}" 2>&1 & goto gone{0})'.format(pid, log),
+                          sleep1,
+                          "goto wait{}".format(pid),
+                          ":gone{}".format(pid)]
+            lines += ["set n=0",
+                      ":retry",
+                      'move /y "{}" "{}" >> "{}" 2>&1 && goto moved'.format(new, exe, log),
+                      "set /a n+=1",
+                      'if %n% geq 30 (echo 入れ替えできませんでした >> "{}" & goto start)'.format(log),
+                      sleep1,
+                      "goto retry",
+                      ":moved",
+                      'echo 入れ替えました >> "{}"'.format(log),
+                      ":start",
+                      'start "" "{}"'.format(exe),
+                      'del "%~f0"',
+                      ""]
             with open(bat, "w", encoding="cp932", errors="replace") as f:
-                f.write("\r\n".join([
-                    "@echo off",
-                    "rem Fox_MD_Tracker のアップデート(自動で作られて、終わったら消えます)",
-                    ":wait",
-                    'tasklist /FI "PID eq {}" | find " {} " > nul && (timeout /t 1 /nobreak > nul & goto wait)'.format(pid, pid),
-                    "set n=0",
-                    ":retry",
-                    'move /y "{}" "{}" > nul && goto done'.format(new, exe),
-                    "set /a n+=1",
-                    "if %n% geq 20 goto done",
-                    "timeout /t 1 /nobreak > nul",
-                    "goto retry",
-                    ":done",
-                    'start "" "{}"'.format(exe),
-                    'del "%~f0"',
-                    ""]))
+                f.write("\r\n".join(lines))
             self.state, self.progress = "ready", 100
             self.log("[アップデート] v{} をダウンロードしました。入れ替えて起動し直します".format(self.latest["version"]))
             flags = 0x08000000 | 0x00000008     # 黒い画面を出さない / 親と切り離す
             subprocess.Popen(["cmd", "/c", bat], cwd=self.folder, creationflags=flags, close_fds=True)
             time.sleep(0.5)
-            quit_app()
+            # 終わりきらないことがあるので、少し待っても残っていたら強制的に終える
+            threading.Timer(8, lambda: os._exit(0)).start()
+            try:
+                quit_app()
+            except Exception:
+                pass
         except Exception as e:
             self.state, self.error = "error", "アップデートできませんでした: {}".format(e)
             self.log("[アップデート] " + self.error)
