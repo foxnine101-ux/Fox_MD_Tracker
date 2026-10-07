@@ -52,6 +52,16 @@ def _same_exe(pid, exe):
         return False
 
 
+def _clean_env():
+    """新しい exe を起動するための環境変数。
+    1つにまとめた exe(PyInstaller)は、自分の子に「展開先フォルダ」などを環境変数で伝えている。
+    それを持ったまま新しい exe を起動すると、古い版の(もう消える)フォルダを使おうとして起動できない。"""
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith("_PYI_") and k.upper() != "_MEIPASS2"}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    return env
+
+
 class Updater(object):
     def __init__(self, version, repo=None, folder=None, log=print, on_found=None):
         self.version = version
@@ -208,11 +218,17 @@ class Updater(object):
                 f.write("\r\n".join(lines))
             self.state, self.progress = "ready", 100
             self.log("[アップデート] v{} をダウンロードしました。入れ替えて起動し直します".format(self.latest["version"]))
-            flags = 0x08000000 | 0x00000008     # 黒い画面を出さない / 親と切り離す
-            subprocess.Popen(["cmd", "/c", bat], cwd=self.folder, creationflags=flags, close_fds=True)
+            # 黒い画面を出さない / 別グループにする。
+            # DETACHED_PROCESS だと cmd に画面が無く、中で動く ping や tasklist が毎回黒い画面を出してしまう
+            flags = 0x08000000 | 0x00000200
+            subprocess.Popen(["cmd", "/c", bat], cwd=self.folder, creationflags=flags, close_fds=True,
+                             env=_clean_env())
             time.sleep(0.5)
             # 終わりきらないことがあるので、少し待っても残っていたら強制的に終える
-            threading.Timer(8, lambda: os._exit(0)).start()
+            # (daemon にしないと、ふつうに終われたときも8秒待ってしまう)
+            t = threading.Timer(8, lambda: os._exit(0))
+            t.daemon = True
+            t.start()
             try:
                 quit_app()
             except Exception:

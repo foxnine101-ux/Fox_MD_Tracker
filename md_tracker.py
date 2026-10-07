@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.2.1"
+VERSION = "2.2.2"
 CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
