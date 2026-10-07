@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-md_tracker.py  —  ROのMDクールタイム自動記録ツール
+md_tracker.py  —  Fox_MD_Tracker (ROのMDクールタイム自動記録ツール)
 
 ROの通信を「読むだけ」で、キャラごとの MD の再入場できる時刻を記録して、
 自分用のウェブページ(Netlify)に送ります。ゲームには何も送りません。
@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.1.1"
+VERSION = "2.2.0"
 CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
@@ -244,7 +244,7 @@ def _sheet_csv(url):
     c = _SHEET_CACHE
     if c["body"] is not None and c["url"] == url and time.time() - c["t"] < 60:
         return c["body"]
-    req = urllib.request.Request(url, headers={"User-Agent": "md-tracker"})
+    req = urllib.request.Request(url, headers={"User-Agent": "Fox_MD_Tracker"})
     with urllib.request.urlopen(req, timeout=10) as r:
         body = r.read()
     if b"<html" in body[:500].lower():
@@ -608,7 +608,7 @@ def main():
     ap.add_argument("--tray", action="store_true")
     ap.add_argument("--hidden", action="store_true")   # 窓を出さずにトレイだけ(Windows起動時の自動起動)   # 黒い画面なしでタスクトレイに常駐
     args = ap.parse_args()
-    print("ROのMDクールタイム記録ツール v{}".format(VERSION))
+    print("Fox_MD_Tracker v{}".format(VERSION))
     cfg = load_config()
     ro = find_ro_dir(cfg)
     names = {}
@@ -728,7 +728,7 @@ def main():
                 import appwin
                 if appwin.AppWindow.available():
                     app = appwin.AppWindow(local_url(), HERE, show=not args.hidden, log=print,
-                                           on_hide=lambda: TRAY and TRAY.notify("右下のアイコンに隠れました。ダブルクリックでまた開けます。終了は右クリックから。", "MDトラッカー"))
+                                           on_hide=lambda: TRAY and TRAY.notify("右下のアイコンに隠れました。ダブルクリックでまた開けます。終了は右クリックから。", "Fox_MD_Tracker"))
             except Exception as e:
                 print("[窓] 使えません:", e)
 
@@ -743,7 +743,7 @@ def main():
                 UPD = updater.Updater(VERSION, cfg.get("アップデート元") or None, HERE, log=print,
                                       on_found=lambda info: TRAY and TRAY.notify(
                                           "新しい版 v{} があります。画面の上か、右クリックの「アップデート」から更新できます。".format(info["version"]),
-                                          "MDトラッカー"))
+                                          "Fox_MD_Tracker"))
                 if cfg.get("アップデートを確認", True) is not False:
                     UPD.start_background(stop)
             except Exception as e:
@@ -775,7 +775,7 @@ def main():
                 else:
                     st = UPD.check()
                     msg = {"none": "最新版です (v{})".format(VERSION), "available": "新しい版 v{} があります".format((st.get("latest") or {}).get("version"))}.get(st["state"], st.get("error") or "")
-                    TRAY.notify(msg, "MDトラッカー")
+                    TRAY.notify(msg, "Fox_MD_Tracker")
             TRAY = tray.Tray(resource("tray.png") or resource("icon.ico"), local_url(), local_url() + "live",
                              ((cfg.get("ウェブのURL") or "").strip() if web_on(cfg) else ""), LOG_FILE, HERE,
                              on_quit=quit_all, status=status, open_main=(app.show if app else None),
@@ -812,7 +812,7 @@ def main():
             else:
                 if local_only and not args.hidden:
                     open_browser()
-                threading.Timer(2, lambda: TRAY.notify("右下のアイコンから画面を開けます。終了もここから。", "MDトラッカーを起動しました")).start()
+                threading.Timer(2, lambda: TRAY.notify("右下のアイコンから画面を開けます。終了もここから。", "Fox_MD_Trackerを起動しました")).start()
                 TRAY.run()                 # 「終了」が押されるまでここで待つ
             stop.set()
             th.join(5)

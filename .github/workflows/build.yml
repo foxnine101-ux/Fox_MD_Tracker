@@ -1,4 +1,4 @@
-# md_tracker.py の VERSION が上がったら、Windows で MDTracker.exe を作ってリリースに置く。
+# md_tracker.py の VERSION が上がったら、Windows で Fox_MD_Tracker.exe を作ってリリースに置く。
 # アプリは起動時にこのリリースを見て、新しければアップデートする。
 name: build
 
@@ -41,16 +41,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller scapy pystray pillow pywebview
-          python -m PyInstaller --noconfirm --onefile --noconsole --name MDTracker --icon icon.ico `
+          python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker --icon icon.ico `
             --add-data "app.html;." --add-data "live.html;." `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." `
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
             --collect-all webview --hidden-import clr md_tracker.py
-          New-Item -ItemType Directory -Force pkg\MDTracker | Out-Null
-          Copy-Item dist\MDTracker.exe pkg\MDTracker\
-          Copy-Item はじめに_配布版.txt pkg\MDTracker\はじめに.txt
-          Compress-Archive -Path pkg\MDTracker -DestinationPath MDTracker.zip -Force
+          New-Item -ItemType Directory -Force pkg\Fox_MD_Tracker | Out-Null
+          Copy-Item dist\Fox_MD_Tracker.exe pkg\Fox_MD_Tracker\
+          Copy-Item はじめに_配布版.txt pkg\Fox_MD_Tracker\はじめに.txt
+          Copy-Item dist\Fox_MD_Tracker.exe dist\MDTracker.exe   # 改名前の版(v2.1.x)がアップデートできるように同じものを旧名でも置く
+          Compress-Archive -Path pkg\Fox_MD_Tracker -DestinationPath Fox_MD_Tracker.zip -Force
 
       - name: リリースに置く
         if: steps.v.outputs.skip == 'false'
@@ -59,4 +60,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.v.outputs.version }}"
-          gh release create "v$v" dist\MDTracker.exe MDTracker.zip --title "v$v" --notes-file release_notes.md
+          gh release create "v$v" dist\Fox_MD_Tracker.exe dist\MDTracker.exe Fox_MD_Tracker.zip --title "v$v" --notes-file release_notes.md

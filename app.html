@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>MDクールタイム</title>
+<title>Fox_MD_Tracker</title>
 <style>
   :root {
     --bg: #f6f5f2; --panel: #ffffff; --ink: #1f2328; --muted: #6b6f76; --line: #e3e1dc;
@@ -90,7 +90,7 @@
 <body>
 <div class="wrap">
   <div id="login" class="panel" hidden>
-    <h1>MDクールタイム</h1>
+    <h1>Fox_MD_Tracker</h1>
     <input id="pw" type="password" placeholder="合言葉" autocomplete="current-password">
     <button id="go">ひらく</button>
     <div class="err" id="lerr"></div>
@@ -98,7 +98,7 @@
 
   <div id="app" hidden>
     <header>
-      <h1>MDクールタイム</h1>
+      <h1>Fox_MD_Tracker</h1>
       <span class="sub" id="upd"></span>
       <span style="flex:1"></span>
       <button class="ghost" id="reload">更新</button>
@@ -540,7 +540,7 @@ function renderResist(chars, now) {
     if (E) { shown.add(E.name); h += resistCard(E, { hot: true, extra: `<span class="muted">← ${esc(inMd.filter(([, b]) => resistMatch(RZ.entries, b.map, b.md) === E).map(([n]) => n).join("・"))}</span>` }); }
     else h += `<div class="rz-out"><b>${esc(c)}</b> がいるMD（${esc(a.md || a.map)}）はシートに見つかりませんでした。シートの「判定キー」に <b>${esc(a.map.replace(/^.*@/, ""))}</b>${a.md ? ` か <b>${esc(a.md)}</b>` : ""} を書き足してね。</div>`;
   }
-  if (!inMd.length) h += `<div class="rz-out">${at.length ? "いまMDにいるキャラはいません。" : "まだ場所の記録がありません（MDトラッカーを起動したままMDに入ると出ます）。"}</div>`;
+  if (!inMd.length) h += `<div class="rz-out">${at.length ? "いまMDにいるキャラはいません。" : "まだ場所の記録がありません（Fox_MD_Trackerを起動したままMDに入ると出ます）。"}</div>`;
   if (RZ.err) h += `<div class="err" style="margin-bottom:10px">${esc(RZ.err)}</div>`;
   h += `<h2 style="margin-top:18px">MDごとの耐性</h2><p><input class="rz-q" id="rzq" placeholder="MD名で検索" value="${esc(RZ.q)}"></p><div id="rzall"></div>`;
   $("#view").innerHTML = h;
@@ -616,7 +616,7 @@ function renderDmg(chars, now) {
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(DMG_CHAR) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   if (!mds.length) {
-    h += `<div class="panel empty">まだ被ダメの記録がありません。<br>MDトラッカー v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
+    h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
     $("#view").innerHTML = h; bindDmg(); return;
   }
   for (const [w, W] of mds) {
@@ -682,7 +682,7 @@ function renderEvents(chars, now) {
   if (!evs.length) {
     const anyEv = Object.values(DATA.chars || {}).some((c) => c.ev);
     $("#view").innerHTML = `<div class="panel empty">${anyEv ? "いま受けているイベントのクエストはありません。" :
-      "まだイベントの記録がありません。<br>MDトラッカーを起動したままROにログインすると出ます。"}</div>`;
+      "まだイベントの記録がありません。<br>Fox_MD_Trackerを起動したままROにログインすると出ます。"}</div>`;
     return;
   }
   let h = `<div class="opts"><span>イベント用のクエスト（クエストウィンドウの「イベント」アイコンのもの）をイベントごとにまとめています。終わったイベントは、各キャラのログイン時に自動で消えます。</span></div>`;
@@ -957,7 +957,7 @@ async function load() {
     render();
   } catch (e) {
     if (e.message === "401") { showLogin(PW ? "合言葉が違います" : ""); PW = ""; store.del("md_pw"); }
-    else if (typeof LOCAL !== "undefined" && LOCAL) { if (DATA) $("#upd").textContent = "ツールが止まっているみたい（MDトラッカーを起動してね）"; else showLogin("MDトラッカーが起動していません"); }
+    else if (typeof LOCAL !== "undefined" && LOCAL) { if (DATA) $("#upd").textContent = "ツールが止まっているみたい（Fox_MD_Trackerを起動してね）"; else showLogin("Fox_MD_Trackerが起動していません"); }
     else if (DATA) $("#upd").textContent = "通信エラー（あとで自動で再読み込みします）";
     else showLogin("読み込めませんでした: " + e.message);
   }
@@ -973,7 +973,7 @@ setInterval(() => { if (DATA && TAB !== "settings") render(); }, 30000);
 setInterval(() => { if (DATA && !document.hidden && TAB !== "settings") load(); }, 120000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && DATA) load(); });
 
-// この PC のツール(MDトラッカー)が出しているページなら、合言葉なし・こまめに更新
+// この PC のツール(Fox_MD_Tracker)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
 // ---------- アップデート(この PC のツールだけ) ----------
 let UPDATE = null;

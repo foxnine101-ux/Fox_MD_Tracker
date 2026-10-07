@@ -17,7 +17,7 @@ except Exception:          # 部品が無い → トレイなし
     pystray = None
 
 
-def message(text, title="MDトラッカー", kind="info", yesno=False):
+def message(text, title="Fox_MD_Tracker", kind="info", yesno=False):
     """Windowsの小さいお知らせ窓。はい/いいえ を聞くときは yesno=True(はい → True)。"""
     if os.name == "nt":
         import ctypes
@@ -35,12 +35,17 @@ def _startup_file():
     appdata = os.environ.get("APPDATA")
     if not appdata:
         return None
-    return os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Startup", "MDトラッカー.vbs")
+    return os.path.join(appdata, r"Microsoft\Windows\Start Menu\Programs\Startup", "Fox_MD_Tracker.vbs")
+
+
+def _old_startup_file():
+    p = _startup_file()
+    return p and os.path.join(os.path.dirname(p), "MDトラッカー.vbs")   # 改名前の名前
 
 
 def startup_enabled():
-    p = _startup_file()
-    return bool(p and os.path.exists(p))
+    p, o = _startup_file(), _old_startup_file()
+    return bool(p and os.path.exists(p)) or bool(o and os.path.exists(o))
 
 
 def set_startup(on):
@@ -52,8 +57,12 @@ def set_startup(on):
         exe = sys.executable
         with open(p, "w", encoding="utf-16") as f:
             f.write('CreateObject("WScript.Shell").Run """{}"" --hidden", 0, False\r\n'.format(exe))   # 起動時は窓を出さずトレイだけ
-    elif os.path.exists(p):
-        os.remove(p)
+    else:
+        if os.path.exists(p):
+            os.remove(p)
+    o = _old_startup_file()
+    if o and os.path.exists(o):
+        os.remove(o)              # 改名前のものは消しておく(新しい名前に置き換え)
 
 
 class Tray(object):
@@ -84,7 +93,7 @@ class Tray(object):
         except Exception:
             webbrowser.open("file:///" + path)
 
-    def notify(self, text, title="MDトラッカー"):
+    def notify(self, text, title="Fox_MD_Tracker"):
         try:
             if self.icon is not None:
                 self.icon.notify(text, title)
@@ -114,13 +123,13 @@ class Tray(object):
             items += [pystray.Menu.SEPARATOR,
                       pystray.MenuItem(lambda it: text_fn() or "アップデートを確認", lambda i, it: act())]
         items += [pystray.Menu.SEPARATOR, pystray.MenuItem("終了", self._quit)]
-        self.icon = pystray.Icon("MDTracker", self._image(), "MDトラッカー", pystray.Menu(*items))
+        self.icon = pystray.Icon("Fox_MD_Tracker", self._image(), "Fox_MD_Tracker", pystray.Menu(*items))
 
         def ticker():
             ev = threading.Event()
             while not ev.wait(10):
                 try:
-                    self.icon.title = ("MDトラッカー\n" + self.status())[:120]
+                    self.icon.title = ("Fox_MD_Tracker\n" + self.status())[:120]
                 except Exception:
                     pass
         threading.Thread(target=ticker, daemon=True).start()

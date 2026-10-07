@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-MDトラッカー専用の窓(ブラウザを使わずに画面を出す)。pywebview を使う。
+Fox_MD_Tracker 専用の窓(ブラウザを使わずに画面を出す)。pywebview を使う。
   - × で閉じてもツールは止まらず、タスクトレイに隠れるだけ
   - show() でまた出てくる / quit() で本当に終わる
   - 窓の大きさ・位置を覚えておく
@@ -17,7 +17,7 @@ except Exception:            # 部品が無い → ブラウザで開く
 
 
 class AppWindow(object):
-    def __init__(self, url, folder, title="MDトラッカー", show=True, on_hide=None, log=print):
+    def __init__(self, url, folder, title="Fox_MD_Tracker", show=True, on_hide=None, log=print):
         self.url, self.folder, self.title = url, folder, title
         self.show_first = show
         self.on_hide = on_hide or (lambda: None)

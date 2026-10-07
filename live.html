@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MD耐性リアルタイム</title>
+<title>Fox_MD_Tracker 耐性リアルタイム</title>
 <style>
 :root{--bg:#f6f5f2;--panel:#fff;--ink:#1f2328;--muted:#6b6f76;--line:#e3e1dc}
 @media (prefers-color-scheme:dark){:root{--bg:#16181c;--panel:#1f2227;--ink:#e8e9eb;--muted:#9aa0a8;--line:#30343b}}
@@ -18,7 +18,7 @@ input{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:8
 details{margin-top:18px}summary{cursor:pointer;color:var(--muted);font-size:13px}
 
 </style></head><body><div class="wrap">
-<h1>MD耐性リアルタイム</h1>
+<h1>Fox_MD_Tracker 耐性リアルタイム</h1>
 <div class="sub" id="st">ツールにつないでいます…</div>
 <div class="where" id="where"></div>
 <div id="main"></div>
@@ -181,7 +181,7 @@ async function poll() {
 }
 function ago(t) { const s = Math.max(0, (NOW ? NOW.now : Date.now() / 1000) - t); return s < 60 ? "いま" : s < 3600 ? Math.floor(s / 60) + "分前" : Math.floor(s / 3600) + "時間前"; }
 function draw() {
-  if (FAIL > 2 || !NOW) { $("#st").textContent = FAIL ? "ツールが止まっているみたい（MDトラッカーを起動してね）" : "ツールにつないでいます…"; if (!NOW) return; }
+  if (FAIL > 2 || !NOW) { $("#st").textContent = FAIL ? "ツールが止まっているみたい（Fox_MD_Tracker を起動してね）" : "ツールにつないでいます…"; if (!NOW) return; }
   const w = NOW.where || {};
   const names = Object.keys(w).sort((a, b) => w[b].t - w[a].t);
   // 見るキャラ: 選んだキャラ → いまプレイ中 → 最後に動いたキャラ

@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-アップデート(新しい MDTracker.exe を受け取って入れ替える)。
+アップデート(新しい Fox_MD_Tracker.exe を受け取って入れ替える)。
 
   - GitHub の「リリース」に置かれた最新版を見に行く(公開リポジトリなのでログイン不要)
       https://api.github.com/repos/<リポジトリ>/releases/latest
   - 新しい版があれば知らせる → 「アップデート」で
-      1) MDTracker.new.exe にダウンロード
-      2) 小さいバッチ(MDTracker_update.bat)を黒い画面なしで起動して、このアプリを終了
+      1) Fox_MD_Tracker.new.exe にダウンロード
+      2) 小さいバッチ(Fox_MD_Tracker_update.bat)を黒い画面なしで起動して、このアプリを終了
       3) バッチが exe を入れ替えて、新しい exe を起動する
   - exe で動いているとき(PyInstaller)だけ使える。python で直接動かしているときは確認だけ。
 """
@@ -19,8 +19,9 @@ import threading
 import time
 import urllib.request
 
-DEFAULT_REPO = "foxnine101-ux/md-tracker"
-ASSET_NAME = "MDTracker.exe"
+DEFAULT_REPO = "foxnine101-ux/Fox_MD_Tracker"
+ASSET_NAME = "Fox_MD_Tracker.exe"
+ASSET_OLD = "MDTracker.exe"   # 改名前の名前(古い版のリリース用)
 CHECK_EVERY = 6 * 3600
 
 
@@ -60,12 +61,14 @@ class Updater(object):
             self.state, self.error = "checking", ""
         try:
             req = urllib.request.Request("https://api.github.com/repos/{}/releases/latest".format(self.repo),
-                                         headers={"User-Agent": "MDTracker/" + self.version,
+                                         headers={"User-Agent": "Fox_MD_Tracker/" + self.version,
                                                   "Accept": "application/vnd.github+json"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 rel = json.loads(r.read().decode("utf-8"))
             ver = rel.get("tag_name") or rel.get("name") or ""
-            asset = next((a for a in rel.get("assets", []) if a.get("name") == ASSET_NAME), None)
+            assets = rel.get("assets", [])
+            asset = next((a for a in assets if a.get("name") == ASSET_NAME), None) or \
+                next((a for a in assets if a.get("name") == ASSET_OLD), None)
             info = {"version": ver.lstrip("vV"), "notes": (rel.get("body") or "")[:2000],
                     "page": rel.get("html_url"), "url": asset and asset.get("browser_download_url"),
                     "size": asset and asset.get("size")}
@@ -113,9 +116,9 @@ class Updater(object):
 
     def _install(self, quit_app):
         exe = os.path.abspath(sys.executable)
-        new = os.path.join(self.folder, "MDTracker.new.exe")
+        new = os.path.join(self.folder, "Fox_MD_Tracker.new.exe")
         try:
-            req = urllib.request.Request(self.latest["url"], headers={"User-Agent": "MDTracker/" + self.version})
+            req = urllib.request.Request(self.latest["url"], headers={"User-Agent": "Fox_MD_Tracker/" + self.version})
             with urllib.request.urlopen(req, timeout=60) as r, open(new, "wb") as f:
                 total = int(r.headers.get("Content-Length") or self.latest.get("size") or 0)
                 got = 0
@@ -133,12 +136,12 @@ class Updater(object):
             with open(new, "rb") as f:
                 if f.read(2) != b"MZ":
                     raise ValueError("exe ではないファイルでした")
-            bat = os.path.join(self.folder, "MDTracker_update.bat")
+            bat = os.path.join(self.folder, "Fox_MD_Tracker_update.bat")
             pid = os.getpid()
             with open(bat, "w", encoding="cp932", errors="replace") as f:
                 f.write("\r\n".join([
                     "@echo off",
-                    "rem MDトラッカーのアップデート(自動で作られて、終わったら消えます)",
+                    "rem Fox_MD_Tracker のアップデート(自動で作られて、終わったら消えます)",
                     ":wait",
                     'tasklist /FI "PID eq {}" | find " {} " > nul && (timeout /t 1 /nobreak > nul & goto wait)'.format(pid, pid),
                     "set n=0",
