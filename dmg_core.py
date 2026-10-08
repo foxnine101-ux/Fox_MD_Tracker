@@ -19,8 +19,8 @@ MDごと・キャラごとに「相手|技」でまとめて、回数・最大�
 
 種類と属性(skill_info.json = rAthena のスキルデータから。通信には入っていないので技の番号から決める):
   - 魔法 / 固定 / 物理 は技で決まる。モンスターの通常攻撃は 物理・無属性
-  - 物理の近接/遠距離は、当たったときの距離(3セルより遠いと遠距離)で決まるので、
-    罠・射程3以下の技など、技だけで決まるものだけ「近接」「遠距離」にする
+  - 物理の近接/遠距離は、当たったときの距離(3セルより遠いと遠距離)で決まる。
+    罠・射程3以下の技など技だけで決まるものはそれで、ほかは位置の通信から距離を出して決める(推定)
   - 「武器」属性の技は、モンスターが使うと無属性
 """
 import json
@@ -35,7 +35,15 @@ OP_NAME = 0x0095
 OP_NAME_ALL = 0x0A30
 OP_NAME_TITLE = 0x0ADF
 OP_POS = {0x0086: "相手が動いた", 0x0087: "自分が動いた", 0x0088: "止まった", 0x01FF: "飛ばされた",
-          0x0091: "マップ移動", 0x0092: "マップ移動(サーバー)", 0x02EB: "ログイン位置"}
+          0x0091: "マップ移動", 0x0092: "マップ移動(サーバー)", 0x02EB: "ログイン位置", 0x0080: "消えた"}
+# 位置の読み方(jRO の実際の通信で確かめたもの)
+#   0087 自分の移動 [時刻 4][移動 6]      0088/01FF [ID 4][x 2][y 2]      0091 [マップ名 16][x 2][y 2]
+#   09FF/09FE 位置は 63 から3バイト   09FD 移動は 66 から6バイト・開始時刻は 37・速さは 13
+SPAWN_POS_AT = {0x09FE: 63, 0x09FF: 63}
+SPAWN_MOVE_AT = 66
+SPAWN_TICK_AT = 37
+NEAR = 3                # これ以下(セル)なら近接
+SELF_SPEED = 150        # 自分の歩く速さ(ミリ秒/セル)。わからないのでふつうの値
 OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE} | set(OP_SPAWN) | set(OP_POS)
 POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
@@ -71,6 +79,39 @@ def _cstr(b):
     return None
 
 
+def _posdir(b):
+    return (b[0] << 2) | (b[1] >> 6), ((b[1] & 0x3F) << 4) | (b[2] >> 4)
+
+
+def _movedata(b):
+    return ((b[0] << 2) | (b[1] >> 6), ((b[1] & 0x3F) << 4) | (b[2] >> 4),
+            ((b[2] & 0x0F) << 6) | (b[3] >> 2), ((b[3] & 0x03) << 8) | b[4])
+
+
+def where_at(p, tick):
+    """p = [x0, y0, x1, y1, 開始時刻, 速さ] の、時刻 tick での位置(歩き途中なら途中の位置)。"""
+    x0, y0, x1, y1, st, spd = p
+    if not st or not tick or (x0, y0) == (x1, y1):
+        return x1, y1
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
+    total = spd * (max(dx, dy) + 0.4 * min(dx, dy))     # ななめは 1.4 倍かかる
+    f = (tick - st) / total if total > 0 else 1
+    if f >= 1:
+        return x1, y1
+    if f <= 0:
+        return x0, y0
+    return round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f)
+
+
+def _merge(x, v):
+    """記録の行 v を x にまとめる [回数, 合計, 最大, 最後, ヒット, (近接の合計, 遠距離の合計)]"""
+    while len(x) < len(v):
+        x.append(0)
+    x[0] += v[0]; x[1] += v[1]; x[2] = max(x[2], v[2]); x[3] = max(x[3], v[3]); x[4] += v[4]
+    for i in range(5, len(v)):
+        x[i] += v[i]
+
+
 def load_skill_info(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -95,6 +136,8 @@ class DmgCore(object):
         self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
+        self.pos = {}                       # ID -> [x0, y0, x1, y1, 開始時刻, 速さ](いるマップの中だけ)
+        self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
         self.names = {}                     # 相手のID -> 名前
         self.stats = {}                     # キャラ -> MD -> "相手|技" -> [回数, 合計, 最大, 最後, ヒット数合計]
@@ -124,7 +167,7 @@ class DmgCore(object):
                         nk = UNKNOWN_NAME + "|" + skill
                         if nk in d:
                             x = d[nk]
-                            x[0] += v[0]; x[1] += v[1]; x[2] = max(x[2], v[2]); x[3] = max(x[3], v[3]); x[4] += v[4]
+                            _merge(x, v)
                         else:
                             d[nk] = v
                         self.changed = True
@@ -145,6 +188,15 @@ class DmgCore(object):
         if not skid:
             return "通常攻撃"
         return self.fix.get(skid) or self.skills.get(skid) or "スキル{}".format(skid)
+
+    def distance(self, key, src, tick):
+        """攻撃した相手と自分の距離(セル)。わからなければ None。"""
+        a, m = self.pos.get(src), self.me.get(key)
+        if not a or not m:
+            return None
+        ax, ay = where_at(a, tick)
+        mx, my = where_at(m, tick)
+        return max(abs(ax - mx), abs(ay - my))
 
     def classify(self, skid, lv=0):
         """技の (種類, 属性)。種類: 魔法/固定/物理・近接/物理・遠距離/物理(距離しだい)/""(不明)"""
@@ -216,7 +268,7 @@ class DmgCore(object):
                     nk = k[:-len(tail)] + "|" + new
                     if nk in d:              # 同じ名前の行があればまとめる
                         x = d[nk]
-                        x[0] += v[0]; x[1] += v[1]; x[2] = max(x[2], v[2]); x[3] = max(x[3], v[3]); x[4] += v[4]
+                        _merge(x, v)
                     else:
                         d[nk] = v
         for r in self.recent:
@@ -260,6 +312,7 @@ class DmgCore(object):
         try:
             if op in OP_POS:
                 self._pos(key, op, pkt)
+                self._move(key, op, pkt)
             elif op in OP_SPAWN:
                 self._spawn(op, pkt)
             elif op in (OP_NAME, OP_NAME_ALL) and len(pkt) >= 30:
@@ -276,9 +329,12 @@ class DmgCore(object):
                 kind = pkt[29]
                 left = struct.unpack_from("<i", pkt, 30)[0]
                 if self._mine(key, tgt) and src != tgt:
-                    self._raw(key, op, pkt, {"src": src, "dmg": dmg, "div": div, "kind": kind, "left": left})
+                    tick = struct.unpack_from("<I", pkt, 10)[0]
+                    dist = self.distance(key, src, tick)
+                    self._raw(key, op, pkt, {"src": src, "dmg": dmg, "div": div, "kind": kind, "left": left,
+                                             "dist": dist})
                     if kind in (0, 4, 8, 9, 10):
-                        self._hit(key, src, 0, dmg + max(left, 0), div, kind == 10)
+                        self._hit(key, src, 0, dmg + max(left, 0), div, kind == 10, dist=dist)
             elif op == OP_SKILL and len(pkt) >= 33:
                 self._sample(op, pkt)
                 skid = struct.unpack_from("<H", pkt, 2)[0]
@@ -286,9 +342,11 @@ class DmgCore(object):
                 dmg = struct.unpack_from("<i", pkt, 24)[0]
                 lv, div = struct.unpack_from("<hh", pkt, 28)
                 if self._mine(key, tgt) and src != tgt:
-                    self._raw(key, op, pkt, {"skid": skid, "src": src, "dmg": dmg, "lv": lv, "div": div},
-                              unknown=not self.known(skid))
-                    self._hit(key, src, skid, dmg, div, False, lv)
+                    tick = struct.unpack_from("<I", pkt, 12)[0]
+                    dist = self.distance(key, src, tick)
+                    self._raw(key, op, pkt, {"skid": skid, "src": src, "dmg": dmg, "lv": lv, "div": div,
+                                             "dist": dist}, unknown=not self.known(skid))
+                    self._hit(key, src, skid, dmg, div, False, lv, dist=dist)
         except struct.error:
             pass
 
@@ -313,6 +371,45 @@ class DmgCore(object):
                     "hex": pkt[:40].hex()})
         del lst[:-POS_RAW_MAX]
 
+    def _move(self, key, op, pkt):
+        """位置を覚える(距離で近接/遠距離を決める用)。"""
+        c = self.md.conn.get(key) or {}
+        if op == 0x0087 and len(pkt) >= 12:              # 自分が歩きはじめた
+            x0, y0, x1, y1 = _movedata(pkt[6:12])
+            self.me[key] = [x0, y0, x1, y1, struct.unpack_from("<I", pkt, 2)[0], SELF_SPEED]
+        elif op in (0x0088, 0x01FF) and len(pkt) >= 10:   # 止まった・飛ばされた
+            aid, x, y = struct.unpack_from("<IHH", pkt, 2)
+            p = [x, y, x, y, 0, 0]
+            if self._mine(key, aid) or aid == c.get("gid"):
+                self.me[key] = p
+            else:
+                self.pos[aid] = p
+        elif op in (0x0091, 0x0092) and len(pkt) >= 22:   # マップ移動 → 前のマップの位置は捨てる
+            x, y = struct.unpack_from("<HH", pkt, 18)
+            self.pos.clear()
+            self.me[key] = [x, y, x, y, 0, 0]
+        elif op == 0x02EB and len(pkt) >= 9:              # ログインした位置
+            x, y = _posdir(pkt[6:9])
+            self.pos.clear()
+            self.me[key] = [x, y, x, y, 0, 0]
+        elif op == 0x0080 and len(pkt) >= 6:              # 見えなくなった
+            self.pos.pop(struct.unpack_from("<I", pkt, 2)[0], None)
+
+    def _spawn_pos(self, op, pkt, aid):
+        try:
+            if op == 0x09FD and len(pkt) >= SPAWN_MOVE_AT + 6:
+                x0, y0, x1, y1 = _movedata(pkt[SPAWN_MOVE_AT:SPAWN_MOVE_AT + 6])
+                tick = struct.unpack_from("<I", pkt, SPAWN_TICK_AT)[0]
+                spd = struct.unpack_from("<H", pkt, 13)[0] or 150
+                self.pos[aid] = [x0, y0, x1, y1, tick, spd]
+            elif op in SPAWN_POS_AT and len(pkt) >= SPAWN_POS_AT[op] + 3:
+                x, y = _posdir(pkt[SPAWN_POS_AT[op]:SPAWN_POS_AT[op] + 3])
+                self.pos[aid] = [x, y, x, y, 0, 0]
+            if len(self.pos) > MOBS_MAX:
+                self.pos.clear()
+        except struct.error:
+            pass
+
     def _name(self, aid, raw24, op, pkt):
         name = _cstr(raw24)
         tag = "name_ok" if name else "name_bad"      # 名前の通信も残す(読む場所が合っているか確かめる用)
@@ -332,9 +429,10 @@ class DmgCore(object):
             return
         self._sample(op, pkt)
         aid = struct.unpack_from("<I", pkt, 5)[0]
+        self._spawn_pos(op, pkt, aid)
         self._name(aid, pkt[at:at + 24], op, pkt)
 
-    def _hit(self, key, src, skid, dmg, div, crit, lv=0):
+    def _hit(self, key, src, skid, dmg, div, crit, lv=0, dist=None):
         if dmg <= 0:
             return
         name = self.md.name_for(key)
@@ -357,9 +455,16 @@ class DmgCore(object):
         st[3] = now
         st[4] += max(div, 1)
         kind, ele = self.classify(skid, lv)
+        est = False
+        if kind == "物理" and dist is not None:       # 技だけで決まらない物理は、距離で決める(推定)
+            kind, est = ("物理・近接" if dist <= NEAR else "物理・遠距離"), True
+        if kind.startswith("物理・"):
+            while len(st) < 7:
+                st.append(0)
+            st[5 if kind == "物理・近接" else 6] += dmg  # [5]=近接の合計 [6]=遠距離の合計
         self.recent.append({"t": now, "char": name, "md": where, "src": who, "skill": skill,
                             "skid": skid, "lv": lv, "dmg": dmg, "hits": max(div, 1), "crit": 1 if crit else 0,
-                            "kind": kind, "ele": ele})
+                            "kind": kind, "ele": ele, "est": 1 if est else 0, "dist": dist})
         del self.recent[:-RECENT_MAX]
         self.changed = True
 

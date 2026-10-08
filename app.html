@@ -663,13 +663,14 @@ setInterval(() => { if (DATA && !document.hidden && TAB === "resist") load(); },
 // ツールが記録した「だれの・どの技で・どれくらい受けたか」。キャラごと・MDごとに [回数, 合計, 最大, 最後, ヒット数]
 let DMG_CHAR = "", DMG_MD = "";
 const fmtN = (n) => Number(n || 0).toLocaleString("ja-JP");
-function dmgMerge(chars) {      // {MD: {"相手|技": [回数, 合計, 最大, 最後, ヒット, キャラ集合]}}
+function dmgMerge(chars) {      // {MD: {"相手|技": [回数, 合計, 最大, 最後, ヒット, キャラ集合, 近接の合計, 遠距離の合計]}}
   const out = {};
   for (const c of chars) for (const [where, d] of Object.entries((DATA.chars[c] || {}).dmg || {})) {
     const W = out[where] = out[where] || {};
     for (const [k, v] of Object.entries(d)) {
-      const x = W[k] = W[k] || [0, 0, 0, 0, 0, new Set()];
+      const x = W[k] = W[k] || [0, 0, 0, 0, 0, new Set(), 0, 0];
       x[0] += v[0]; x[1] += v[1]; x[2] = Math.max(x[2], v[2]); x[3] = Math.max(x[3], v[3]); x[4] += v[4] || v[0]; x[5].add(c);
+      x[6] += v[5] || 0; x[7] += v[6] || 0;
     }
   }
   return out;
@@ -678,14 +679,26 @@ function dmgMerge(chars) {      // {MD: {"相手|技": [回数, 合計, 最大, 
 const KIND_TIP = { "物理": "物理（近接か遠距離かは、当たったときの距離しだい。3セルより遠いと遠距離）", "物理・近接": "物理・近接", "物理・遠距離": "物理・遠距離", "魔法": "魔法", "固定": "固定ダメージ系（物理・魔法の軽減が効かないもの）" };
 const kindOf = (skill) => (DATA.dmg_kinds || {})[skill] || ["", ""];
 const eleTag = (e) => e ? e.split("/").map((x) => `<span class="ek ek-${esc(x)}">${esc(x)}</span>`).join("") : "";
-const kindTag = (k) => k ? `<span class="kd kd-${esc(k.split("・")[0])}" title="${esc(KIND_TIP[k] || k)}">${esc(k)}</span>` : "";
+const kindTag = (k, tip) => k ? `<span class="kd kd-${esc(k.split("・")[0])}" title="${esc(tip ? k + "（" + tip + "）" : KIND_TIP[k] || k)}">${esc(k)}${tip ? "<sup>*</sup>" : ""}</span>` : "";
+// 行の種類: 物理は、記録した近接/遠距離の合計([6][7])があればそれで分ける
+function rowKind(skill, v) {
+  const [kd, el] = kindOf(skill);
+  if (!kd.startsWith("物理") || !(v[6] || v[7])) return [kd, el, ""];
+  if (v[6] && !v[7]) return ["物理・近接", el, kd === "物理" ? "当たったときの距離から" : ""];
+  if (v[7] && !v[6]) return ["物理・遠距離", el, kd === "物理" ? "当たったときの距離から" : ""];
+  return ["物理・近/遠", el, `近接 ${Math.round(v[6] * 100 / (v[6] + v[7]))}% / 遠距離 ${Math.round(v[7] * 100 / (v[6] + v[7]))}%（当たったときの距離から）`];
+}
 function dmgMix(W) {      // 受けたダメージ(合計)の内訳: 属性ごと・種類ごと
   const ele = {}, kind = {};
   let all = 0;
+  const add = (o, k, n) => { if (n > 0) o[k] = (o[k] || 0) + n; };
   for (const [k, v] of Object.entries(W)) {
     const [kd, e] = kindOf(k.split("|")[1]);
     if (e === "属性なし") continue;          // 反射(マックスペインなど)は自分の攻撃が返ってきたものなので除く
-    ele[e || "?"] = (ele[e || "?"] || 0) + v[1]; kind[(kd || "?").split("・")[0]] = (kind[(kd || "?").split("・")[0]] || 0) + v[1]; all += v[1];
+    add(ele, e || "?", v[1]); all += v[1];
+    if (kd.startsWith("物理")) {            // 物理は近接/遠距離に分ける(わからない分は「物理」)
+      add(kind, "物理・近接", v[6]); add(kind, "物理・遠距離", v[7]); add(kind, "物理", v[1] - (v[6] || 0) - (v[7] || 0));
+    } else add(kind, kd || "?", v[1]);
   }
   if (!all) return "";
   const fmt = (o, tag) => Object.entries(o).sort((a, b) => b[1] - a[1]).filter(([, n]) => n / all >= 0.01)
@@ -697,8 +710,8 @@ function dmgTable(W, showChars, limit) {
   let h = `<table class="dm-t"><thead><tr><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>回数</th><th>最大</th><th>平均</th><th>合計</th>${showChars ? '<th class="l">キャラ</th>' : ""}<th>最後</th></tr></thead><tbody>`;
   for (const [k, v] of rows) {
     const [who, skill] = k.split("|");
-    const [kd, el] = kindOf(skill);
-    h += `<tr><td class="l">${esc(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
+    const [kd, el, tip] = rowKind(skill, v);
+    h += `<tr><td class="l">${esc(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
   }
   return h + `</tbody></table>`;
 }
@@ -723,10 +736,10 @@ function renderDmg(chars, now) {
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD)).slice(-60).reverse();
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0])}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td></tr>`;
     h += `</tbody></table></div>`;
   }
-  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離で決まるので、技だけで決まるもの以外は「物理」と出ます。状態変化で属性が変わっているときは反映されません。</p>`;
+  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。</p>`;
   $("#view").innerHTML = h + skillFixHtml();
   bindDmg();
 }
