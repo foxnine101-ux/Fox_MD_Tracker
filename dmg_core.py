@@ -4,7 +4,8 @@
 
   0x08C8  通常攻撃   src(4) target(4) 時刻(4) 速度(4) 速度(4) ダメージ(4) SP(1) ヒット数(2) 種類(1) 左手(4)
   0x01DE  スキル     スキルID(2) src(4) target(4) 時刻(4) 速度(4) 速度(4) ダメージ(4) Lv(2) ヒット数(2) 種類(1)
-  0x09FD/0x09FE/0x09FF  まわりに出てきたもの(モンスターなど)。最後の24バイトが名前
+  0x09FD/0x09FE/0x09FF  まわりに出てきたもの(モンスターなど)。名前は決まった位置から最後まで(長さは名前しだい)
+                        jRO の実際の通信で確かめた位置: 09FD=90 / 09FE=83 / 09FF=84
   0x0095/0x0A30         名前の返事(ID + 名前)
   0x0ADF                名前の返事(新しい形: ID + グループID + 名前)
 
@@ -23,6 +24,7 @@ import time
 OP_ACT = 0x08C8
 OP_SKILL = 0x01DE
 OP_SPAWN = (0x09FD, 0x09FE, 0x09FF)
+SPAWN_NAME_AT = {0x09FD: 90, 0x09FE: 83, 0x09FF: 84}   # 名前が始まる位置(その前は HP・ボスかどうか・体の見た目)
 OP_NAME = 0x0095
 OP_NAME_ALL = 0x0A30
 OP_NAME_TITLE = 0x0ADF
@@ -256,12 +258,13 @@ class DmgCore(object):
             self.names[aid] = name
 
     def _spawn(self, op, pkt):
-        # 0x09FD〜FF: [op 2][長さ 2][種類 1][ID 4][GID 4] … [名前 24](最後)
-        if len(pkt) < 4 + 1 + 8 + 24:
+        # 0x09FD〜FF: [op 2][長さ 2][種類 1][ID 4][GID 4] … [最大HP 4][HP 4][ボス 1][体 2][名前(最後まで)]
+        at = SPAWN_NAME_AT[op]
+        if len(pkt) <= at:
             return
         self._sample(op, pkt)
         aid = struct.unpack_from("<I", pkt, 5)[0]
-        self._name(aid, pkt[-24:], op, pkt)
+        self._name(aid, pkt[at:at + 24], op, pkt)
 
     def _hit(self, key, src, skid, dmg, div, crit, lv=0):
         if dmg <= 0:
