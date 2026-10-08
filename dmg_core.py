@@ -6,6 +6,7 @@
   0x01DE  スキル     スキルID(2) src(4) target(4) 時刻(4) 速度(4) 速度(4) ダメージ(4) Lv(2) ヒット数(2) 種類(1)
   0x09FD/0x09FE/0x09FF  まわりに出てきたもの(モンスターなど)。最後の24バイトが名前
   0x0095/0x0A30         名前の返事(ID + 名前)
+  0x0ADF                名前の返事(新しい形: ID + グループID + 名前)
 
 自分あて(target が自分のアカウントID)だけを数える。
 MDごと・キャラごとに「相手|技」でまとめて、回数・最大・合計・最後の時刻を覚える。
@@ -24,7 +25,9 @@ OP_SKILL = 0x01DE
 OP_SPAWN = (0x09FD, 0x09FE, 0x09FF)
 OP_NAME = 0x0095
 OP_NAME_ALL = 0x0A30
-OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL} | set(OP_SPAWN)
+OP_NAME_TITLE = 0x0ADF
+OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE} | set(OP_SPAWN)
+UNKNOWN_NAME = "名前不明"
 
 RECENT_MAX = 300
 MOBS_MAX = 20000
@@ -33,12 +36,28 @@ RAW_MAX = 150           # 確認用データに残す数(通信の種類ごと�
 RAW_UNKNOWN_MAX = 300   # 名前がわからない技の通信は別に多めに残す
 
 
+def good_name(s):
+    """名前として読める文字だけか(化けた文字・制御文字・外字があればダメ)。"""
+    if not s or len(s) > 24:
+        return False
+    for ch in s:
+        o = ord(ch)
+        if o < 0x20 or 0x7F <= o <= 0x9F or 0xE000 <= o <= 0xF8FF or o == 0xFFFD:
+            return False
+    return True
+
+
 def _cstr(b):
+    """名前の24バイトを文字にする。名前ではなさそうなら None。"""
     b = b.split(b"\x00", 1)[0]
-    try:
-        return b.decode("cp932")
-    except UnicodeDecodeError:
-        return b.decode("cp932", "replace")
+    for enc in ("utf-8", "cp932"):    # ふつうは cp932。UTF-8 として正しく読めるときだけ UTF-8
+        try:
+            s = b.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        if good_name(s):
+            return s
+    return None
 
 
 def load_skill_names(path):
@@ -72,6 +91,30 @@ class DmgCore(object):
             self.stats = d.get("stats") or {}
             self.recent = d.get("recent") or []
             self.seen = d.get("seen") or {}
+            self._fix_bad_names()
+
+    def _fix_bad_names(self):
+        """前の版で化けたまま記録した相手の名前を「名前不明」にまとめる。"""
+        for per_char in self.stats.values():
+            for d in per_char.values():
+                for k in list(d):
+                    who, _, skill = k.partition("|")
+                    if who and not good_name(who):
+                        v = d.pop(k)
+                        nk = UNKNOWN_NAME + "|" + skill
+                        if nk in d:
+                            x = d[nk]
+                            x[0] += v[0]; x[1] += v[1]; x[2] = max(x[2], v[2]); x[3] = max(x[3], v[3]); x[4] += v[4]
+                        else:
+                            d[nk] = v
+                        self.changed = True
+        for r in self.recent:
+            if r.get("src") and not good_name(r["src"]):
+                r["src"] = UNKNOWN_NAME
+                self.changed = True
+        for v in self.seen.values():
+            if v.get("src") and not good_name(v["src"]):
+                v["src"] = UNKNOWN_NAME
 
     def raw_snapshot(self):
         return {"note": "被ダメの通信の確認用。形が合っているか確かめるときに使います(自動で上書きされます)",
@@ -137,7 +180,7 @@ class DmgCore(object):
         n = self.samples.get(op, 0)
         if n < SAMPLE_MAX:
             self.samples[op] = n + 1
-            self.log("[被ダメ確認用] {:04X} 長さ{} {}".format(op, len(pkt), pkt[:64].hex()))
+            self.log("[被ダメ確認用] {:04X} 長さ{} {}".format(op, len(pkt), pkt[:200].hex()))
 
     def _mine(self, key, aid):
         c = self.md.conn.get(key) or {}
@@ -159,12 +202,12 @@ class DmgCore(object):
         try:
             if op in OP_SPAWN:
                 self._spawn(op, pkt)
-            elif op == OP_NAME and len(pkt) >= 30:
+            elif op in (OP_NAME, OP_NAME_ALL) and len(pkt) >= 30:
                 aid = struct.unpack_from("<I", pkt, 2)[0]
-                self._name(aid, _cstr(pkt[6:30]))
-            elif op == OP_NAME_ALL and len(pkt) >= 30:
+                self._name(aid, pkt[6:30], op, pkt)
+            elif op == OP_NAME_TITLE and len(pkt) >= 34:
                 aid = struct.unpack_from("<I", pkt, 2)[0]
-                self._name(aid, _cstr(pkt[6:30]))
+                self._name(aid, pkt[10:34], op, pkt)
             elif op == OP_ACT and len(pkt) >= 34:
                 self._sample(op, pkt)
                 src, tgt = struct.unpack_from("<II", pkt, 2)
@@ -200,8 +243,14 @@ class DmgCore(object):
                 lst.append(rec)
                 del lst[:-mx]
 
-    def _name(self, aid, name):
-        if name and len(name) <= 24 and all(ord(ch) >= 0x20 for ch in name):
+    def _name(self, aid, raw24, op, pkt):
+        name = _cstr(raw24)
+        tag = "name_ok" if name else "name_bad"      # 名前の通信も残す(読む場所が合っているか確かめる用)
+        lst = self.raw.setdefault(tag, [])
+        lst.append({"t": int(time.time()), "op": "{:04X}".format(op), "id": aid, "name": name or "",
+                    "len": len(pkt), "hex": pkt[:200].hex()})
+        del lst[:-(RAW_MAX if name else RAW_UNKNOWN_MAX)]
+        if name:
             if len(self.names) > MOBS_MAX:
                 self.names.clear()
             self.names[aid] = name
@@ -212,7 +261,7 @@ class DmgCore(object):
             return
         self._sample(op, pkt)
         aid = struct.unpack_from("<I", pkt, 5)[0]
-        self._name(aid, _cstr(pkt[-24:]))
+        self._name(aid, pkt[-24:], op, pkt)
 
     def _hit(self, key, src, skid, dmg, div, crit, lv=0):
         if dmg <= 0:

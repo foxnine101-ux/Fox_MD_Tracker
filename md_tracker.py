@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.3.2"
+VERSION = "2.3.3"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -455,7 +455,7 @@ class _Scanner(gp.StreamScanner):
     def _handle(self, pkt):
         if len(pkt) >= 2:
             op = pkt[0] | (pkt[1] << 8)
-            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF):   # 被ダメ関係も数える
+            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF):   # 被ダメ関係も数える
                 STATS["ops"][op] = STATS["ops"].get(op, 0) + 1
         with self.lock:
             try:
