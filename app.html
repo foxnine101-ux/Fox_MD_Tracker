@@ -47,6 +47,10 @@
   .drop-above { box-shadow: inset 0 3px 0 var(--accent); }
   .drop-below { box-shadow: inset 0 -3px 0 var(--accent); }
   tr.drop-above > td { box-shadow: inset 0 3px 0 var(--accent); }
+  th.drop-left { box-shadow: inset 3px 0 0 var(--accent); }
+  th.drop-right { box-shadow: inset -3px 0 0 var(--accent); }
+  .mx-grip { display: block; padding: 0; line-height: 1; font-size: 11px; letter-spacing: -1px; }
+  thead th:hover .mx-grip { opacity: 1; }
   tr.drop-below > td { box-shadow: inset 0 -3px 0 var(--accent); }
   body.is-dragging, body.is-dragging * { cursor: grabbing !important; user-select: none; }
   .sortbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 13px; }
@@ -210,9 +214,18 @@ function saveCharOrder(shown) {
   SETTINGS.charOrder = cur.map((c, i) => pos[i] ? q.shift() : c);
   saveSettings(); render();
 }
-// ⋮⋮ をつかんで上下に動かす(マウスでも指でも)
+// MDの並び: shown(画面に出ている列の新しい並び)を、all(その分類の今の並び全部)の中の同じ席に入れて保存
+function saveMdOrder(shown, all) {
+  const q = shown.slice();
+  const md = SETTINGS.md = SETTINGS.md || {};
+  all.map((n) => shown.includes(n) ? q.shift() : n)
+    .forEach((n, i) => { md[n] = { ...(md[n] || {}), order: i }; });
+  saveSettings(); render();
+}
+// ⋮⋮ をつかんで上下(左右)に動かす(マウスでも指でも)
 let DRAGGING = false;
-function makeSortable(box, rowSel, names) {
+function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y") {
+  const X = axis === "x";
   if (!box) return;
   box.querySelectorAll(rowSel).forEach((row) => {
     const grip = row.querySelector(".grip");
@@ -226,15 +239,17 @@ function makeSortable(box, rowSel, names) {
       DRAGGING = true;
       document.body.classList.add("is-dragging");
       row.classList.add("dragging");
-      const clear = () => rows.forEach((r) => r.classList.remove("drop-above", "drop-below"));
+      const [BEFORE, AFTER] = X ? ["drop-left", "drop-right"] : ["drop-above", "drop-below"];
+      const clear = () => rows.forEach((r) => r.classList.remove(BEFORE, AFTER));
       const onMove = (e) => {
         clear();
-        // 指の位置にある行を探す(行の上半分=その上に、下半分=その下に入れる)
-        let i = rows.findIndex((r) => { const b = r.getBoundingClientRect(); return e.clientY < b.bottom; });
+        // 指の位置にある行(列)を探す(前半分=その前に、後ろ半分=その後に入れる)
+        const p = X ? e.clientX : e.clientY;
+        let i = rows.findIndex((r) => { const b = r.getBoundingClientRect(); return p < (X ? b.right : b.bottom); });
         if (i < 0) i = rows.length - 1;
         const b = rows[i].getBoundingClientRect();
-        const below = e.clientY > b.top + b.height / 2;
-        rows[i].classList.add(below ? "drop-below" : "drop-above");
+        const below = X ? p > b.left + b.width / 2 : p > b.top + b.height / 2;
+        rows[i].classList.add(below ? AFTER : BEFORE);
         to = i + (below ? 1 : 0);
         if (to > from) to--;                    // 自分が抜けたぶんずれる
       };
@@ -247,7 +262,7 @@ function makeSortable(box, rowSel, names) {
         DRAGGING = false;
         if (to === from) return;
         const arr = names.slice(); const [x] = arr.splice(from, 1); arr.splice(to, 0, x);
-        saveCharOrder(arr);
+        onDone(arr);
       };
       document.addEventListener("pointermove", onMove);
       document.addEventListener("pointerup", onUp);
@@ -325,7 +340,7 @@ function renderGrid(groups, chars, now) {
   const canGo = new Map(cols.map((G) => [G.name, G.role === "md" || !!resistFind(RZ.entries, G.name)]));
   if (MX_FOCUS && !cols.some((G) => G.name === MX_FOCUS)) cols = groups;   // 戻ってきた列が隠れていたら全部出す
   // 見出し: アイコン(クリックでグレー表示を固定) + MD名(クリックで耐性へ)
-  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" title="${esc(G.name)}"><span class="mx-ico" title="クリックで固定（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
+  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックで固定（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
     + (canGo.get(G.name) ? `<span class="mx-name rzgo" data-go="${esc(G.name)}" title="クリックで耐性を見る">${esc(G.label)}</span>` : `<span class="mx-name">${esc(G.label)}</span>`) + `</th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
@@ -347,9 +362,11 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすと、キャラの並びを変えられます。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
+  makeSortable($("#view").querySelector("thead tr"), "th[data-g]", cols.map((G) => G.name),
+    (arr) => saveMdOrder(arr, groups.map((G) => G.name)), "x");
   // 列を選ぶ → まだCT中(数字)のキャラをグレーに。マウスを乗せると下見、アイコンやマスのクリックで固定
   const rows = [...$("#view").querySelectorAll("tbody tr")];
   const waitRows = cols.map((G) => new Set(chars.map((c, r) => { const e = endOf(c, G); return e !== null && e > now ? r : -1; }).filter((r) => r >= 0)));
@@ -1012,13 +1029,16 @@ function renderHistory() {
 }
 
 function renderSettings(groups) {
-  groups.sort((a, b) => a.name.localeCompare(b.name, "ja"));
+  const KO = { weekly: 0, daily: 1, other: 2, hide: 3 };
+  groups.sort((a, b) => (KO[a.kind] - KO[b.kind]) || (a.order - b.order) || a.label.localeCompare(b.label, "ja"));
+  const mdNames = groups.map((G) => G.name);
   const md = SETTINGS.md || {};
-  let h = `<h2>MDの分類と表示名</h2><p class="hint">「自動」は、名前に「週間」がある・明ける時刻がちょうど12:00・CTが26時間より長い → 週次、それ以外 → デイリー で分けています。違っていたらここで直してね。</p><div class="panel list">`;
+  let h = `<h2>MDの分類と表示名</h2><p class="hint">「自動」は、名前に「週間」がある・明ける時刻がちょうど12:00・CTが26時間より長い → 週次、それ以外 → デイリー で分けています。違っていたらここで直してね。⋮⋮ をつかんで上下に動かすと、表の列の並びが変わります。</p>
+    <div class="sortbar"><button class="ghost" id="mdreset">MDの並びを名前順に戻す</button></div><div class="panel list" id="mdlist">`;
   for (const G of groups) {
     const s = md[G.name] || {};
     const autoL = { weekly: "週次", daily: "デイリー", other: "その他" }[G.auto];
-    h += `<div class="row"><span class="nm">${iconImg(G.name, true)}${esc(G.name)}</span>
+    h += `<div class="row" data-g="${esc(G.name)}"><span class="nm"><span class="grip" title="つかんで上下に動かすと並び替え">⋮⋮</span>${iconImg(G.name, true)}${esc(G.name)}</span>
       <input class="lbl" data-label="${esc(G.name)}" placeholder="表示名" value="${esc(s.label || "")}">
       <select data-kind="${esc(G.name)}">
         ${[["auto", `自動（${autoL}）`], ["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["hide", "表示しない"]]
@@ -1074,6 +1094,11 @@ function renderSettings(groups) {
     saveCharOrder(arr);
   };
   makeSortable($("#charlist"), ".row[data-char]", all);
+  makeSortable($("#mdlist"), ".row[data-g]", mdNames, (arr) => saveMdOrder(arr, mdNames));
+  $("#mdreset").onclick = () => {
+    for (const v of Object.values(SETTINGS.md || {})) delete v.order;
+    saveSettings(); render();
+  };
   const C = DATA.chars;
   const byName = (a, b) => a.localeCompare(b, "ja", { numeric: true });
   const SORTS = {
