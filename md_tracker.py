@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.3.5"
+VERSION = "2.4.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -309,6 +309,7 @@ def start_live_server(core, lock, cfg):
                     if DMG is not None:
                         data["dmg_recent"] = DMG.recent[-200:]
                         data["dmg_skills"] = DMG.seen_list()
+                        data["dmg_kinds"] = DMG.kinds()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path == "/api/update":
@@ -687,7 +688,7 @@ def main():
     try:
         import dmg_core
         DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(resource("skill_names.json") or ""), log=print,
-                               fix=load_skill_fix())
+                               fix=load_skill_fix(), info=dmg_core.load_skill_info(resource("skill_info.json") or ""))
         if os.path.exists(DMG_FILE):
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))

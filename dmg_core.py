@@ -16,6 +16,12 @@ MDごと・キャラごとに「相手|技」でまとめて、回数・最大�
   - seen  … 受けたスキルの番号ごとのまとめ(名前がわからない技を見つける・名前を付ける用)
   - fix   … 手で付けたスキル名(スキル名の手直し.json)。ラトリオのデータより優先
   - raw   … 通信そのもの(16進)と読み取った値。通信の形が合っているか確かめる用
+
+種類と属性(skill_info.json = rAthena のスキルデータから。通信には入っていないので技の番号から決める):
+  - 魔法 / 固定 / 物理 は技で決まる。モンスターの通常攻撃は 物理・無属性
+  - 物理の近接/遠距離は、当たったときの距離(3セルより遠いと遠距離)で決まるので、
+    罠・射程3以下の技など、技だけで決まるものだけ「近接」「遠距離」にする
+  - 「武器」属性の技は、モンスターが使うと無属性
 """
 import json
 import struct
@@ -28,7 +34,10 @@ SPAWN_NAME_AT = {0x09FD: 90, 0x09FE: 83, 0x09FF: 84}   # 名前が始まる位�
 OP_NAME = 0x0095
 OP_NAME_ALL = 0x0A30
 OP_NAME_TITLE = 0x0ADF
-OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE} | set(OP_SPAWN)
+OP_POS = {0x0086: "相手が動いた", 0x0087: "自分が動いた", 0x0088: "止まった", 0x01FF: "飛ばされた",
+          0x0091: "マップ移動", 0x0092: "マップ移動(サーバー)", 0x02EB: "ログイン位置"}
+OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE} | set(OP_SPAWN) | set(OP_POS)
+POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
 
 RECENT_MAX = 300
@@ -62,6 +71,14 @@ def _cstr(b):
     return None
 
 
+def load_skill_info(path):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return {int(k): v for k, v in json.load(f).items()}
+    except Exception:
+        return {}
+
+
 def load_skill_names(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -71,10 +88,11 @@ def load_skill_names(path):
 
 
 class DmgCore(object):
-    def __init__(self, md, skill_names=None, log=None, fix=None):
+    def __init__(self, md, skill_names=None, log=None, fix=None, info=None):
         self.md = md                        # md_core.MDCore(キャラ名・いる場所・自分のIDを借りる)
         self.skills = skill_names or {}     # ラトリオのデータ(番号 -> 名前)
         self.fix = dict(fix or {})          # 手で付けた名前(番号 -> 名前)。こっちが優先
+        self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
         self.log = log or (lambda *a: None)
@@ -128,6 +146,43 @@ class DmgCore(object):
             return "通常攻撃"
         return self.fix.get(skid) or self.skills.get(skid) or "スキル{}".format(skid)
 
+    def classify(self, skid, lv=0):
+        """技の (種類, 属性)。種類: 魔法/固定/物理・近接/物理・遠距離/物理(距離しだい)/""(不明)"""
+        if not skid:
+            return "物理", "無"                  # モンスターの通常攻撃
+        inf = self.info.get(skid)
+        if not inf:
+            return "", ""
+        t, ele, rng, mark = inf
+        if isinstance(ele, list):
+            ele = ele[lv - 1] if 0 < lv <= len(ele) else "/".join(dict.fromkeys(ele))
+        if "I" in mark:
+            ele = "属性なし"
+        elif ele in ("武器", "付与"):
+            ele = "無"                           # モンスターの武器の属性は無
+        if t == "M":
+            return "魔法", ele
+        if t == "X":
+            return "固定", ele
+        if t != "W":
+            return "", ele
+        if "T" in mark or "S" in mark:
+            return "物理・近接", ele
+        if "L" in mark:
+            return "物理・遠距離", ele
+        r = max(rng) if isinstance(rng, list) else rng
+        if 0 < r < 4:                            # 射程3以下 → 3セル以内でしか当たらない
+            return "物理・近接", ele
+        return "物理", ele
+
+    def kinds(self):
+        """画面用: 技の名前 -> [種類, 属性](記録の表は名前でまとめているので)。"""
+        out = {"通常攻撃": list(self.classify(0))}
+        for k, v in self.seen.items():
+            sk = int(k)
+            out[self.skill_name(sk)] = list(self.classify(sk, v.get("lv") or 0))
+        return out
+
     def known(self, skid):
         return skid in self.fix or skid in self.skills
 
@@ -136,8 +191,9 @@ class DmgCore(object):
         out = []
         for k, v in self.seen.items():
             sk = int(k)
+            kind, ele = self.classify(sk, v.get("lv") or 0)
             out.append(dict(v, id=sk, name=self.skill_name(sk), base=self.skills.get(sk, ""),
-                            fixed=sk in self.fix, known=self.known(sk)))
+                            fixed=sk in self.fix, known=self.known(sk), kind=kind, ele=ele))
         out.sort(key=lambda r: (r["known"], -r.get("last", 0)))
         return out
 
@@ -202,7 +258,9 @@ class DmgCore(object):
         if op not in OPS:
             return
         try:
-            if op in OP_SPAWN:
+            if op in OP_POS:
+                self._pos(key, op, pkt)
+            elif op in OP_SPAWN:
                 self._spawn(op, pkt)
             elif op in (OP_NAME, OP_NAME_ALL) and len(pkt) >= 30:
                 aid = struct.unpack_from("<I", pkt, 2)[0]
@@ -244,6 +302,16 @@ class DmgCore(object):
                 lst = self.raw.setdefault(tag, [])
                 lst.append(rec)
                 del lst[:-mx]
+
+    def _pos(self, key, op, pkt):
+        """位置の通信を残すだけ(読み方を確かめてから距離に使う)。MD の中のときだけ。"""
+        c = self.md.conn.get(key) or {}
+        if "@" not in (c.get("map") or ""):
+            return
+        lst = self.raw.setdefault("pos_{:04X}".format(op), [])
+        lst.append({"t": int(time.time()), "ms": int(time.time() * 1000) % 100000000, "len": len(pkt),
+                    "hex": pkt[:40].hex()})
+        del lst[:-POS_RAW_MAX]
 
     def _name(self, aid, raw24, op, pkt):
         name = _cstr(raw24)
@@ -288,8 +356,10 @@ class DmgCore(object):
         st[2] = max(st[2], dmg)
         st[3] = now
         st[4] += max(div, 1)
+        kind, ele = self.classify(skid, lv)
         self.recent.append({"t": now, "char": name, "md": where, "src": who, "skill": skill,
-                            "skid": skid, "lv": lv, "dmg": dmg, "hits": max(div, 1), "crit": 1 if crit else 0})
+                            "skid": skid, "lv": lv, "dmg": dmg, "hits": max(div, 1), "crit": 1 if crit else 0,
+                            "kind": kind, "ele": ele})
         del self.recent[:-RECENT_MAX]
         self.changed = True
 
