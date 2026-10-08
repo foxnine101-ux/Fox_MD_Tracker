@@ -698,7 +698,7 @@ function renderDmg(chars, now) {
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD)).slice(-60).reverse();
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th>ダメージ</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。攻撃の属性は通信に入っていないので出ません。</p>`;
@@ -721,7 +721,7 @@ function skillFixHtml() {
     h += `<tr class="${r.known ? "" : "sk-unk"}"><td class="l">${r.id}</td>
       <td class="l"><input class="skfix" data-sk="${r.id}" value="${esc(r.fixed || r.known ? r.name : "")}" placeholder="${esc(r.name)}"></td>
       <td class="l muted">${esc(r.base || "（なし）")}</td><td>${fmtN(r.n)}</td><td>${fmtN(r.max)}</td>
-      <td class="l">${esc(r.src || "")}${r.lv ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(r.where || "")}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
+      <td class="l">${esc(r.src || "")}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(r.where || "")}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
   }
   h += `</tbody></table></div><p class="hint">名前を付けると、これまでの記録の名前も付けかわります。付けた名前はフォルダの「スキル名の手直し.json」に、通信の中身は「被ダメ_確認用データ.json」にたまります（名前や数字がおかしいときは、この2つを見せてもらえると直せます）。</p>`;
   return h;
