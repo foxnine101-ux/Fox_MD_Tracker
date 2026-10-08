@@ -2,7 +2,7 @@
 """
 タスクトレイ(画面右下)に常駐するための部品。
   - 黒い画面(コンソール)なしで動かすときに使う
-  - アイコンを右クリック → 画面を開く / 耐性リアルタイム / ログ / フォルダ / 自動起動 / 終了
+  - アイコンを右クリック → 画面を開く / 耐性リアルタイム(開発版のみ) / ログ / フォルダ / 自動起動 / 終了
 pystray と Pillow が無いときは何もしない(コンソール版はそのまま動く)。
 """
 import os
@@ -106,8 +106,9 @@ class Tray(object):
         items = [
             pystray.MenuItem("画面を開く", lambda i, it: self.open_main(), default=True),
             pystray.MenuItem("ブラウザで開く", lambda i, it: webbrowser.open(self.url)),
-            pystray.MenuItem("耐性リアルタイムを開く", lambda i, it: webbrowser.open(self.live_url)),
         ]
+        if self.live_url:      # 開発版だけ
+            items.append(pystray.MenuItem("耐性リアルタイムを開く", lambda i, it: webbrowser.open(self.live_url)))
         if self.web_url:
             items.append(pystray.MenuItem("ウェブのページを開く", lambda i, it: webbrowser.open(self.web_url)))
         items += [

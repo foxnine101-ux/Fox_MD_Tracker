@@ -893,7 +893,7 @@ function renderSettings(groups) {
     <input class="lbl" id="rzsheet" style="flex:1;min-width:240px" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(SETTINGS.resistSheet || "")}"></div></div>`;
   if (typeof LOCAL !== "undefined" && LOCAL) {
     const u = UPDATE || {};
-    h += `<h2>アップデート</h2><div class="panel list"><div class="row"><span class="nm">いまの版 v${esc(u.current || DATA.version || "?")}
+    h += `<h2>アップデート</h2><div class="panel list"><div class="row"><span class="nm">いまの版 v${esc(u.current || DATA.version || "?")}${DATA.edition ? "（" + esc(DATA.edition) + "）" : ""}
       <span class="muted">${u.state === "none" ? "（最新です）" : u.state === "available" ? `（新しい版 v${esc(u.latest.version)} があります）` : u.state === "error" ? "（" + esc(u.error) + "）" : ""}</span></span>
       <button class="ghost" id="upchk">アップデートを確認</button></div></div>`;
   }

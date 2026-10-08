@@ -28,7 +28,12 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.2.2"
+VERSION = "2.3.0"
+try:
+    from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
+except Exception:
+    DEV = False
+EDITION = "開発版" if DEV else "公開版"
 CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
@@ -214,7 +219,7 @@ def build_payload(core, history=100):
             chars[name]["ev"] = ev
     titles = {str(q): core.title(q) for q in used}
     spans = {str(q): core.quest_meta.get(q, {}).get("span", 0) for q in used}
-    return {"version": VERSION, "updated": int(time.time()), "chars": chars,
+    return {"version": VERSION, "edition": EDITION, "updated": int(time.time()), "chars": chars,
             "titles": titles, "spans": spans, "history": core.history[-history:]}
 
 
@@ -294,7 +299,7 @@ def start_live_server(core, lock, cfg):
             path = self.path.split("?")[0]
             if path in ("/", "/index.html", "/app.html"):
                 return self._file("app.html", "text/html; charset=utf-8")
-            if path in ("/live", "/live.html"):
+            if DEV and path in ("/live", "/live.html"):   # 耐性リアルタイムは開発版だけ
                 return self._file("live.html", "text/html; charset=utf-8")
             if path == "/api/data":
                 with lock:
@@ -375,7 +380,10 @@ def start_live_server(core, lock, cfg):
         print("リアルタイム画面を開けませんでした(ポート{}が使用中?): {}".format(LIVE_PORT, e))
         return None
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    print("この PC で見るページ: {}  (リアルタイム耐性は {}live)".format(local_url(), local_url()))
+    if DEV:
+        print("この PC で見るページ: {}  (リアルタイム耐性は {}live)".format(local_url(), local_url()))
+    else:
+        print("この PC で見るページ: {}".format(local_url()))
     return srv
 
 
@@ -608,7 +616,7 @@ def main():
     ap.add_argument("--tray", action="store_true")
     ap.add_argument("--hidden", action="store_true")   # 窓を出さずにトレイだけ(Windows起動時の自動起動)   # 黒い画面なしでタスクトレイに常駐
     args = ap.parse_args()
-    print("Fox_MD_Tracker v{}".format(VERSION))
+    print("Fox_MD_Tracker v{} ({})".format(VERSION, EDITION))
     cfg = load_config()
     ro = find_ro_dir(cfg)
     names = {}
@@ -739,6 +747,8 @@ def main():
 
             global UPD, QUIT_HOOK
             try:
+                if DEV:
+                    raise RuntimeError("開発版はリリースから更新しません(公開版で上書きされるため)")
                 import updater
                 UPD = updater.Updater(VERSION, cfg.get("アップデート元") or None, HERE, log=print,
                                       on_found=lambda info: TRAY and TRAY.notify(
@@ -778,7 +788,7 @@ def main():
                     st = UPD.check()
                     msg = {"none": "最新版です (v{})".format(VERSION), "available": "新しい版 v{} があります".format((st.get("latest") or {}).get("version"))}.get(st["state"], st.get("error") or "")
                     TRAY.notify(msg, "Fox_MD_Tracker")
-            TRAY = tray.Tray(resource("tray.png") or resource("icon.ico"), local_url(), local_url() + "live",
+            TRAY = tray.Tray(resource("tray.png") or resource("icon.ico"), local_url(), (local_url() + "live") if DEV else "",
                              ((cfg.get("ウェブのURL") or "").strip() if web_on(cfg) else ""), LOG_FILE, HERE,
                              on_quit=quit_all, status=status, open_main=(app.show if app else None),
                              update=(upd_text, upd_act))

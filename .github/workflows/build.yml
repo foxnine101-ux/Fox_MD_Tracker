@@ -1,5 +1,7 @@
-# md_tracker.py の VERSION が上がったら、Windows で Fox_MD_Tracker.exe を作ってリリースに置く。
-# アプリは起動時にこのリリースを見て、新しければアップデートする。
+# main に push するたびに Windows で exe を作る。
+#   - 公開版 Fox_MD_Tracker.exe … md_tracker.py の VERSION が上がったときだけ作ってリリースに置く
+#       (耐性リアルタイムなど開発中の機能は入れない。アプリは起動時にこのリリースを見てアップデートする)
+#   - 開発版 Fox_MD_Tracker_dev.exe … 毎回作って Actions の「Artifacts」に置く(リリースには置かない)
 name: build
 
 on:
@@ -31,20 +33,25 @@ jobs:
           exit 0
 
       - uses: actions/setup-python@v5
-        if: steps.v.outputs.skip == 'false'
         with:
           python-version: '3.11'
 
-      - name: exe を作る
-        if: steps.v.outputs.skip == 'false'
+      - name: 部品を入れる
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install pyinstaller scapy pystray pillow pywebview
+
+      - name: 公開版の exe を作る
+        if: steps.v.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          Set-Content -Path edition.py -Encoding utf8 -Value "DEV = False"
           python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker --icon icon.ico `
-            --add-data "app.html;." --add-data "live.html;." `
+            --add-data "app.html;." `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." `
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." `
+            --hidden-import edition `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
             --collect-all webview --hidden-import clr md_tracker.py
           New-Item -ItemType Directory -Force pkg\Fox_MD_Tracker | Out-Null
@@ -52,6 +59,25 @@ jobs:
           Copy-Item はじめに_配布版.txt pkg\Fox_MD_Tracker\はじめに.txt
           Copy-Item dist\Fox_MD_Tracker.exe dist\MDTracker.exe   # 改名前の版(v2.1.x)がアップデートできるように同じものを旧名でも置く
           Compress-Archive -Path pkg\Fox_MD_Tracker -DestinationPath Fox_MD_Tracker.zip -Force
+
+      - name: 開発版の exe を作る
+        shell: pwsh
+        run: |
+          Set-Content -Path edition.py -Encoding utf8 -Value "DEV = True"
+          python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker_dev --icon icon.ico `
+            --add-data "app.html;." --add-data "live.html;." `
+            --add-data "packet_lengths.json;." --add-data "id2name.json;." `
+            --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." `
+            --hidden-import edition `
+            --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
+            --collect-all webview --hidden-import clr md_tracker.py
+
+      - name: 開発版を Artifacts に置く
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fox_MD_Tracker_dev-v${{ steps.v.outputs.version }}
+          path: dist/Fox_MD_Tracker_dev.exe
+          retention-days: 30
 
       - name: リリースに置く
         if: steps.v.outputs.skip == 'false'
