@@ -69,13 +69,14 @@ def good_name(s):
 def _cstr(b):
     """名前の24バイトを文字にする。名前ではなさそうなら None。"""
     b = b.split(b"\x00", 1)[0]
-    for enc in ("utf-8", "cp932"):    # ふつうは cp932。UTF-8 として正しく読めるときだけ UTF-8
-        try:
-            s = b.decode(enc)
-        except UnicodeDecodeError:
-            continue
-        if good_name(s):
-            return s
+    for raw in (b, b[:-1]):             # 長い名前はサーバーが途中(2バイト文字の真ん中)で切ることがある
+        for enc in ("utf-8", "cp932"):    # ふつうは cp932。UTF-8 として正しく読めるときだけ UTF-8
+            try:
+                s = raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+            if good_name(s):
+                return s
     return None
 
 
@@ -136,6 +137,9 @@ class DmgCore(object):
         self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
+        self.gear = None                    # キャラ名 -> いまの装備のまとめ(char_core.CharCore.gear_profile)
+        self.sets = {}                      # 装備セットID -> {"p": まとめ, "first": 時刻, "last": 時刻, "n": 回数}
+        self.gstats = {}                    # キャラ -> MD -> 装備セットID -> "相手|技" -> 行(stats と同じ形)
         self.pos = {}                       # ID -> [x0, y0, x1, y1, 開始時刻, 速さ](いるマップの中だけ)
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
@@ -147,13 +151,16 @@ class DmgCore(object):
 
     # ---------------- 保存 ----------------
     def snapshot(self):
-        return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen}
+        return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen,
+                "sets": self.sets, "gstats": self.gstats}
 
     def restore(self, d):
         if d:
             self.stats = d.get("stats") or {}
             self.recent = d.get("recent") or []
             self.seen = d.get("seen") or {}
+            self.sets = d.get("sets") or {}
+            self.gstats = d.get("gstats") or {}
             self._fix_bad_names()
 
     def _fix_bad_names(self):
@@ -280,9 +287,10 @@ class DmgCore(object):
     def clear(self, char=None):
         if char:
             self.stats.pop(char, None)
+            self.gstats.pop(char, None)
             self.recent = [r for r in self.recent if r.get("char") != char]
         else:
-            self.stats, self.recent = {}, []
+            self.stats, self.recent, self.gstats, self.sets = {}, [], {}, {}
         self.changed = True
 
     # ---------------- 通信 ----------------
@@ -432,6 +440,22 @@ class DmgCore(object):
         self._spawn_pos(op, pkt, aid)
         self._name(aid, pkt[at:at + 24], op, pkt)
 
+    def _gear_set(self, name, now):
+        """いまの装備のまとめを、同じものは同じIDにして覚える。わからなければ ""。"""
+        try:
+            p = self.gear(name) if self.gear else None
+        except Exception:
+            p = None
+        if not p or not p.get("known"):
+            return ""
+        p = {k: p[k] for k in ("armor", "res", "def", "mdef")}
+        sid = "{}|{}|{}|{}".format(p["armor"], ",".join("{}{}".format(e, v) for e, v in p["res"].items()),
+                                   "+".join(map(str, p["def"])), "+".join(map(str, p["mdef"])))
+        s = self.sets.setdefault(sid, {"p": p, "first": now, "n": 0})
+        s["last"] = now
+        s["n"] += 1
+        return sid
+
     def _hit(self, key, src, skid, dmg, div, crit, lv=0, dist=None):
         if dmg <= 0:
             return
@@ -462,13 +486,32 @@ class DmgCore(object):
             while len(st) < 7:
                 st.append(0)
             st[5 if kind == "物理・近接" else 6] += dmg  # [5]=近接の合計 [6]=遠距離の合計
+        gid = self._gear_set(name, now)
+        if gid:                                       # 装備セットごとにも同じ形で数える
+            row = [1, dmg, dmg, now, max(div, 1)]
+            if kind.startswith("物理・"):
+                row += [dmg, 0] if kind == "物理・近接" else [0, dmg]
+            g = self.gstats.setdefault(name, {}).setdefault(where, {}).setdefault(gid, {})
+            if k in g:
+                _merge(g[k], row)
+            else:
+                g[k] = row
         self.recent.append({"t": now, "char": name, "md": where, "src": who, "skill": skill,
                             "skid": skid, "lv": lv, "dmg": dmg, "hits": max(div, 1), "crit": 1 if crit else 0,
-                            "kind": kind, "ele": ele, "est": 1 if est else 0, "dist": dist})
+                            "kind": kind, "ele": ele, "est": 1 if est else 0, "dist": dist, "gear": gid})
         del self.recent[:-RECENT_MAX]
         self.changed = True
 
     # ---------------- ウェブ用 ----------------
+    def for_char_gear(self, name, top=40):
+        """キャラの被ダメまとめ(MDごと・装備セットごと)。"""
+        out = {}
+        for where, sets in (self.gstats.get(name) or {}).items():
+            for gid, d in sets.items():
+                rows = sorted(d.items(), key=lambda kv: -kv[1][2])[:top]
+                out.setdefault(where, {})[gid] = {k: v for k, v in rows}
+        return out
+
     def for_char(self, name, top=40):
         """キャラの被ダメまとめ(MDごと、最大ダメージ順に top 件)。"""
         out = {}

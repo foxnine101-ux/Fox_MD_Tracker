@@ -678,11 +678,26 @@ setInterval(() => { if (DATA && !document.hidden && TAB === "resist") load(); },
 
 // ---------- 被ダメ ----------
 // ツールが記録した「だれの・どの技で・どれくらい受けたか」。キャラごと・MDごとに [回数, 合計, 最大, 最後, ヒット数]
-let DMG_CHAR = "", DMG_MD = "";
+let DMG_CHAR = "", DMG_MD = "", DMG_GEAR = "";
+// 装備セット(当たったときの 鎧の属性・属性耐性・DEF・MDEF)。見つかった順に A, B, C…
+function gearSets() {
+  const S = DATA.dmg_sets || {};
+  const ids = Object.keys(S).sort((a, b) => (S[a].first || 0) - (S[b].first || 0));
+  const L = (i) => i < 26 ? String.fromCharCode(65 + i) : "Z" + (i - 25);
+  return Object.fromEntries(ids.map((id, i) => [id, { ...S[id], letter: L(i) }]));
+}
+function gearText(p) {
+  if (!p) return "";
+  const res = Object.entries(p.res || {}).map(([e, v]) => `${e}${v}%`).join(" ");
+  return `${p.armor}鎧・耐性 ${res || "なし"}・DEF ${p.def.join("+")}・MDEF ${p.mdef.join("+")}`;
+}
+const gearTag = (G, id) => G[id] ? `<span class="tag" title="${esc(gearText(G[id].p))}">${G[id].letter}</span>` : "";
 const fmtN = (n) => Number(n || 0).toLocaleString("ja-JP");
-function dmgMerge(chars) {      // {MD: {"相手|技": [回数, 合計, 最大, 最後, ヒット, キャラ集合, 近接の合計, 遠距離の合計]}}
+function dmgMerge(chars, gear) {      // {MD: {"相手|技": [回数, 合計, 最大, 最後, ヒット, キャラ集合, 近接の合計, 遠距離の合計]}}
   const out = {};
-  for (const c of chars) for (const [where, d] of Object.entries((DATA.chars[c] || {}).dmg || {})) {
+  const src = (c) => !gear ? (DATA.chars[c] || {}).dmg || {}
+    : Object.fromEntries(Object.entries((DATA.chars[c] || {}).dmg_g || {}).map(([w, g]) => [w, g[gear]]).filter(([, d]) => d));
+  for (const c of chars) for (const [where, d] of Object.entries(src(c))) {
     const W = out[where] = out[where] || {};
     for (const [k, v] of Object.entries(d)) {
       const x = W[k] = W[k] || [0, 0, 0, 0, 0, new Set(), 0, 0];
@@ -735,11 +750,18 @@ function dmgTable(W, showChars, limit) {
 function renderDmg(chars, now) {
   const withDmg = chars.filter((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length);
   if (DMG_CHAR && !withDmg.includes(DMG_CHAR)) DMG_CHAR = "";
-  const merged = dmgMerge(DMG_CHAR ? [DMG_CHAR] : withDmg);
+  const G = gearSets();
+  // 選んでいるキャラ・場所で使った装備セット
+  const usedGear = new Set();
+  for (const c of DMG_CHAR ? [DMG_CHAR] : withDmg) for (const [w, g] of Object.entries((DATA.chars[c] || {}).dmg_g || {}))
+    if (!DMG_MD || w === DMG_MD) Object.keys(g).forEach((id) => usedGear.add(id));
+  if (DMG_GEAR && !usedGear.has(DMG_GEAR)) DMG_GEAR = "";
+  const merged = dmgMerge(DMG_CHAR ? [DMG_CHAR] : withDmg, DMG_GEAR);
   const mds = Object.entries(merged).map(([w, W]) => [w, W, Math.max(...Object.values(W).map((v) => v[3]))]).sort((a, b) => b[2] - a[2]);
   if (DMG_MD && !merged[DMG_MD]) DMG_MD = "";
   let h = `<div class="opts"><label>キャラ <select id="dmc"><option value="">すべて</option>${withDmg.map((c) => `<option ${c === DMG_CHAR ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
+    ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(DMG_CHAR) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
@@ -750,10 +772,15 @@ function renderDmg(chars, now) {
     const E = resistMatch(RZ.entries, "", w) || resistFind(RZ.entries, w);
     h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${dmgTable(W, !DMG_CHAR, 0)}</div>`;
   }
-  const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD)).slice(-60).reverse();
+  const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || r.gear === DMG_GEAR)).slice(-60).reverse();
+  if (usedGear.size) {
+    h += `<h2>装備セット</h2><div class="panel list">${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) =>
+      `<div class="row"><span class="tag">${G[id].letter}</span><span class="nm">${eleTag(G[id].p.armor)}鎧　耐性 ${Object.entries(G[id].p.res || {}).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") || "なし"}　DEF ${G[id].p.def.join("+")}　MDEF ${G[id].p.mdef.join("+")}</span><span class="muted">${fmtN(G[id].n)}回 ・ 最後 ${when(G[id].last)}</span></div>`).join("")}</div>
+      <p class="hint">攻撃を受けたときの装備です。上の「装備」で選ぶと、その装備のときの被ダメだけを見られます（装備を比べるとき用）。DEF・MDEFは通信の値。鎧の属性と耐性は、着ている装備・カード・エンチャント・ランダムオプションから出した目安です（セット効果・精錬などの条件つきの効果、スキルや薬・属性付与などの一時的な効果は入りません）。</p>`;
+  }
   if (rec.length) {
-    h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td></tr>`;
+    h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th></tr></thead><tbody>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。</p>`;
@@ -804,6 +831,8 @@ function bindDmg() {
   const c = $("#dmc"), m = $("#dmm"), x = $("#dmclear");
   if (c) c.onchange = () => { DMG_CHAR = c.value; render(); };
   if (m) m.onchange = () => { DMG_MD = m.value; render(); };
+  const g = $("#dmgear");
+  if (g) g.onchange = () => { DMG_GEAR = g.value; render(); };
   if (x) x.onclick = async () => {
     if (x.dataset.ok !== "1") { x.dataset.ok = "1"; x.textContent = "本当に消す？"; return; }
     await fetch("/api/dmg" + (DMG_CHAR ? "?char=" + encodeURIComponent(DMG_CHAR) : ""), { method: "DELETE" });

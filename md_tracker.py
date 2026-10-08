@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -215,6 +215,9 @@ def build_payload(core, history=100):
             d = DMG.for_char(name)
             if d:
                 chars[name]["dmg"] = d          # 被ダメのまとめ(MDごと)
+            g = DMG.for_char_gear(name)
+            if g:
+                chars[name]["dmg_g"] = g        # 被ダメのまとめ(MDごと・装備セットごと)
         # イベント用クエスト: {ID: [イベント名, 種類]} (キャラの中に入れるとサーバー側の変更なしで届く)
         ev = {str(q): [core.events[q]["g"], core.events[q]["s"]] for q in ch["quests"] if q in core.events}
         if ev:
@@ -310,6 +313,7 @@ def start_live_server(core, lock, cfg):
                         data["dmg_recent"] = DMG.recent[-200:]
                         data["dmg_skills"] = DMG.seen_list()
                         data["dmg_kinds"] = DMG.kinds()
+                        data["dmg_sets"] = DMG.sets
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path == "/api/update":
@@ -693,6 +697,8 @@ def main():
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))
         print("被ダメの記録: スキル名 {}件 (手直し {}件)".format(len(DMG.skills), len(DMG.fix)))
+        if CHARS is not None:
+            DMG.gear = CHARS.gear_profile              # 当たったときの装備(鎧の属性・耐性・DEF・MDEF)も覚える
     except Exception as e:
         print("[被ダメ] 使えません:", e)
         DMG = None

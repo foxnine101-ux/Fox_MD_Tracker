@@ -12,13 +12,23 @@ MDトラッカー(md_tracker.py)に相乗りする前提。向こうはもう常
     0x00BD  ステータス一括 (残ステータスポイント, ATK/MATK/DEF など)
     0x00B0  派生値の変化 (HP/SP/ASPD など)
     0x0B39  装備一覧 (アイテムID・精錬・★グレード・エンチャ4枠・ランダムOP)
+    0x0999  装備した (index・場所・結果 0=成功)
+    0x099A  装備を外した (index・場所・結果 0=成功)
+
+被ダメ用に「いまの装備」のまとめ(鎧の属性・属性耐性・DEF・MDEF)も出す(gear_profile)。
+鎧の属性と耐性は通信に無いので、着ている装備・カード・エンチャ・ランダムOP から
+gear_info.json(rAthena のアイテムデータ)で出した目安。
 """
 import json
 import os
 import struct
 import time
 
-WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39}
+WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A}
+ELES = ("無", "水", "地", "火", "風", "毒", "聖", "闇", "念", "不死")
+# ランダムオプションの番号 → 耐性の属性(rAthena item_randomopt_db: ATTR_TOLERACE_*)
+RANDOPT_RES = {25: "無", 26: "水", 27: "地", 28: "火", 29: "風", 30: "毒", 31: "聖", 32: "闇", 33: "念", 34: "不死"}
+RANDOPT_RES_ALL_BUT_NEUTRAL = 35
 
 STAT_NAMES = {
     13: "STR", 14: "AGI", 15: "VIT", 16: "INT", 17: "DEX", 18: "LUK",
@@ -42,6 +52,15 @@ UNKNOWN = "(キャラ不明)"
 EQUIP_SIZE = 68
 
 
+def load_gear_info(folder=None):
+    folder = folder or os.path.dirname(os.path.abspath(__file__))
+    try:
+        with open(os.path.join(folder, "gear_info.json"), "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def load_id2name(folder=None):
     """アイテムID→日本語名の対応表。ratorio の items_part*.json から作ったもの。"""
     folder = folder or os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +76,7 @@ class CharCore(object):
     def __init__(self, md=None, id2name=None, log=None):
         self.md = md                      # md_core.MDCore (キャラ名を借りる)。無くても動く
         self.id2name = id2name if id2name is not None else load_id2name()
+        self.gear_info = load_gear_info()
         self.log = log or (lambda *a: None)
         self.chars = {}
         self.changed = False
@@ -80,6 +100,35 @@ class CharCore(object):
     def restore(self, data):
         if data:
             self.chars = data.get("chars", {})
+
+    def gear_profile(self, name):
+        """被ダメ用: いまの装備のまとめ。{"armor": 鎧の属性, "res": {属性: %}, "def": [..], "mdef": [..]}"""
+        ch = self.chars.get(name)
+        if not ch:
+            return None
+        armor, res = "無", {}
+
+        def add(e, v):
+            if v:
+                res[e] = res.get(e, 0) + v
+        for it in ch.get("equips") or []:
+            ids = [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]
+            for iid in ids:
+                g = self.gear_info.get(str(iid)) or {}
+                if g.get("de"):
+                    armor = g["de"]
+                for e, v in (g.get("re") or {}).items():
+                    add(e, v)
+            for o in it.get("options") or []:
+                if o.get("index") in RANDOPT_RES:
+                    add(RANDOPT_RES[o["index"]], o.get("value", 0))
+                elif o.get("index") == RANDOPT_RES_ALL_BUT_NEUTRAL:
+                    for e in ELES[1:]:
+                        add(e, o.get("value", 0))
+        d = ch.get("derived") or {}
+        return {"armor": armor, "res": {e: res[e] for e in ELES if res.get(e)},
+                "def": [d.get("DEF", 0), d.get("DEF2", 0)], "mdef": [d.get("MDEF", 0), d.get("MDEF2", 0)],
+                "known": bool(ch.get("equips"))}
 
     # ---------- 中身 ----------
     def _name(self):
@@ -142,6 +191,16 @@ class CharCore(object):
             ch["updated"] = int(time.time())
             self.changed = True
 
+        elif op == 0x0999 and len(pkt) >= 11:            # 装備した(結果 0 = 成功)
+            idx, loc = struct.unpack_from("<HI", pkt, 2)
+            if pkt[10] == 0:
+                self._wear(idx, loc, True)
+
+        elif op == 0x099A and len(pkt) >= 9:             # 外した(結果 0 = 成功)
+            idx, loc = struct.unpack_from("<HI", pkt, 2)
+            if pkt[8] == 0:
+                self._wear(idx, loc, False)
+
         elif op == 0x0B39:
             body = pkt[5:]
             if len(body) < EQUIP_SIZE or len(body) % EQUIP_SIZE:
@@ -157,6 +216,30 @@ class CharCore(object):
             ch["updated"] = int(time.time())
             self.changed = True
             self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
+
+    def _wear(self, idx, loc, on):
+        """装備した/外した。0x0B39 の一覧(equips と bag)の中で入れかえる。"""
+        ch = self._ch()
+        eq, bag = ch.setdefault("equips", []), ch.setdefault("bag", [])
+        item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
+        if item is None:
+            return
+        if item in eq:
+            eq.remove(item)
+        if item in bag:
+            bag.remove(item)
+        if on:
+            for x in [x for x in eq if x.get("wear", 0) & loc]:   # 同じ場所の装備は外れる
+                eq.remove(x)
+                x["wear"], x["slot"] = 0, ""
+                bag.append(x)
+            item["wear"], item["slot"] = loc, LOC_NAMES.get(loc, str(loc))
+            eq.append(item)
+        else:
+            item["wear"], item["slot"] = 0, ""
+            bag.append(item)
+        ch["updated"] = int(time.time())
+        self.changed = True
 
     def _equip(self, e):
         """装備1件 68バイト。精錬と★は末尾にある(先頭ではない)。"""
