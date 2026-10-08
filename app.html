@@ -281,6 +281,7 @@ const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
+  if (document.activeElement && document.activeElement.matches("input.skfix")) return;   // 名前を入力中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -547,6 +548,9 @@ table.dm-t th{font-size:11px;color:var(--muted);font-weight:600;padding:4px 6px;
 table.dm-t td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 table.dm-t .l{text-align:left}
 td.dm-max{font-weight:700}
+input.skfix{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);width:180px}
+input.skfix.saved{border-color:var(--ok)}
+tr.sk-unk td:first-child{color:var(--soon);font-weight:700}
 .hl-col{background:rgba(59,91,219,.07)}
 tr.mx-dim td{opacity:.28;filter:grayscale(1);transition:opacity .12s}
 .mx-off{opacity:.22;filter:grayscale(1);transition:opacity .12s}
@@ -684,7 +688,7 @@ function renderDmg(chars, now) {
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(DMG_CHAR) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
-    $("#view").innerHTML = h; bindDmg(); return;
+    $("#view").innerHTML = h + skillFixHtml(); bindDmg(); return;
   }
   for (const [w, W] of mds) {
     if (DMG_MD && w !== DMG_MD) continue;
@@ -698,10 +702,50 @@ function renderDmg(chars, now) {
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。攻撃の属性は通信に入っていないので出ません。</p>`;
-  $("#view").innerHTML = h;
+  $("#view").innerHTML = h + skillFixHtml();
   bindDmg();
 }
+// 受けたスキルの一覧。名前がわからない技(「スキル123」)に名前を付けられる(この PC で見ているときだけ)
+let SK_ALL = false;
+function skillFixHtml() {
+  const list = DATA.dmg_skills;
+  if (!list || !list.length || typeof LOCAL === "undefined" || !LOCAL) return "";
+  const unk = list.filter((r) => !r.known).length;
+  const rows = SK_ALL ? list : list.filter((r) => !r.known || r.fixed);
+  let h = `<h2>受けた技の一覧（名前の手直し）</h2>
+    <div class="opts"><span>${list.length}種類のうち、名前がわからない技 <b>${unk}</b>種類</span>
+    <label><input type="checkbox" id="skall" ${SK_ALL ? "checked" : ""}> 名前がわかっている技も出す</label></div>`;
+  if (!rows.length) return h + `<div class="panel empty">名前がわからない技はいまのところありません。</div>`;
+  h += `<div class="panel tablewrap"><table class="dm-t"><thead><tr><th class="l">番号</th><th class="l">名前（入力して Enter で保存・空にすると元に戻す）</th><th class="l">元のデータ</th><th>回数</th><th>最大</th><th class="l">相手</th><th class="l">最後に受けた場所</th><th>最後</th></tr></thead><tbody>`;
+  for (const r of rows) {
+    h += `<tr class="${r.known ? "" : "sk-unk"}"><td class="l">${r.id}</td>
+      <td class="l"><input class="skfix" data-sk="${r.id}" value="${esc(r.fixed || r.known ? r.name : "")}" placeholder="${esc(r.name)}"></td>
+      <td class="l muted">${esc(r.base || "（なし）")}</td><td>${fmtN(r.n)}</td><td>${fmtN(r.max)}</td>
+      <td class="l">${esc(r.src || "")}${r.lv ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(r.where || "")}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
+  }
+  h += `</tbody></table></div><p class="hint">名前を付けると、これまでの記録の名前も付けかわります。付けた名前はフォルダの「スキル名の手直し.json」に、通信の中身は「被ダメ_確認用データ.json」にたまります（名前や数字がおかしいときは、この2つを見せてもらえると直せます）。</p>`;
+  return h;
+}
+function bindSkillFix() {
+  const a = $("#skall");
+  if (a) a.onchange = () => { SK_ALL = a.checked; render(); };
+  $("#view").querySelectorAll("input.skfix").forEach((el) => {
+    const save = async () => {
+      if (el.value === el.defaultValue) return;
+      try {
+        const r = await fetch("/api/skillname", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: +el.dataset.sk, name: el.value.trim() }) });
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        el.defaultValue = el.value; el.classList.add("saved");
+        setTimeout(() => load(), 300);
+      } catch (e) { alert("保存できませんでした: " + e.message); }
+    };
+    el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
+    el.onchange = save;
+  });
+}
 function bindDmg() {
+  bindSkillFix();
   const c = $("#dmc"), m = $("#dmm"), x = $("#dmclear");
   if (c) c.onchange = () => { DMG_CHAR = c.value; render(); };
   if (m) m.onchange = () => { DMG_MD = m.value; render(); };

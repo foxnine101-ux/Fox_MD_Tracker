@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.3.1"
+VERSION = "2.3.2"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -38,6 +38,8 @@ CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
+SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
+DMG_RAW_FILE = os.path.join(HERE, "被ダメ_確認用データ.json")   # 通信そのもの(形を確かめる用)
 NAMES_CACHE = os.path.join(HERE, "quest_names_cache.json")
 LOCK_FILE = os.path.join(os.environ.get("TEMP", "/tmp"), "md_tracker.lock")
 LOG_FILE = os.path.join(HERE, "動作ログ.txt")
@@ -306,6 +308,7 @@ def start_live_server(core, lock, cfg):
                     data = build_payload(core, history=300)
                     if DMG is not None:
                         data["dmg_recent"] = DMG.recent[-200:]
+                        data["dmg_skills"] = DMG.seen_list()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path == "/api/update":
@@ -337,6 +340,20 @@ def start_live_server(core, lock, cfg):
                 else:
                     st = UPD.check()
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/skillname" and self._local_only():
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 10000)).decode("utf-8"))
+                    sk = int(b["id"])
+                    if DMG is None or sk <= 0:
+                        raise ValueError
+                    with lock:
+                        DMG.rename(sk, str(b.get("name") or ""))
+                        save_skill_fix()
+                        save_dmg()
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
             if self.path.split("?")[0] != "/api/data" or not self._local_only():
                 return self._send(403, "forbidden", "text/plain")
             try:
@@ -465,16 +482,37 @@ CHARS = None   # char_core.CharCore (あれば)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
 
 
+def _write_json(path, obj, indent=None):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
+    os.replace(tmp, path)
+
+
 def save_dmg():
     if DMG is None:
         return
     try:
-        tmp = DMG_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(DMG.snapshot(), f, ensure_ascii=False)
-        os.replace(tmp, DMG_FILE)
+        _write_json(DMG_FILE, DMG.snapshot())
+        if DMG.raw:
+            _write_json(DMG_RAW_FILE, DMG.raw_snapshot(), indent=1)
     except Exception as e:
         print("[被ダメ] 保存に失敗:", e)
+
+
+def load_skill_fix():
+    try:
+        with open(SKILL_FIX_FILE, "r", encoding="utf-8") as f:
+            return {int(k): str(v) for k, v in json.load(f).items() if str(v).strip()}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print("[被ダメ] スキル名の手直しが読めませんでした:", e)
+        return {}
+
+
+def save_skill_fix():
+    _write_json(SKILL_FIX_FILE, {str(k): v for k, v in sorted(DMG.fix.items())}, indent=1)
 
 
 def split_account_prefix(data, lengths):
@@ -648,11 +686,12 @@ def main():
     global DMG
     try:
         import dmg_core
-        DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(resource("skill_names.json") or ""), log=print)
+        DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(resource("skill_names.json") or ""), log=print,
+                               fix=load_skill_fix())
         if os.path.exists(DMG_FILE):
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))
-        print("被ダメの記録: スキル名 {}件".format(len(DMG.skills)))
+        print("被ダメの記録: スキル名 {}件 (手直し {}件)".format(len(DMG.skills), len(DMG.fix)))
     except Exception as e:
         print("[被ダメ] 使えません:", e)
         DMG = None

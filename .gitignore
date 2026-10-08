@@ -22,3 +22,6 @@ dist/
 *.spec
 *.exe
 GitHubトークン.txt
+スキル名の手直し.json
+被ダメ_確認用データ.json
+アップデートログ.txt
