@@ -627,12 +627,12 @@ class DmgCore(object):
             p = self.gear(name) if self.gear else None
         except Exception:
             p = None
-        if not p or not p.get("known"):
-            return ""
-        p = {k: p[k] for k in ("armor", "res", "def", "mdef")}
-        sid = "{}|{}|{}|{}".format(p["armor"], ",".join("{}{}".format(e, v) for e, v in p["res"].items()),
-                                   "+".join(map(str, p["def"])), "+".join(map(str, p["mdef"])))
-        s = self.sets.setdefault(sid, {"p": p, "first": now, "n": 0})
+        if not p or not p.get("known") or not p.get("sid"):
+            return ""                       # 全部の場所がうまった装備(装備セット)のときだけ
+        sid = p["sid"]
+        s = self.sets.setdefault(sid, {"first": now, "n": 0})
+        s["p"] = {k: p[k] for k in ("armor", "res", "def", "mdef")}   # 鎧属性・耐性・DEF・MDEF(最新)
+        s["char"] = name
         s["last"] = now
         s["n"] += 1
         return sid

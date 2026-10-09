@@ -297,11 +297,11 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["nyar", "ニャル様"], ["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["equip", "装備"], ["nyar", "ニャル様"], ["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -322,6 +322,7 @@ function render() {
   if (TAB === "event") return renderEvents(chars, now);
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);
+  if (TAB === "equip") return renderEquip(chars);
   if (TAB === "settings") return renderSettings(groups);
   renderGrid(groups.filter((G) => G.kind === TAB), chars, now);
 }
@@ -617,6 +618,16 @@ table.dm-t th{font-size:11px;color:var(--muted);font-weight:600;padding:4px 6px;
 table.dm-t td{padding:5px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
 table.dm-t .l{text-align:left}
 td.dm-max{font-weight:700}
+.eq-box{padding:10px 12px;margin-bottom:10px}
+.eq-h{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
+.eq-h input.eqname{font:inherit;font-weight:700;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);flex:1 1 380px;min-width:200px}
+.eq-btns{margin-left:auto;display:flex;gap:6px}
+.eq-sub{font-size:12px;margin:0 0 6px}
+.eq-st{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;margin:4px 0}
+table.eq-t{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+table.eq-t th{width:120px;text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:5px 6px;border-bottom:1px solid var(--line);position:static;min-width:0;max-width:none;background:none;vertical-align:top;white-space:nowrap}
+table.eq-t td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line);white-space:normal}
+.eq-name{font-weight:600}.eq-opt{font-size:11px;color:var(--muted)}
 .ek{display:inline-block;min-width:1.6em;padding:0 5px;border-radius:5px;font-size:12px;font-weight:700;text-align:center;border:1px solid var(--line)}
 .ek-水{color:#1c7ed6;border-color:#1c7ed6}.ek-火{color:#e03131;border-color:#e03131}.ek-風{color:#2f9e44;border-color:#2f9e44}.ek-地{color:#a0662b;border-color:#a0662b}
 .ek-聖{color:#c99a06;border-color:#c99a06}.ek-闇{color:#7048e8;border-color:#7048e8}.ek-念{color:#9c36b5;border-color:#9c36b5}.ek-毒{color:#5c940d;border-color:#5c940d}
@@ -738,14 +749,94 @@ function gearSets() {
   const S = DATA.dmg_sets || {};
   const ids = Object.keys(S).sort((a, b) => (S[a].first || 0) - (S[b].first || 0));
   const L = (i) => i < 26 ? String.fromCharCode(65 + i) : "Z" + (i - 25);
-  return Object.fromEntries(ids.map((id, i) => [id, { ...S[id], letter: L(i) }]));
+  return Object.fromEntries(ids.map((id, i) => [id, { ...S[id], letter: L(i), name: equipSetName(id) }]));
 }
+// 装備タブの装備セットの名前(付けた名前 > 自動の名前)
+function equipSet(sid) {
+  for (const e of Object.values(DATA.equip || {})) if ((e.sets || {})[sid]) return e.sets[sid];
+  return null;
+}
+const equipSetName = (sid) => { const s = equipSet(sid); return s ? (s.name || s.auto) : ""; };
 function gearText(p) {
   if (!p) return "";
   const res = Object.entries(p.res || {}).map(([e, v]) => `${e}${v}%`).join(" ");
   return `${p.armor}鎧・耐性 ${res || "なし"}・DEF ${p.def.join("+")}・MDEF ${p.mdef.join("+")}`;
 }
-const gearTag = (G, id) => G[id] ? `<span class="tag" title="${esc(gearText(G[id].p))}">${G[id].letter}</span>` : "";
+const gearTag = (G, id) => G[id] ? `<span class="tag" title="${esc((G[id].name ? G[id].name + "\n" : "") + gearText(G[id].p))}">${G[id].letter}</span>` : "";
+
+// ---------- 装備 ----------
+// キャラ × 装備セット。全部の場所(衣装をのぞく)がうまったときの装備を「装備セット」として覚えている
+let EQ_CHAR = "", EQ_OPEN = {};
+function itemLine(it) {
+  const head = `${it.refine ? `+${it.refine} ` : ""}${it.grade ? `[★${it.grade}] ` : ""}${it.name}`;
+  const cards = (it.cards || []).map((c) => c.name);
+  return `<span class="eq-name">${esc(head)}</span>${cards.length ? ` <span class="muted">（${esc(cards.join("，"))}）</span>` : ""}`
+    + ((it.options || []).length ? `<div class="eq-opt">${it.options.map((o) => esc(o.text)).join(" ／ ")}</div>` : "");
+}
+function itemsTable(items) {
+  return `<table class="eq-t"><tbody>${items.map((it) => `<tr><th>${esc(it.slot)}</th><td>${itemLine(it)}</td></tr>`).join("")}</tbody></table>`;
+}
+function statusHtmlEq(st) {
+  if (!st) return "";
+  const s = st.stats || {}, d = st.derived || {};
+  const sv = (k) => s[k] ? `${s[k].base}${s[k].plus ? "+" + s[k].plus : ""}` : "-";
+  const two = (a, b) => d[a] === undefined ? "-" : `${d[a]}${d[b] ? " + " + d[b] : ""}`;
+  const cell = (l, v) => `<div><span class="muted">${l}</span> <b>${esc(String(v))}</b></div>`;
+  return `<div class="eq-st">
+    ${cell("Lv", `${st.lv ?? "-"}${st.jobLv ? " / Job " + st.jobLv : ""}`)}${cell("職業", st.jobName || "-")}
+    ${cell("HP", d.MaxHP ?? "-")}${cell("SP", d.MaxSP ?? "-")}${d.MaxAP !== undefined ? cell("AP", d.MaxAP) : ""}</div>
+    <div class="eq-st">${["STR", "AGI", "VIT", "INT", "DEX", "LUK"].map((k) => cell(k, sv(k))).join("")}</div>
+    ${s.POW ? `<div class="eq-st">${["POW", "STA", "WIS", "SPL", "CON", "CRT"].map((k) => cell(k, sv(k))).join("")}</div>` : ""}
+    <div class="eq-st">${cell("Atk", two("ATK", "ATK2"))}${cell("Matk", d.MATKmin !== undefined ? `${d.MATKmin} + ${d.MATKmax}` : "-")}${cell("Def", two("DEF", "DEF2"))}${cell("Mdef", two("MDEF", "MDEF2"))}${cell("Hit", d.HIT ?? "-")}${cell("Flee", two("FLEE", "FLEE2"))}${cell("Critical", d.CRIT ?? "-")}</div>
+    ${d["P.ATK"] !== undefined || d.RES !== undefined ? `<div class="eq-st">${["P.ATK", "S.MATK", "RES", "MRES", "H.PLUS", "C.RATE"].map((k) => cell(k, d[k] ?? "-")).join("")}</div>` : ""}`;
+}
+function renderEquip(chars) {
+  const E = DATA.equip || {};
+  const names = chars.filter((c) => E[c]).concat(Object.keys(E).filter((c) => !chars.includes(c) && !(SETTINGS.hiddenChars || []).includes(c)));
+  if (!names.length) {
+    $("#view").innerHTML = `<div class="panel empty">まだ装備の記録がありません。<br>Fox_MD_Tracker を起動したままキャラにログインすると、装備とステータスがここに出ます。</div>`;
+    return;
+  }
+  if (!E[EQ_CHAR]) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
+  const e = E[EQ_CHAR], G = gearSets();
+  let h = `<div class="opts"><label>キャラ <select id="eqc">${names.map((c) => `<option ${c === EQ_CHAR ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div>`;
+  // いまの装備
+  const cur = e.cur && e.sets[e.cur];
+  h += `<h2>いまの装備</h2><div class="panel eq-box">`
+    + (cur ? `<div class="eq-h"><span class="tag">着用中</span> <b>${esc(cur.name || cur.auto)}</b></div>`
+      : `<div class="eq-h muted">まだ装備セットになっていません（あいている場所: ${esc((e.missing || []).join("・") || "-")}）</div>`)
+    + statusHtmlEq(e.status) + itemsTable(e.now || []) + `</div>`;
+  // 装備セット
+  const sets = Object.entries(e.sets || {}).sort((a, b) => (b[1].last || 0) - (a[1].last || 0));
+  h += `<h2>装備セット（${sets.length}）</h2>`;
+  if (!sets.length) h += `<div class="panel empty">まだありません。全部の場所に装備をつけると、その組み合わせが装備セットとして記録されます。</div>`;
+  for (const [sid, s] of sets) {
+    const dm = (DATA.dmg_sets || {})[sid], open = EQ_OPEN[sid];
+    h += `<div class="panel eq-box"><div class="eq-h">
+        ${sid === e.cur ? `<span class="tag">着用中</span>` : ""}${G[sid] ? `<span class="tag">${G[sid].letter}</span>` : ""}
+        <input class="eqname" data-sid="${esc(sid)}" value="${esc(s.name || "")}" placeholder="${esc(s.auto)}">
+        <span class="muted">${s.worn || 0}回着た・最後 ${s.last ? when(s.last) : "-"}${dm ? `・被ダメ ${fmtN(dm.n)}回` : ""}</span>
+        <span class="eq-btns">${dm ? `<button class="ghost" data-dmg="${esc(sid)}">被ダメを見る</button>` : ""}
+        <button class="ghost" data-open="${esc(sid)}">${open ? "とじる" : "中身"}</button>
+        <button class="ghost" data-del="${esc(sid)}">消す</button></span></div>
+      ${dm && dm.p ? `<div class="eq-sub">${eleTag(dm.p.armor)}鎧　耐性 ${Object.entries(dm.p.res || {}).map(([k, v]) => `${eleTag(k)}${v}%`).join(" ") || "なし"}</div>` : ""}
+      ${open ? statusHtmlEq(s.status) + itemsTable(s.items || []) : ""}</div>`;
+  }
+  h += `<p class="hint">兜・鎧・武器・盾・肩・靴・アクセサリー2つと、シャドウ装備6か所が全部うまったときの装備を「装備セット」として、キャラごとに覚えます（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら同じセットです。Lv・ステータスは、そのセットを最後に着ていたときのもの。名前は自由に付けられます（空なら「武器 / 鎧」）。被ダメタブの「装備」でセットごとの被ダメを見られます。</p>`;
+  $("#view").innerHTML = h;
+  $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
+  const post = (body) => fetch("/api/equipset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char: EQ_CHAR, ...body }) });
+  $("#view").querySelectorAll("input.eqname").forEach((el) => {
+    el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
+    el.onchange = async () => { await post({ sid: el.dataset.sid, name: el.value }); load(); };
+  });
+  $("#view").querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { EQ_OPEN[b.dataset.open] = !EQ_OPEN[b.dataset.open]; render(); });
+  $("#view").querySelectorAll("[data-dmg]").forEach((b) => b.onclick = () => { DMG_CHAR = EQ_CHAR; DMG_GEAR = b.dataset.dmg; DMG_MD = ""; TAB = "dmg"; store.set("md_tab", TAB); render(); });
+  $("#view").querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
+    if (b.dataset.ok !== "1") { b.dataset.ok = "1"; b.textContent = "本当に消す？"; return; }
+    await post({ sid: b.dataset.del, delete: 1 }); load();
+  });
+}
 const fmtN = (n) => Number(n || 0).toLocaleString("ja-JP");
 function dmgMerge(chars, gear) {      // {MD: {"相手|技": [回数, 合計, 最大, 最後, ヒット, キャラ集合, 近接の合計, 遠距離の合計]}}
   const out = {};
@@ -838,7 +929,7 @@ function renderDmg(chars, now) {
   if (DMG_MD && !merged[DMG_MD]) DMG_MD = "";
   let h = `<div class="opts"><label>キャラ <select id="dmc"><option value="">すべて</option>${withDmg.map((c) => `<option ${c === DMG_CHAR ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
-    ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
+    ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(G[id].name ? G[id].name + "（" + gearText(G[id].p) + "）" : gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(DMG_CHAR) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
@@ -852,7 +943,7 @@ function renderDmg(chars, now) {
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || r.gear === DMG_GEAR)).slice(-60).reverse();
   if (usedGear.size) {
     h += `<h2>装備セット</h2><div class="panel list">${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) =>
-      `<div class="row"><span class="tag">${G[id].letter}</span><span class="nm">${eleTag(G[id].p.armor)}鎧　耐性 ${Object.entries(G[id].p.res || {}).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") || "なし"}　DEF ${G[id].p.def.join("+")}　MDEF ${G[id].p.mdef.join("+")}</span><span class="muted">${fmtN(G[id].n)}回 ・ 最後 ${when(G[id].last)}</span></div>`).join("")}</div>
+      `<div class="row"><span class="tag">${G[id].letter}</span><span class="nm">${G[id].name ? `<b>${esc(G[id].name)}</b>　` : ""}${eleTag(G[id].p.armor)}鎧　耐性 ${Object.entries(G[id].p.res || {}).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") || "なし"}　DEF ${G[id].p.def.join("+")}　MDEF ${G[id].p.mdef.join("+")}</span><span class="muted">${fmtN(G[id].n)}回 ・ 最後 ${when(G[id].last)}</span></div>`).join("")}</div>
       <p class="hint">攻撃を受けたときの装備です。上の「装備」で選ぶと、その装備のときの被ダメだけを見られます（装備を比べるとき用）。DEF・MDEFは通信の値。鎧の属性と耐性は、着ている装備・カード・エンチャント・ランダムオプションから出した目安です（セット効果・精錬などの条件つきの効果、スキルや薬・属性付与などの一時的な効果は入りません）。</p>`;
   }
   if (rec.length) {

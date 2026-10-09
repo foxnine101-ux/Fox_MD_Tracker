@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.8.0"
+VERSION = "2.9.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -319,6 +319,8 @@ def start_live_server(core, lock, cfg):
                         data["dmg_skills"] = DMG.seen_list()
                         data["dmg_kinds"] = DMG.kinds()
                         data["dmg_sets"] = DMG.sets
+                    if CHARS is not None:
+                        data["equip"] = CHARS.equip_view()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path == "/api/update":
@@ -350,6 +352,21 @@ def start_live_server(core, lock, cfg):
                 else:
                     st = UPD.check()
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/equipset" and self._local_only():
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 10000)).decode("utf-8"))
+                    if CHARS is None:
+                        raise ValueError
+                    with lock:
+                        if b.get("delete"):
+                            CHARS.delete_set(str(b["char"]), str(b["sid"]))
+                        else:
+                            CHARS.rename_set(str(b["char"]), str(b["sid"]), str(b.get("name") or ""))
+                        save_chars()
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
             if self.path.split("?")[0] == "/api/skillname" and self._local_only():
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
@@ -512,6 +529,15 @@ def save_dmg():
             _write_json(DMG_RAW_FILE, DMG.raw_snapshot(), indent=1)
     except Exception as e:
         print("[被ダメ] 保存に失敗:", e)
+
+
+def save_chars():
+    if CHARS is None:
+        return
+    try:
+        _write_json(CHAR_STATE_FILE, CHARS.snapshot())
+    except Exception as e:
+        print("[キャラ] 保存に失敗:", e)
 
 
 def load_skill_fix():
@@ -885,6 +911,7 @@ def main():
                     with lock:
                         save_state(core)
                         save_dmg()
+                        save_chars()
                     return
                 TRAY.open_main = lambda: open_browser()
                 if not args.hidden:
@@ -901,6 +928,7 @@ def main():
             with lock:
                 save_state(core)
                 save_dmg()
+                save_chars()
             return
     print("(このウィンドウは最小化でOK。閉じると止まります)")
     if local_only:
@@ -953,13 +981,7 @@ def run_loop(core, lock, cfg, stop):
                 dirty_since = dirty_since or time.time()
             if CHARS is not None and CHARS.changed:
                 CHARS.changed = False
-                try:
-                    tmp = CHAR_STATE_FILE + ".tmp"
-                    with open(tmp, "w", encoding="utf-8") as f:
-                        json.dump(CHARS.snapshot(), f, ensure_ascii=False)
-                    os.replace(tmp, CHAR_STATE_FILE)
-                except Exception as e:
-                    print("[キャラ] 保存に失敗:", e)
+                save_chars()
         # 変化があったら少しまとめてから送る(ログイン直後の連続更新を1回に)
         if dirty_since and time.time() - dirty_since > 8 and time.time() - last_up > 15:
             with lock:
