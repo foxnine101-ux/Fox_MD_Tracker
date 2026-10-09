@@ -42,8 +42,10 @@ _HALF.update({k: _HALF[v] + "ﾟ" for k, v in zip("パピプペポ", "ハヒフ�
 
 
 def short_item(name, refine=0):
-    """「+10 ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。"""
-    head = "".join(_HALF.get(c, c) for c in (name or "")[:3])
+    """「+10 ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。漢字で始まる名前は頭2文字(「星座」)。"""
+    name = name or ""
+    n = 2 if name and ("\u4e00" <= name[0] <= "\u9fff" or "\u3400" <= name[0] <= "\u4dbf") else 3
+    head = "".join(_HALF.get(c, c) for c in name[:n])
     return ("+{} ".format(refine) if refine else "") + head
 
 
