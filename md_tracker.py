@@ -23,12 +23,13 @@ sys.path.insert(0, HERE)
 import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと共通)
 import md_core
 import quest_names
+import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
 try:
     import char_core          # キャラのステ・装備を拾う(無くても動く)
 except Exception:
     char_core = None
 
-VERSION = "2.10.1"
+VERSION = "2.11.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -145,6 +146,27 @@ def save_state(core):
     save_accounts(core)
 
 
+def load_servers():
+    """見たことのあるサーバーと、表示の設定の「記録しないサーバー」を読む。"""
+    try:
+        with open(SERVERS_FILE, "r", encoding="utf-8") as f:
+            SERVERS.restore(json.load(f))
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(VIEW_SETTINGS_FILE, "r", encoding="utf-8") as f:
+            SERVERS.set_ignore(json.load(f).get("ignoreServers"))
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def save_servers():
+    try:
+        _write_json(SERVERS_FILE, SERVERS.snapshot(), indent=1)
+    except Exception as e:
+        print("[サーバー] 保存できませんでした:", e)
+
+
 ACCOUNTS_FILE = os.path.join(HERE, "accounts.json")
 
 
@@ -238,6 +260,7 @@ def build_payload(core, history=100):
 #  (この PC の中だけ。ネットには出ない・Netlifyのクレジットも使わない)
 # ---------------------------------------------------------------
 LIVE_PORT = 8788
+SERVERS_FILE = os.path.join(HERE, "サーバー.json")   # 見たことのあるサーバー(キャラ選択サーバーの IP)と、そこで遊んだキャラ
 VIEW_SETTINGS_FILE = os.path.join(HERE, "表示の設定.json")   # ローカル表示の設定(MDの分類・キャラの並び など)
 
 
@@ -320,6 +343,7 @@ def start_live_server(core, lock, cfg):
                         data["dmg_kinds"] = DMG.kinds()
                         data["dmg_sets"] = DMG.sets
                         data["dmg_mobs"] = DMG.mob_view()   # 相手のモンスターの種族・サイズ・属性など
+                    data["servers"] = SERVERS.view()          # 見たことのあるサーバー(設定の「記録しない」用)
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
@@ -397,6 +421,8 @@ def start_live_server(core, lock, cfg):
                 with open(tmp, "w", encoding="utf-8") as f:
                     json.dump(s, f, ensure_ascii=False, indent=1)
                 os.replace(tmp, VIEW_SETTINGS_FILE)
+                with lock:
+                    SERVERS.set_ignore(s.get("ignoreServers"))
             except Exception:
                 return self._send(400, "bad data", "text/plain")
             return self._send(200, '{"ok":true}', "application/json")
@@ -485,6 +511,10 @@ class _Scanner(gp.StreamScanner):
         self.core, self.key, self.lock = core, key, lock
 
     def _handle(self, pkt):
+        with self.lock:
+            SERVERS.packet(self.key, pkt)            # マップへの行き先(どのサーバーか引き継ぐ用)は必ず読む
+            if SERVERS.ignored(self.key):
+                return                               # 記録しないサーバー(露店用など)
         if len(pkt) >= 2:
             op = pkt[0] | (pkt[1] << 8)
             if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB):   # 被ダメ関係も数える
@@ -507,10 +537,14 @@ class _Scanner(gp.StreamScanner):
                     CHARS.feed(self.key, pkt)
                 except Exception:
                     pass
+            c = self.core.conn.get(self.key)
+            if c and c.get("name"):
+                SERVERS.note_char(self.key, c["name"])   # このサーバーで遊んだキャラ(設定で見分ける用)
 
 
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 CHARS = None   # char_core.CharCore (あれば)
+SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
 
 
@@ -610,7 +644,8 @@ class Sniffer(object):
         aid, rest = split_account_prefix(data, gp.load_lengths())
         if aid is not None:
             with self.lock:
-                self.core.account(aid, self._cur_key)
+                if not SERVERS.ignored(self._cur_key):
+                    self.core.account(aid, self._cur_key)
             return rest
         return data
 
@@ -633,7 +668,9 @@ class Sniffer(object):
             sc = self.scanners.get(key)
             if sc is None:
                 with self.lock:
-                    self.core._c(key)          # 新しい接続を覚える(キャラ選択サーバーなら、いまのキャラをリセット)
+                    SERVERS.new_conn(key, is_char=self.core.is_char_conn(key))
+                    if not SERVERS.ignored(key):
+                        self.core._c(key)      # 新しい接続を覚える(キャラ選択サーバーなら、いまのキャラをリセット)
                 sc = _Scanner(self.core, key, self.lock)
                 self.scanners[key] = sc
                 self._cur_key = key
@@ -646,7 +683,8 @@ class Sniffer(object):
                     return
             sc.feed_segment(tcp.seq, data)
             with self.lock:
-                self.core.raw(key, data)
+                if not SERVERS.ignored(key):
+                    self.core.raw(key, data)
         except Exception as e:
             print("[通信] 読み取りエラー:", e)
 
@@ -728,6 +766,7 @@ def main():
             print("イベントクエストを読めませんでした:", e)
     load_state(core)
     load_accounts(core)
+    load_servers()
     apply_nyar_fix(core)
     if char_core is not None:
         CHARS = char_core.CharCore(md=core, log=print)
@@ -984,6 +1023,9 @@ def run_loop(core, lock, cfg, stop):
             if CHARS is not None and CHARS.changed:
                 CHARS.changed = False
                 save_chars()
+            if SERVERS.changed:
+                SERVERS.changed = False
+                save_servers()
         # 変化があったら少しまとめてから送る(ログイン直後の連続更新を1回に)
         if dirty_since and time.time() - dirty_since > 8 and time.time() - last_up > 15:
             with lock:

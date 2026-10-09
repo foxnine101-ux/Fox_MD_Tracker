@@ -1287,7 +1287,17 @@ function renderSettings(groups) {
       <label class="muted"><input type="checkbox" data-hide="${esc(c)}" ${hidden.has(c) ? "checked" : ""}> 隠す</label>
       <button class="ghost" data-del="${esc(c)}">記録を消す</button></div>`;
   });
-  h += `</div><h2>耐性シート</h2><div class="panel list"><div class="row"><span class="nm">GoogleスプレッドシートのURL（空欄 = 最初に作った「MD耐性一覧」）</span>
+  h += `</div>`;
+  // サーバー(この PC で見ているときだけ)。露店用など、記録しないサーバーを選べる
+  const SV = DATA.servers || [];
+  if (typeof LOCAL !== "undefined" && LOCAL && SV.length) {
+    const ign = new Set(SETTINGS.ignoreServers || []);
+    h += `<h2>サーバー</h2><div class="panel list">${SV.map((v, i) => `<div class="row"><span class="nm"><b>サーバー${i + 1}</b> <span class="muted">${esc(v.ip)}</span><br>
+      <span class="muted">${v.chars.length ? "遊んだキャラ: " + esc(v.chars.join("、")) : "キャラはまだわかりません"} ・ 最後 ${v.last ? when(v.last) : "-"}</span></span>
+      <label class="muted"><input type="checkbox" data-srv="${esc(v.ip)}" ${ign.has(v.ip) ? "checked" : ""}> 記録しない</label></div>`).join("")}</div>
+      <p class="hint">キャラ選択のときにつないだサーバーごとに分けています。露店用のサーバーなど「記録しない」にしたサーバーは、そこで遊んでいる間の通信を読み飛ばします（MDのクールタイム・被ダメ・装備などに入りません）。すでに入った記録は消えないので、いらなければ上のキャラの「記録を消す」で消してください。</p>`;
+  }
+  h += `<h2>耐性シート</h2><div class="panel list"><div class="row"><span class="nm">GoogleスプレッドシートのURL（空欄 = 最初に作った「MD耐性一覧」）</span>
     <input class="lbl" id="rzsheet" style="flex:1;min-width:240px" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(SETTINGS.resistSheet || "")}"></div></div>`;
   if (typeof LOCAL !== "undefined" && LOCAL) {
     const u = UPDATE || {};
@@ -1332,6 +1342,11 @@ function renderSettings(groups) {
   document.querySelectorAll("[data-sort]").forEach((el) => el.onclick = () => saveCharOrder(all.slice().sort(SORTS[el.dataset.sort])));
   document.querySelectorAll("[data-up]").forEach((el) => el.onclick = () => move(+el.dataset.up, -1));
   document.querySelectorAll("[data-down]").forEach((el) => el.onclick = () => move(+el.dataset.down, 1));
+  document.querySelectorAll("[data-srv]").forEach((el) => el.onchange = () => {
+    const s = new Set(SETTINGS.ignoreServers || []);
+    el.checked ? s.add(el.dataset.srv) : s.delete(el.dataset.srv);
+    SETTINGS.ignoreServers = [...s]; saveSettings();
+  });
   document.querySelectorAll("[data-hide]").forEach((el) => el.onchange = () => {
     const s = new Set(SETTINGS.hiddenChars || []);
     el.checked ? s.add(el.dataset.hide) : s.delete(el.dataset.hide);
