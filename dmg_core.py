@@ -26,6 +26,7 @@ MDごと・キャラごとに「相手|技」でまとめて、回数・最大�
 import json
 import struct
 import time
+from collections import deque
 
 OP_ACT = 0x08C8
 OP_SKILL = 0x01DE
@@ -72,6 +73,8 @@ OPS = ({OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE, OP_OPT, OP_CAST} 
        | set(OP_ICON) | set(OP_USE))
 POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
+NO_NAME = "名前の無い相手"   # 名前が「#」から始まるもの(ゲームの画面では名前が出ない)
+RING_MAX = 400          # 名前がわからない相手を調べる用に、接続ごとに覚えておく最近の通信の数
 
 RECENT_MAX = 300
 MOBS_MAX = 20000
@@ -89,6 +92,13 @@ def good_name(s):
         if o < 0x20 or 0x7F <= o <= 0x9F or 0xE000 <= o <= 0xF8FF or o == 0xFFFD:
             return False
     return True
+
+
+def shown_name(s):
+    """ゲームの画面に出る名前。「#」より後ろは画面に出ない(「デッドソウル#166_98」→「デッドソウル」)。"""
+    if s and "#" in s:
+        return s.split("#", 1)[0].strip() or NO_NAME
+    return s
 
 
 def _cstr(b):
@@ -185,6 +195,7 @@ class DmgCore(object):
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
         self.names = {}                     # 相手のID -> 名前
+        self.ring = {}                      # 接続 -> 最近の通信 [(op, 先頭)](名前がわからない相手を調べる用)
         self.stats = {}                     # キャラ -> MD -> "相手|技" -> [回数, 合計, 最大, 最後, ヒット数合計]
         self.recent = []                    # 最近の被ダメ
         self.samples = {}
@@ -212,6 +223,7 @@ class DmgCore(object):
                         if who.startswith("ID") and who[2:].isdigit():
                             self.id_used.add(int(who[2:]))
             self._fix_bad_names()
+            self._fix_hash_names()
 
     def _fix_bad_names(self):
         """前の版で化けたまま記録した相手の名前を「名前不明」にまとめる。"""
@@ -235,6 +247,24 @@ class DmgCore(object):
         for v in self.seen.values():
             if v.get("src") and not good_name(v["src"]):
                 v["src"] = UNKNOWN_NAME
+
+    def _fix_hash_names(self):
+        """前の版で「#」の後ろまで付けて記録した相手を、画面に出る名前にまとめる(1匹ずつ分かれていたのを1行に)。"""
+        olds = set()
+        for per_char in self.stats.values():
+            for d in per_char.values():
+                olds.update(k.split("|")[0] for k in d if "#" in k.split("|")[0])
+        for per_char in self.acts.values():
+            for d in per_char.values():
+                olds.update(k.split("|")[0] for k in d if "#" in k.split("|")[0])
+        for per_char in self.ails.values():
+            for d in per_char.values():
+                olds.update(k.split("|")[1] for k in d if "#" in k.split("|")[1])
+        for r in self.recent:
+            if "#" in (r.get("src") or ""):
+                olds.add(r["src"])
+        for old in olds:
+            self._rename_who(old, shown_name(old))
 
     def raw_snapshot(self):
         return {"note": "被ダメの通信の確認用。形が合っているか確かめるときに使います(自動で上書きされます)",
@@ -390,6 +420,11 @@ class DmgCore(object):
         if len(pkt) < 2:
             return
         op = pkt[0] | (pkt[1] << 8)
+        if op not in (OP_ACT, OP_SKILL):
+            r = self.ring.get(key)
+            if r is None:
+                r = self.ring[key] = deque(maxlen=RING_MAX)
+            r.append((op, bytes(pkt[:200])))
         if op not in OPS:
             return
         try:
@@ -606,6 +641,20 @@ class DmgCore(object):
         except struct.error:
             pass
 
+    def _raw_id(self, key, src):
+        """名前がわからない相手のIDが入っている最近の通信を残す(どの通信で名前が来るのか調べる用)。"""
+        b = struct.pack("<I", src)
+        hits = []
+        for op, pkt in reversed(self.ring.get(key) or ()):
+            at = pkt.find(b, 2)
+            if at >= 0:
+                hits.append({"op": "{:04X}".format(op), "at": at, "len": len(pkt), "hex": pkt.hex()})
+                if len(hits) >= 6:
+                    break
+        lst = self.raw.setdefault("id_src", [])
+        lst.append({"t": int(time.time()), "id": src, "where": self._where(key), "found": hits})
+        del lst[:-60]
+
     def _name(self, aid, raw24, op, pkt):
         name = _cstr(raw24)
         tag = "name_ok" if name else "name_bad"      # 名前の通信も残す(読む場所が合っているか確かめる用)
@@ -614,6 +663,7 @@ class DmgCore(object):
                     "len": len(pkt), "hex": pkt[:200].hex()})
         del lst[:-(RAW_MAX if name else RAW_UNKNOWN_MAX)]
         if name:
+            name = shown_name(name)
             if len(self.names) > MOBS_MAX:
                 self.names.clear()
             self.names[aid] = name
@@ -656,6 +706,8 @@ class DmgCore(object):
         who = self.names.get(src)
         if not who:
             who = "ID{}".format(src)
+            if src not in self.id_used:
+                self._raw_id(key, src)
             self.id_used.add(src)
         skill = self.skill_name(skid)
         where = self._where(key)
