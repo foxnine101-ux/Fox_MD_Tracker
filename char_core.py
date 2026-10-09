@@ -32,6 +32,7 @@ RANDOPT_RES = {25: "無", 26: "水", 27: "地", 28: "火", 29: "風", 30: "毒",
 RANDOPT_RES_ALL_BUT_NEUTRAL = 35
 RANDOPT_RES_ALL = 193
 RANDOPT_BODY = {76 + i: e for i, e in enumerate(ELES)}   # 鎧の属性になるランダムオプション(BODY_ATTR_*)
+RANDOPT_WEAPON = {175 + i: e for i, e in enumerate(ELES)}  # 武器の属性になるランダムオプション(WEAPON_ATTR_*)
 
 
 # 全角カタカナ → 半角(装備セットの短い名前用)
@@ -42,11 +43,20 @@ _HALF.update({k: _HALF[v] + "ﾟ" for k, v in zip("パピプペポ", "ハヒフ�
 
 
 def short_item(name, refine=0):
-    """「+10 ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。漢字で始まる名前は頭2文字(「星座」)。"""
+    """「+10ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。漢字で始まる名前は頭2文字(「星座」)。"""
     name = name or ""
     n = 2 if name and ("\u4e00" <= name[0] <= "\u9fff" or "\u3400" <= name[0] <= "\u4dbf") else 3
     head = "".join(_HALF.get(c, c) for c in name[:n])
-    return ("+{} ".format(refine) if refine else "") + head
+    return ("+{}".format(refine) if refine else "") + head
+
+
+def top_res(res):
+    """いちばん高い耐性「聖念50」(同じ値は全部)。無ければ ""。"""
+    res = {e: v for e, v in (res or {}).items() if v > 0}
+    if not res:
+        return ""
+    top = max(res.values())
+    return "".join(e for e in ELES if res.get(e) == top) + str(top)
 
 
 def job_name(job):
@@ -176,27 +186,13 @@ class CharCore(object):
         if not ch:
             return None
         armor, res = "無", {}
-
-        def add(e, v):
-            if v:
-                res[e] = res.get(e, 0) + v
         for it in ch.get("equips") or []:
-            ids = [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]
-            for iid in ids:
-                g = self.gear_info.get(str(iid)) or {}
-                if g.get("de"):
-                    armor = g["de"]
-                for e, v in (g.get("re") or {}).items():
-                    add(e, v)
-            for o in it.get("options") or []:
-                oi = o.get("index")
-                if oi in RANDOPT_RES:
-                    add(RANDOPT_RES[oi], o.get("value", 0))
-                elif oi in (RANDOPT_RES_ALL_BUT_NEUTRAL, RANDOPT_RES_ALL):
-                    for e in (ELES[1:] if oi == RANDOPT_RES_ALL_BUT_NEUTRAL else ELES):
-                        add(e, o.get("value", 0))
-                elif oi in RANDOPT_BODY:
-                    armor = RANDOPT_BODY[oi]
+            if it.get("wear", 0) & COSTUME_BITS and not it.get("wear", 0) & ~COSTUME_BITS:
+                continue                              # 衣装は耐性に関係ない
+            _, de, r = self.item_attrs(it)
+            armor = de or armor
+            for e, v in r.items():
+                res[e] = res.get(e, 0) + v
         d = ch.get("derived") or {}
         sid = ch.get("cur_set") or ""
         return {"armor": armor, "res": {e: res[e] for e in ELES if res.get(e)},
@@ -257,18 +253,44 @@ class CharCore(object):
         s["status"] = self._status_view(name, ch)          # このセットを着ているときの Lv・ステータス(最新)
         ch["cur_set"] = sid
 
-    @staticmethod
-    def _auto_names(sets):
-        """装備セットの自動の名前「+10 ｾﾚｽ / +10 ﾖﾙｽ / +7 ｽﾃﾗ」(武器 / 鎧 / 肩)。同じになったら (2) など。"""
+    def item_attrs(self, it):
+        """装備1つ(カード・エンチャ・ランダムOP込み)の 武器の属性・鎧の属性・属性耐性。"""
+        ae, de, res = "", "", {}
+        ids = [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]
+        for iid in ids:
+            g = self.gear_info.get(str(iid)) or {}
+            ae = g.get("ae") or ae
+            de = g.get("de") or de
+            for e, v in (g.get("re") or {}).items():
+                res[e] = res.get(e, 0) + v
+        for o in it.get("options") or []:
+            oi, v = o.get("index"), o.get("value", 0)
+            if oi in RANDOPT_RES:
+                res[RANDOPT_RES[oi]] = res.get(RANDOPT_RES[oi], 0) + v
+            elif oi in (RANDOPT_RES_ALL_BUT_NEUTRAL, RANDOPT_RES_ALL):
+                for e in (ELES[1:] if oi == RANDOPT_RES_ALL_BUT_NEUTRAL else ELES):
+                    res[e] = res.get(e, 0) + v
+            elif oi in RANDOPT_BODY:
+                de = RANDOPT_BODY[oi]
+            elif oi in RANDOPT_WEAPON:
+                ae = RANDOPT_WEAPON[oi]
+        return ae, de, res
+
+    def _auto_names(self, sets):
+        """装備セットの自動の名前「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」
+        (武器+武器の属性 / 鎧+鎧の属性 / 肩+いちばん高い耐性)。同じになったら (2) など。"""
         used = {}
         for sid in sorted(sets, key=lambda k: sets[k].get("first", 0)):
             items = sets[sid].get("items") or []
             parts = []
             for bit in (2, 16, 4):
                 i = next((i for i in items if i.get("wear", 0) & bit), None)
-                if i:
-                    parts.append(short_item(i.get("name"), i.get("refine", 0)))
-            base = " / ".join(parts) or "装備セット"
+                if not i:
+                    continue
+                ae, de, res = self.item_attrs(i)
+                tag = ae if bit == 2 else (de if de and de != "無" else top_res(res)) if bit == 16 else top_res(res)
+                parts.append(short_item(i.get("name"), i.get("refine", 0)) + tag)
+            base = "/".join(parts) or "装備セット"
             used[base] = used.get(base, 0) + 1
             sets[sid]["auto"] = base if used[base] == 1 else "{} ({})".format(base, used[base])
 
