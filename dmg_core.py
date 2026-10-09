@@ -146,6 +146,15 @@ def load_skill_info(path):
         return {}
 
 
+def load_mob_info(path):
+    """モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json = ラトリオのデータから)。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
 def load_skill_names(path):
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -155,12 +164,13 @@ def load_skill_names(path):
 
 
 class DmgCore(object):
-    def __init__(self, md, skill_names=None, log=None, fix=None, info=None, efix=None):
+    def __init__(self, md, skill_names=None, log=None, fix=None, info=None, efix=None, mobs=None):
         self.md = md                        # md_core.MDCore(キャラ名・いる場所・自分のIDを借りる)
         self.skills = skill_names or {}     # ラトリオのデータ(番号 -> 名前)
         self.fix = dict(fix or {})          # 手で付けた名前(番号 -> 名前)。こっちが優先
         self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
         self.efix = dict(efix or {})        # 手で直した種類・属性(番号 -> {"ele":, "kind":})。こっちが優先
+        self.mobs = mobs or {}              # モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json)
         self.id_used = set()                # 名前がわからず「ID○○」で記録した相手(あとで名前がわかったら付けかえる)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
@@ -700,6 +710,14 @@ class DmgCore(object):
     def for_char_status(self, name):
         """キャラの状態異常と、ダメージの無い技(MDごと)。"""
         return self.ails.get(name) or {}, self.acts.get(name) or {}
+
+    def mob_view(self):
+        """記録にある相手のうち、モンスターのデータがあるものだけ {名前: {lv, hp, race, size, ele, boss}}。"""
+        who = {r.get("src") for r in self.recent}
+        for per_char in self.stats.values():
+            for d in per_char.values():
+                who.update(k.split("|")[0] for k in d)
+        return {w: self.mobs[w] for w in who if w in self.mobs}
 
     def for_char(self, name, top=40):
         """キャラの被ダメまとめ(MDごと、最大ダメージ順に top 件)。"""

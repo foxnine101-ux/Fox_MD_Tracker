@@ -632,6 +632,7 @@ table.eq-t td{text-align:left;padding:5px 6px;border-bottom:1px solid var(--line
 .ek-水{color:#1c7ed6;border-color:#1c7ed6}.ek-火{color:#e03131;border-color:#e03131}.ek-風{color:#2f9e44;border-color:#2f9e44}.ek-地{color:#a0662b;border-color:#a0662b}
 .ek-聖{color:#c99a06;border-color:#c99a06}.ek-闇{color:#7048e8;border-color:#7048e8}.ek-念{color:#9c36b5;border-color:#9c36b5}.ek-毒{color:#5c940d;border-color:#5c940d}
 .ek-不死{color:#495057;border-color:#495057}.ek-無{color:var(--muted)}
+.mob{margin-left:6px;white-space:nowrap;font-size:11px;color:var(--muted)}.mob .ek{font-size:11px;min-width:0;padding:0 3px}.mob .boss{color:#e03131;font-weight:700}
 .kd{font-size:12px;color:var(--muted)}.kd-魔法{color:#7048e8}.kd-固定{color:#c92a2a}
 .dm-st{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:12px;margin:0 0 6px;align-items:center}
 .ail{border:1px solid var(--line);border-radius:999px;padding:1px 8px;background:var(--panel)}
@@ -855,6 +856,15 @@ function dmgMerge(chars, gear) {      // {MD: {"相手|技": [回数, 合計, �
 // 技の種類・属性(ツールが技の番号から出したもの)。通信には入っていないので、データにない技は空
 const KIND_TIP = { "物理": "物理（近接か遠距離かは、当たったときの距離しだい。3セルより遠いと遠距離）", "物理・近接": "物理・近接", "物理・遠距離": "物理・遠距離", "魔法": "魔法", "固定": "固定ダメージ系（物理・魔法の軽減が効かないもの）" };
 const kindOf = (skill) => (DATA.dmg_kinds || {})[skill] || ["", ""];
+// 相手のモンスターの種族・サイズ・属性・ボス(ラトリオのデータから。同じ名前で強さ違いは「/」でつなぐ)
+const mobShort = (v) => { const a = String(v).split("/"); return a.length > 2 ? a.slice(0, 2).join("/") + "…" : a.join("/"); };
+function mobTag(who) {
+  const m = (DATA.dmg_mobs || {})[who];
+  if (!m) return "";
+  const ele = String(m.ele || "").split("/").slice(0, 2).map((x) => { const b = x.replace(/\d+$/, ""); return `<span class="ek ek-${esc(b)}">${esc(x)}</span>`; }).join("");
+  const tip = `Lv ${m.lv}　HP ${String(m.hp).split("/").map((h) => fmtN(+h)).join(" / ")}\n種族 ${m.race}　サイズ ${m.size}　属性 ${m.ele}${String(m.boss) === "1" ? "　ボス" : String(m.boss).includes("1") ? "　ボスのものもある" : ""}\n（ラトリオのデータ。同じ名前で強さが違うものは / で並べています）`;
+  return `<span class="mob" title="${esc(tip)}">${esc(mobShort(m.race))}・${esc(mobShort(m.size))}型 ${ele}${String(m.boss) === "1" ? ' <span class="boss">ボス</span>' : String(m.boss).includes("1") ? ' <span class="boss">ボス?</span>' : ""}</span>`;
+}
 const eleTag = (e) => e ? e.split("/").map((x) => `<span class="ek ek-${esc(x)}">${esc(x)}</span>`).join("") : "";
 const kindTag = (k, tip) => k ? `<span class="kd kd-${esc(k.split("・")[0])}" title="${esc(tip ? k + "（" + tip + "）" : KIND_TIP[k] || k)}">${esc(k)}${tip ? "<sup>*</sup>" : ""}</span>` : "";
 // 行の種類: 物理は、記録した近接/遠距離の合計([6][7])があればそれで分ける
@@ -888,7 +898,7 @@ function dmgTable(W, showChars, limit) {
   for (const [k, v] of rows) {
     const [who, skill] = k.split("|");
     const [kd, el, tip] = rowKind(skill, v);
-    h += `<tr><td class="l">${esc(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
+    h += `<tr><td class="l">${esc(who)}${mobTag(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
   }
   return h + `</tbody></table>`;
 }
@@ -948,10 +958,10 @@ function renderDmg(chars, now) {
   }
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
-  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
+  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
   $("#view").innerHTML = h + skillFixHtml();
   bindDmg();
 }

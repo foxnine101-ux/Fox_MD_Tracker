@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.9.4"
+VERSION = "2.10.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -319,6 +319,7 @@ def start_live_server(core, lock, cfg):
                         data["dmg_skills"] = DMG.seen_list()
                         data["dmg_kinds"] = DMG.kinds()
                         data["dmg_sets"] = DMG.sets
+                        data["dmg_mobs"] = DMG.mob_view()   # 相手のモンスターの種族・サイズ・属性など
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
@@ -742,11 +743,12 @@ def main():
         import dmg_core
         SKFIX = load_skill_fix()
         DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(resource("skill_names.json") or ""), log=print,
-                               fix=SKFIX[0], efix=SKFIX[1], info=dmg_core.load_skill_info(resource("skill_info.json") or ""))
+                               fix=SKFIX[0], efix=SKFIX[1], info=dmg_core.load_skill_info(resource("skill_info.json") or ""),
+                               mobs=dmg_core.load_mob_info(resource("mob_info.json") or ""))
         if os.path.exists(DMG_FILE):
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))
-        print("被ダメの記録: スキル名 {}件 (手直し {}件)".format(len(DMG.skills), len(DMG.fix)))
+        print("被ダメの記録: スキル名 {}件 (手直し {}件) / モンスター {}件".format(len(DMG.skills), len(DMG.fix), len(DMG.mobs)))
         if CHARS is not None:
             DMG.gear = CHARS.gear_profile              # 当たったときの装備(鎧の属性・耐性・DEF・MDEF)も覚える
     except Exception as e:

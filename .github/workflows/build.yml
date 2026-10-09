@@ -50,7 +50,7 @@ jobs:
           python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker --icon icon.ico `
             --add-data "app.html;." `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." `
-            --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "option_names.json;." `
+            --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "option_names.json;." `
             --hidden-import edition `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
             --collect-all webview --hidden-import clr md_tracker.py
@@ -67,7 +67,7 @@ jobs:
           python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker_dev --icon icon.ico `
             --add-data "app.html;." --add-data "live.html;." `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." `
-            --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "option_names.json;." `
+            --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "option_names.json;." `
             --hidden-import edition `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
             --collect-all webview --hidden-import clr md_tracker.py
