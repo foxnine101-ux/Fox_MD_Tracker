@@ -155,11 +155,13 @@ def load_skill_names(path):
 
 
 class DmgCore(object):
-    def __init__(self, md, skill_names=None, log=None, fix=None, info=None):
+    def __init__(self, md, skill_names=None, log=None, fix=None, info=None, efix=None):
         self.md = md                        # md_core.MDCore(キャラ名・いる場所・自分のIDを借りる)
         self.skills = skill_names or {}     # ラトリオのデータ(番号 -> 名前)
         self.fix = dict(fix or {})          # 手で付けた名前(番号 -> 名前)。こっちが優先
         self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
+        self.efix = dict(efix or {})        # 手で直した種類・属性(番号 -> {"ele":, "kind":})。こっちが優先
+        self.id_used = set()                # 名前がわからず「ID○○」で記録した相手(あとで名前がわかったら付けかえる)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
         self.gear = None                    # キャラ名 -> いまの装備のまとめ(char_core.CharCore.gear_profile)
@@ -192,6 +194,13 @@ class DmgCore(object):
             self.gstats = d.get("gstats") or {}
             self.ails = d.get("ails") or {}
             self.acts = d.get("acts") or {}
+            # 「ID○○」のままの相手は、名前がわかったら付けかえられるように覚えておく
+            for per_char in self.stats.values():
+                for dd in per_char.values():
+                    for k in dd:
+                        who = k.split("|")[0]
+                        if who.startswith("ID") and who[2:].isdigit():
+                            self.id_used.add(int(who[2:]))
             self._fix_bad_names()
 
     def _fix_bad_names(self):
@@ -237,6 +246,27 @@ class DmgCore(object):
         return max(abs(ax - mx), abs(ay - my))
 
     def classify(self, skid, lv=0):
+        """技の (種類, 属性)。手で直したものがあればそれ。"""
+        kind, ele = self._classify(skid, lv)
+        fx = self.efix.get(skid) or {}
+        return fx.get("kind") or kind, fx.get("ele") or ele
+
+    def set_attr(self, skid, ele, kind):
+        """技の属性・種類を手で直す(空なら自動に戻す)。"""
+        fx = {k: v for k, v in (("ele", ele), ("kind", kind)) if v}
+        if fx:
+            self.efix[skid] = fx
+        else:
+            self.efix.pop(skid, None)
+        for r in self.recent:
+            if r.get("skid") == skid:
+                k2, e2 = self.classify(skid, r.get("lv") or 0)
+                if not (r.get("est") and k2 == "物理"):
+                    r["kind"] = k2
+                r["ele"] = e2
+        self.changed = True
+
+    def _classify(self, skid, lv=0):
         """技の (種類, 属性)。種類: 魔法/固定/物理・近接/物理・遠距離/物理(距離しだい)/""(不明)"""
         if not skid:
             return "物理", "無"                  # モンスターの通常攻撃
@@ -282,8 +312,10 @@ class DmgCore(object):
         for k, v in self.seen.items():
             sk = int(k)
             kind, ele = self.classify(sk, v.get("lv") or 0)
+            akind, aele = self._classify(sk, v.get("lv") or 0)
             out.append(dict(v, id=sk, name=self.skill_name(sk), base=self.skills.get(sk, ""),
-                            fixed=sk in self.fix, known=self.known(sk), kind=kind, ele=ele))
+                            fixed=sk in self.fix, known=self.known(sk), kind=kind, ele=ele,
+                            akind=akind, aele=aele, efix=self.efix.get(sk) or {}))
         out.sort(key=lambda r: (r["known"], -r.get("last", 0)))
         return out
 
@@ -442,7 +474,10 @@ class DmgCore(object):
             if not self._mine(key, tgt) or src == tgt or self._mine(key, src):
                 return
             self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res}, keep=True)
-            who = self.names.get(src) or "ID{}".format(src)
+            who = self.names.get(src)
+            if not who:
+                who = "ID{}".format(src)
+                self.id_used.add(src)
             skill = self.skill_name(skid)
             self.last_act[key] = (now, who, skill)
             name = self.md.name_for(key)
@@ -484,6 +519,42 @@ class DmgCore(object):
         st = self.ails.setdefault(name, {}).setdefault(self._where(key), {}).setdefault(k, [0, 0])
         st[0] += 1
         st[1] = int(now)
+        self.changed = True
+
+    def _rename_who(self, old, new):
+        """記録の中の相手の名前 old を new に付けかえる(同じ行があればまとめる)。"""
+        def rekey(d, sep_first):
+            for k in [k for k in d if k.split("|")[sep_first] == old]:
+                parts = k.split("|")
+                parts[sep_first] = new
+                nk = "|".join(parts)
+                v = d.pop(k)
+                if nk not in d:
+                    d[nk] = v
+                elif len(v) >= 5:                     # 被ダメの行
+                    _merge(d[nk], v)
+                else:                                 # [回数, 最後] の行
+                    d[nk][0] += v[0]
+                    d[nk][1] = max(d[nk][1], v[1])
+        for per_char in self.stats.values():
+            for d in per_char.values():
+                rekey(d, 0)
+        for per_char in self.gstats.values():
+            for sets in per_char.values():
+                for d in sets.values():
+                    rekey(d, 0)
+        for per_char in self.acts.values():
+            for d in per_char.values():
+                rekey(d, 0)
+        for per_char in self.ails.values():
+            for d in per_char.values():
+                rekey(d, 1)
+        for r in self.recent:
+            if r.get("src") == old:
+                r["src"] = new
+        for v in self.seen.values():
+            if v.get("src") == old:
+                v["src"] = new
         self.changed = True
 
     def _move(self, key, op, pkt):
@@ -536,6 +607,9 @@ class DmgCore(object):
             if len(self.names) > MOBS_MAX:
                 self.names.clear()
             self.names[aid] = name
+            if aid in self.id_used:                  # 「ID○○」で記録していた相手の名前がわかった
+                self.id_used.discard(aid)
+                self._rename_who("ID{}".format(aid), name)
 
     def _spawn(self, op, pkt):
         # 0x09FD〜FF: [op 2][長さ 2][種類 1][ID 4][GID 4] … [最大HP 4][HP 4][ボス 1][体 2][名前(最後まで)]
@@ -569,7 +643,10 @@ class DmgCore(object):
         name = self.md.name_for(key)
         if not name:
             return
-        who = self.names.get(src) or "ID{}".format(src)
+        who = self.names.get(src)
+        if not who:
+            who = "ID{}".format(src)
+            self.id_used.add(src)
         skill = self.skill_name(skid)
         where = self._where(key)
         self.last_act[key] = (time.time(), who, skill)

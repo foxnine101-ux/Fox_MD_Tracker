@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.7.0"
+VERSION = "2.8.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -358,7 +358,11 @@ def start_live_server(core, lock, cfg):
                     if DMG is None or sk <= 0:
                         raise ValueError
                     with lock:
-                        DMG.rename(sk, str(b.get("name") or ""))
+                        if "name" in b:
+                            DMG.rename(sk, str(b.get("name") or ""))
+                        if "ele" in b or "kind" in b:
+                            fx = DMG.efix.get(sk) or {}
+                            DMG.set_attr(sk, str(b.get("ele", fx.get("ele")) or ""), str(b.get("kind", fx.get("kind")) or ""))
                         save_skill_fix()
                         save_dmg()
                 except Exception:
@@ -511,18 +515,32 @@ def save_dmg():
 
 
 def load_skill_fix():
+    """スキル名の手直し.json → (名前, 種類・属性)。中身は {"番号": "名前"} か {"番号": {"name", "ele", "kind"}}"""
+    names, attrs = {}, {}
     try:
         with open(SKILL_FIX_FILE, "r", encoding="utf-8") as f:
-            return {int(k): str(v) for k, v in json.load(f).items() if str(v).strip()}
+            for k, v in json.load(f).items():
+                if isinstance(v, dict):
+                    if str(v.get("name") or "").strip():
+                        names[int(k)] = str(v["name"])
+                    a = {x: v[x] for x in ("ele", "kind") if v.get(x)}
+                    if a:
+                        attrs[int(k)] = a
+                elif str(v).strip():
+                    names[int(k)] = str(v)
     except FileNotFoundError:
-        return {}
+        pass
     except Exception as e:
         print("[被ダメ] スキル名の手直しが読めませんでした:", e)
-        return {}
+    return names, attrs
 
 
 def save_skill_fix():
-    _write_json(SKILL_FIX_FILE, {str(k): v for k, v in sorted(DMG.fix.items())}, indent=1)
+    out = {}
+    for k in sorted(set(DMG.fix) | set(DMG.efix)):
+        a = DMG.efix.get(k) or {}
+        out[str(k)] = dict(a, name=DMG.fix[k]) if a and k in DMG.fix else (a if a else DMG.fix[k])
+    _write_json(SKILL_FIX_FILE, out, indent=1)
 
 
 def split_account_prefix(data, lengths):
@@ -696,8 +714,9 @@ def main():
     global DMG
     try:
         import dmg_core
+        SKFIX = load_skill_fix()
         DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(resource("skill_names.json") or ""), log=print,
-                               fix=load_skill_fix(), info=dmg_core.load_skill_info(resource("skill_info.json") or ""))
+                               fix=SKFIX[0], efix=SKFIX[1], info=dmg_core.load_skill_info(resource("skill_info.json") or ""))
         if os.path.exists(DMG_FILE):
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))

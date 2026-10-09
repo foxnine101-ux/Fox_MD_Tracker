@@ -49,6 +49,11 @@
   tr.drop-above > td { box-shadow: inset 0 3px 0 var(--accent); }
   th.drop-left { box-shadow: inset 3px 0 0 var(--accent); }
   th.drop-right { box-shadow: inset -3px 0 0 var(--accent); }
+  .ctx { position: fixed; z-index: 50; min-width: 200px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 4px; font-size: 14px; }
+  .ctx button { display: block; width: 100%; text-align: left; background: transparent; color: var(--ink); padding: 7px 12px; border-radius: 6px; }
+  .ctx button:hover { background: var(--chip); }
+  .ctx .sep { height: 1px; background: var(--line); margin: 4px 6px; }
+  .ctx .cap { font-size: 11px; color: var(--muted); padding: 4px 12px 2px; }
   .mx-grip { display: block; padding: 0; line-height: 1; font-size: 11px; letter-spacing: -1px; }
   thead th:hover .mx-grip { opacity: 1; }
   tr.drop-below > td { box-shadow: inset 0 -3px 0 var(--accent); }
@@ -296,7 +301,7 @@ const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix")) return;   // 名前を入力中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -321,19 +326,59 @@ function render() {
   renderGrid(groups.filter((G) => G.kind === TAB), chars, now);
 }
 
+// ---------- 右クリックのメニュー ----------
+// items: [{label, act}] / "-"(区切り) / {cap: "見出し"}
+function showCtx(x, y, items) {
+  let m = $("#ctx");
+  if (!m) { document.body.insertAdjacentHTML("beforeend", `<div id="ctx" class="ctx" hidden></div>`); m = $("#ctx"); }
+  m.innerHTML = items.map((it, i) => it === "-" ? `<div class="sep"></div>` : it.cap ? `<div class="cap">${esc(it.cap)}</div>` : `<button data-i="${i}">${esc(it.label)}</button>`).join("");
+  m.hidden = false;
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 4)) + "px";
+  m.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + "px";
+  m.onclick = (e) => { const b = e.target.closest("button[data-i]"); if (!b) return; hideCtx(); items[+b.dataset.i].act(); };
+}
+function hideCtx() { const m = $("#ctx"); if (m) m.hidden = true; }
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx")) hideCtx(); }, true);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtx(); });
+window.addEventListener("scroll", hideCtx, true);
+function setMd(name, patch) {
+  const md = SETTINGS.md = SETTINGS.md || {};
+  const v = { ...(md[name] || {}), ...patch };
+  for (const k of Object.keys(v)) if (v[k] === undefined) delete v[k];
+  md[name] = v; saveSettings(); render();
+}
+const KIND_L = { weekly: "週次", daily: "デイリー", other: "その他" };
+function mdMenu(G, canGo) {
+  const items = [{ cap: G.label }];
+  if (canGo) items.push({ label: "耐性を見る", act: () => goResist(G.name) });
+  items.push({ label: "表示名を変える…", act: () => { const v = prompt(`「${G.name}」の表示名（空にすると元の名前）`, G.label === G.name ? "" : G.label); if (v !== null) setMd(G.name, { label: v.trim() || undefined }); } });
+  items.push("-");
+  for (const k of ["weekly", "daily", "other"]) if (k !== G.kind) items.push({ label: `${KIND_L[k]}に移す`, act: () => setMd(G.name, { kind: k }) });
+  items.push({ label: "このMDを隠す", act: () => setMd(G.name, { kind: "hide" }) });
+  return items;
+}
+function hiddenMenu(hidden) {
+  return [{ cap: "隠したMD（クリックで表示に戻す）" }, ...hidden.map((G) => ({ label: G.label, act: () => setMd(G.name, { kind: undefined }) })),
+    ...(hidden.length > 1 ? ["-", { label: "全部表示に戻す", act: () => { for (const G of hidden) delete (SETTINGS.md[G.name] || {}).kind; saveSettings(); render(); } }] : [])];
+}
+
 function renderGrid(groups, chars, now) {
+  const hidden = buildGroups().filter((G) => G.kind === "hide").sort((a, b) => a.label.localeCompare(b.label, "ja"));
+  const hiddenBtn = hidden.length ? ` <button class="ghost" id="mdhidden">隠したMD（${hidden.length}）</button>` : "";
   groups.sort((a, b) => (a.order - b.order) || a.label.localeCompare(b.label, "ja"));
   if (!chars.length) {
     $("#view").innerHTML = `<div class="panel empty">まだキャラの記録がありません。<br>PCでツールを動かしたままROにログインすると、ここに出ます。</div>`;
     return;
   }
   if (!groups.length) {
-    $("#view").innerHTML = `<div class="panel empty">この分類のMDはまだありません。<br>「設定」で分類を変えられます。</div>`;
+    $("#view").innerHTML = `<div class="panel empty">この分類のMDはまだありません。<br>「設定」で分類を変えられます。${hiddenBtn}</div>`;
+    if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
     return;
   }
   let cols = groups;
   if (ONLY_OK) cols = groups.filter((G) => chars.some((c) => { const e = endOf(c, G); return e !== null && e <= now; }));
-  let h = `<div class="opts"><label><input type="checkbox" id="onlyok" ${ONLY_OK ? "checked" : ""}> 行けるMDがある列だけ</label>
+  let h = `<div class="opts"><label><input type="checkbox" id="onlyok" ${ONLY_OK ? "checked" : ""}> 行けるMDがある列だけ</label>${hiddenBtn}
     <span>● 行ける ／ 数字 = あと何時間でまた行けるか ／ ー = 記録なし</span></div>`;
   h += `<div class="panel tablewrap"><table><thead><tr><th class="char">キャラ</th>`;
   loadResistSheet();
@@ -362,7 +407,7 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが出ます。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
   makeSortable($("#view").querySelector("thead tr"), "th[data-g]", cols.map((G) => G.name),
@@ -410,6 +455,13 @@ function renderGrid(groups, chars, now) {
       setTimeout(() => cells.forEach((x) => x.classList.remove("mx-flash")), 2500);
     }
   }
+  // MD名の右クリック → メニュー
+  $("#view").querySelectorAll("thead th[data-g]").forEach((th) => th.oncontextmenu = (e) => {
+    e.preventDefault();
+    const G = cols.find((x) => x.name === th.dataset.g);
+    if (G) showCtx(e.clientX, e.clientY, mdMenu(G, canGo.get(G.name)));
+  });
+  if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
   $("#onlyok").onchange = (ev) => { ONLY_OK = ev.target.checked; store.set("md_onlyok", ONLY_OK ? "1" : "0"); render(); };
 }
 
@@ -814,11 +866,13 @@ function renderDmg(chars, now) {
 }
 // 受けたスキルの一覧。名前がわからない技(「スキル123」)に名前を付けられる(この PC で見ているときだけ)
 let SK_ALL = false;
+const SK_KINDS = ["物理", "物理・近接", "物理・遠距離", "魔法", "固定"];
+const SK_ELES = ["無", "水", "地", "火", "風", "毒", "聖", "闇", "念", "不死", "属性なし"];
 function skillFixHtml() {
   const list = DATA.dmg_skills;
   if (!list || !list.length || typeof LOCAL === "undefined" || !LOCAL) return "";
   const unk = list.filter((r) => !r.known).length;
-  const rows = SK_ALL ? list : list.filter((r) => !r.known || r.fixed);
+  const rows = SK_ALL ? list : list.filter((r) => !r.known || r.fixed || Object.keys(r.efix || {}).length);
   let h = `<h2>受けた技の一覧（名前の手直し）</h2>
     <div class="opts"><span>${list.length}種類のうち、名前がわからない技 <b>${unk}</b>種類</span>
     <label><input type="checkbox" id="skall" ${SK_ALL ? "checked" : ""}> 名前がわかっている技も出す</label></div>`;
@@ -827,10 +881,13 @@ function skillFixHtml() {
   for (const r of rows) {
     h += `<tr class="${r.known ? "" : "sk-unk"}"><td class="l">${r.id}</td>
       <td class="l"><input class="skfix" data-sk="${r.id}" value="${esc(r.fixed || r.known ? r.name : "")}" placeholder="${esc(r.name)}"></td>
-      <td class="l muted">${esc(r.base || "（なし）")}</td><td class="l">${kindTag(r.kind)}</td><td class="l">${eleTag(r.ele)}</td><td>${fmtN(r.n)}</td><td>${fmtN(r.max)}</td>
+      <td class="l muted">${esc(r.base || "（なし）")}</td>
+      <td class="l"><select class="skattr" data-sk="${r.id}" data-k="kind">${[["", `自動（${r.akind || "不明"}）`], ...SK_KINDS.map((x) => [x, x])].map(([v, l]) => `<option value="${esc(v)}" ${(r.efix.kind || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
+      <td class="l"><select class="skattr" data-sk="${r.id}" data-k="ele">${[["", `自動（${r.aele || "不明"}）`], ...SK_ELES.map((x) => [x, x])].map(([v, l]) => `<option value="${esc(v)}" ${(r.efix.ele || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
+      <td>${fmtN(r.n)}</td><td>${fmtN(r.max)}</td>
       <td class="l">${esc(r.src || "")}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(r.where || "")}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
   }
-  h += `</tbody></table></div><p class="hint">名前を付けると、これまでの記録の名前も付けかわります。付けた名前はフォルダの「スキル名の手直し.json」に、通信の中身は「被ダメ_確認用データ.json」にたまります（名前や数字がおかしいときは、この2つを見せてもらえると直せます）。</p>`;
+  h += `</tbody></table></div><p class="hint">名前を付けると、これまでの記録の名前も付けかわります。種類・属性がデータと違っていたら（モンスターの技はサーバーごとに違うことがあります）、ここで選んで直せます。付けた名前・直した種類と属性はフォルダの「スキル名の手直し.json」に、通信の中身は「被ダメ_確認用データ.json」にたまります（名前や数字がおかしいときは、この2つを見せてもらえると直せます）。</p>`;
   return h;
 }
 function bindSkillFix() {
@@ -849,6 +906,15 @@ function bindSkillFix() {
     };
     el.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } };
     el.onchange = save;
+  });
+  // 種類・属性を手で直す(データと違ったとき)
+  $("#view").querySelectorAll("select.skattr").forEach((el) => el.onchange = async () => {
+    try {
+      const r = await fetch("/api/skillname", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: +el.dataset.sk, [el.dataset.k]: el.value }) });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      load();
+    } catch (e) { alert("保存できませんでした: " + e.message); }
   });
 }
 function bindDmg() {
