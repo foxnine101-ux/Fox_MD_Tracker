@@ -822,7 +822,7 @@ function renderEquip(chars) {
       ${dm && dm.p ? `<div class="eq-sub">${eleTag(dm.p.armor)}鎧　耐性 ${Object.entries(dm.p.res || {}).map(([k, v]) => `${eleTag(k)}${v}%`).join(" ") || "なし"}</div>` : ""}
       ${open ? statusHtmlEq(s.status) + itemsTable(s.items || []) : ""}</div>`;
   }
-  h += `<p class="hint">兜・鎧・武器・盾・肩・靴・アクセサリー2つと、シャドウ装備6か所が全部うまったときの装備を「装備セット」として、キャラごとに覚えます（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら同じセットです。Lv・ステータスは、そのセットを最後に着ていたときのもの。名前は自由に付けられます（空なら「武器 / 鎧」）。被ダメタブの「装備」でセットごとの被ダメを見られます。</p>`;
+  h += `<p class="hint">兜・鎧・武器・盾・肩・靴・アクセサリー2つと、シャドウ装備6か所が全部うまったときの装備を「装備セット」として、キャラごとに覚えます（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら同じセットです。Lv・ステータスは、そのセットを最後に着ていたときのもの。名前は自由に付けられます（空なら「+10 ｾﾚｽ / +10 ﾖﾙｽ / +7 ｽﾃﾗ」のような 武器 / 鎧 / 肩 の精錬値＋頭3文字）。被ダメタブの「装備」でセットごとの被ダメを見られます。</p>`;
   $("#view").innerHTML = h;
   $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
   const post = (body) => fetch("/api/equipset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ char: EQ_CHAR, ...body }) });

@@ -34,6 +34,19 @@ RANDOPT_RES_ALL = 193
 RANDOPT_BODY = {76 + i: e for i, e in enumerate(ELES)}   # 鎧の属性になるランダムオプション(BODY_ATTR_*)
 
 
+# 全角カタカナ → 半角(装備セットの短い名前用)
+_HALF = dict(zip("アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンァィゥェォッャュョーヴ・",
+                 "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜｦﾝｧｨｩｪｫｯｬｭｮｰｳﾞ･"))
+_HALF.update({k: _HALF[v] + "ﾞ" for k, v in zip("ガギグゲゴザジズゼゾダヂヅデドバビブベボ", "カキクケコサシスセソタチツテトハヒフヘホ")})
+_HALF.update({k: _HALF[v] + "ﾟ" for k, v in zip("パピプペポ", "ハヒフヘホ")})
+
+
+def short_item(name, refine=0):
+    """「+10 ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。"""
+    head = "".join(_HALF.get(c, c) for c in (name or "")[:3])
+    return ("+{} ".format(refine) if refine else "") + head
+
+
 def job_name(job):
     return JOB_NAMES.get(job) or ("職業{}".format(job) if job is not None else "")
 
@@ -233,21 +246,8 @@ class CharCore(object):
         s = sets.get(sid)
         if s is None:
             items = [self._item_view(it) for it in worn]
-
-            def short(bit, card=False):
-                i = next((i for i in items if i["wear"] & bit), None)
-                if not i:
-                    return ""
-                t = ("+{} ".format(i["refine"]) if i["refine"] else "") + i["name"]
-                if card and i["cards"]:
-                    t += "（{}）".format(i["cards"][0]["name"])
-                return t
-            auto = " / ".join(x for x in (short(2), short(16, True)) if x) or "装備セット"
-            used = {v.get("auto") for v in sets.values()}
-            n, base = 2, auto
-            while auto in used:                       # 同じ名前になったら番号を付ける
-                auto, n = "{} ({})".format(base, n), n + 1
-            s = sets[sid] = {"name": "", "auto": auto, "items": items, "first": now, "worn": 0}
+            s = sets[sid] = {"name": "", "items": items, "first": now, "worn": 0}
+            self._auto_names(sets)
             self.log("[キャラ] {} の新しい装備セット: {}".format(name, s["auto"]))
         if ch.get("cur_set") != sid:
             s["worn"] = s.get("worn", 0) + 1
@@ -255,12 +255,28 @@ class CharCore(object):
         s["status"] = self._status_view(name, ch)          # このセットを着ているときの Lv・ステータス(最新)
         ch["cur_set"] = sid
 
+    @staticmethod
+    def _auto_names(sets):
+        """装備セットの自動の名前「+10 ｾﾚｽ / +10 ﾖﾙｽ / +7 ｽﾃﾗ」(武器 / 鎧 / 肩)。同じになったら (2) など。"""
+        used = {}
+        for sid in sorted(sets, key=lambda k: sets[k].get("first", 0)):
+            items = sets[sid].get("items") or []
+            parts = []
+            for bit in (2, 16, 4):
+                i = next((i for i in items if i.get("wear", 0) & bit), None)
+                if i:
+                    parts.append(short_item(i.get("name"), i.get("refine", 0)))
+            base = " / ".join(parts) or "装備セット"
+            used[base] = used.get(base, 0) + 1
+            sets[sid]["auto"] = base if used[base] == 1 else "{} ({})".format(base, used[base])
+
     def equip_view(self):
         """画面用: キャラごとのいまの装備と装備セット。"""
         out = {}
         for name, ch in self.chars.items():
             if name == UNKNOWN or not ch.get("equips"):
                 continue
+            self._auto_names(ch.get("sets") or {})     # 前の版で作ったセットも今の付け方で
             out[name] = {"cur": ch.get("cur_set") or "", "missing": ch.get("missing") or [],
                          "now": [self._item_view(it) for it in self._worn(ch)],
                          "status": self._status_view(name, ch), "sets": ch.get("sets") or {}}
