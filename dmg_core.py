@@ -73,7 +73,7 @@ OPS = ({OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE, OP_OPT, OP_CAST} 
        | set(OP_ICON) | set(OP_USE))
 POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
-NO_NAME = "名前の無い相手"   # 名前が「#」から始まるもの(ゲームの画面では名前が出ない)
+NO_NAME = "名前の無い相手"   # 名前が「#」から始まるもの(「#」の前が空)
 RING_MAX = 400          # 名前がわからない相手を調べる用に、接続ごとに覚えておく最近の通信の数
 
 RECENT_MAX = 300
@@ -95,7 +95,8 @@ def good_name(s):
 
 
 def shown_name(s):
-    """ゲームの画面に出る名前。「#」より後ろは画面に出ない(「デッドソウル#166_98」→「デッドソウル」)。"""
+    """まとめる用の名前。「#」より後ろ(討伐数を数えるサブクエ用の個体番号など)を外す
+    (「暴食の変異Hプードル#4」→「暴食の変異Hプードル」)。番号ごとに行が分かれないようにする。"""
     if s and "#" in s:
         return s.split("#", 1)[0].strip() or NO_NAME
     return s
