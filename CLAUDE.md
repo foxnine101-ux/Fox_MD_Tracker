@@ -18,7 +18,7 @@
 | `edition.py` | `DEV = True/False`。ビルドが書きかえて 公開版/開発版 を作る |
 | `skill_names.json` | スキル番号→名前(ラトリオ) |
 | `skill_info.json` | スキル番号→[種類,属性,射程,印]。`tools/make_skill_info.py`(rAthena skill_db + `JRO_FIX`) |
-| `gear_info.json` | アイテム→鎧属性/武器属性/属性耐性。`tools/make_gear_info.py`(rAthena item_db) |
+| `gear_info.json` | アイテム→鎧属性/武器属性/属性耐性/精錬条件つき耐性(`rr`)。`tools/make_gear_info_ratorio.py <ラトリオ> <rAthena版>`(ラトリオ=jRO 準拠が土台、無いものだけ `tools/make_gear_info.py` の rAthena 版で補う。ラトリオの誤りは `JRO_FIX`) |
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
 | `id2name.json` | アイテムID→日本語名(ラトリオ) |
 
@@ -58,10 +58,10 @@
 - 利用者が送ってくれた本物の通信(確認用データの `hex`)をそのまま流して確かめるのがいちばん確実
 
 ## 次にやること(引き継ぎ時点)
-1. **jRO のアイテム情報ファイルを読む**(いちばん大事)
-   - 装備の効果は通信に無い(番号だけ)。今は rAthena のデータで出しているので jRO 独自のアイテムがズレる
-   - RO フォルダの `System/itemInfo*.lub`(Lua 5.1 バイトコード)に jRO の名前と説明文があるはず → `quest_names.py` の VM で読めるか試す
-   - 説明文の「念属性攻撃で受けるダメージ - 20%」「鎧が○属性」などから耐性・属性を拾う(条件つきの効果の扱いは要検討)
-   - ローカルのセッションなら、RO フォルダ(`設定.json` の「ROフォルダ」、ふつうは `C:\Gravity\Ragnarok`)を直接見られる
+1. ~~jRO のアイテム情報ファイルを読む~~ → v2.9.4 でラトリオのデータに切りかえ済み
+   - RO フォルダの `System/iteminfo.lub` は読めるが名前などだけで説明文が無い。説明文は `data.grf` の中にあるが Gravity 独自の暗号(flags=0x80)なので使わない
+   - ラトリオ(`F:\Claude\ratorio`、フォーク)の `engine/equip/item.dat.js`・`card.dat.js` の効果の番号から作る。ゲームのIDとは `ro4/m/items_part*.json`(jRO の名前と説明文が全部ある)で名前でつなぐ
+   - jRO の説明文と比べるとラトリオのほうが rAthena より正確(角兜・イミューン系・属性靴など)。ただしラトリオにも誤りがある(ウィスパーマスクの符号など)→ 見つけたら `JRO_FIX` に足す
+   - まだ: エンチャント(紅蓮・「無属性耐性4」など)はゲームのアイテム名と合わずつながっていない。セット効果は入っていない
 2. 状態異常・ダメージの無い技・装備の付けかえの通信を、本物のデータで確かめる
 3. Atk/Matk/Hit/Flee が装備タブで「-」のままなら 00BD の読み方を確かめる

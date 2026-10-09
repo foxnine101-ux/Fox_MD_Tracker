@@ -17,7 +17,7 @@ MDトラッカー(md_tracker.py)に相乗りする前提。向こうはもう常
 
 被ダメ用に「いまの装備」のまとめ(鎧の属性・属性耐性・DEF・MDEF)も出す(gear_profile)。
 鎧の属性と耐性は通信に無いので、着ている装備・カード・エンチャ・ランダムOP から
-gear_info.json(rAthena のアイテムデータ)で出した目安。
+gear_info.json(ラトリオ=jRO 準拠のアイテムデータ。無いものは rAthena)で出した目安。
 """
 import hashlib
 import json
@@ -257,12 +257,16 @@ class CharCore(object):
         """装備1つ(カード・エンチャ・ランダムOP込み)の 武器の属性・鎧の属性・属性耐性。"""
         ae, de, res = "", "", {}
         ids = [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]
+        refine = it.get("refine", 0) or 0
         for iid in ids:
             g = self.gear_info.get(str(iid)) or {}
             ae = g.get("ae") or ae
             de = g.get("de") or de
             for e, v in (g.get("re") or {}).items():
                 res[e] = res.get(e, 0) + v
+            for over, by, e, v in g.get("rr") or []:      # 精錬が over 以上なら v × (精錬÷by)。by=0 は1回だけ
+                if refine >= over:
+                    res[e] = res.get(e, 0) + v * (refine // by if by else 1)
         for o in it.get("options") or []:
             oi, v = o.get("index"), o.get("value", 0)
             if oi in RANDOPT_RES:

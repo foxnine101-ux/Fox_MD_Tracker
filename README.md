@@ -7,3 +7,5 @@
 - アプリは起動時に新しい版を確認して、ボタン1つでアップデートできます
 
 ※ 通信を読むツールはガンホーの規約上グレーです。使うかどうかは自己責任でお願いします。
+
+アイテムのデータ(名前・属性・耐性)は [ROラトリオHub](https://github.com/roratorio-hub/ratorio) のデータから作っています(PolyForm Noncommercial License 1.0.0)。
