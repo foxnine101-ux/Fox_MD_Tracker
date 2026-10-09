@@ -44,7 +44,32 @@ SPAWN_MOVE_AT = 66
 SPAWN_TICK_AT = 37
 NEAR = 3                # これ以下(セル)なら近接
 SELF_SPEED = 150        # 自分の歩く速さ(ミリ秒/セル)。わからないのでふつうの値
-OPS = {OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE} | set(OP_SPAWN) | set(OP_POS)
+# 状態異常(自分の頭の上のアイコン)と、ダメージの無い技
+#   0983 [番号2][ID4][オン1][全体4][残り4][値4×3]  043F [番号2][ID4][オン1][残り4][値4×3]  0196 [番号2][ID4][オン1]
+#   0229 [ID4][体の状態2][健康の状態2][効果4][PK1]   (石化・凍結・スタン・睡眠 / 毒・呪い・沈黙・混乱・暗闇・出血・猛毒・恐怖)
+#   09CB [技2][Lv4][相手ID4][使った人ID4][結果1]  011A [技2][Lv2][相手ID4][使った人ID4][結果1]
+#   07FB [使った人4][相手4][x2][y2][技2][属性4][詠唱時間4][..]   (詠唱開始)
+OP_ICON = {0x0983: 9, 0x043F: 9, 0x0196: 9}     # 値: オン/オフの位置は 8
+OP_OPT = 0x0229
+OP_USE = {0x09CB: "<HiIIb", 0x011A: "<HhIIb"}
+OP_CAST = 0x07FB
+# アイコン番号(rAthena の EFST_*) → 名前。状態異常・弱体化だけ
+AILMENT_ICON = {
+    875: "石化", 880: "石化", 876: "凍結", 877: "スタン", 878: "睡眠", 881: "火傷", 882: "拘束",
+    883: "毒", 884: "呪い", 885: "沈黙", 886: "混乱", 887: "暗闇", 124: "出血", 890: "猛毒", 891: "恐怖",
+    435: "深い眠り", 470: "ハウリング(マンドラゴラ)", 437: "冷凍", 351: "フロストミスティ",
+    50: "武器脱衣", 51: "盾脱衣", 52: "鎧脱衣", 53: "兜脱衣", 420: "アクセ脱衣",
+    8: "クァグマイア", 282: "スローキャスト", 286: "致命傷", 22: "レックスエーテルナ", 354: "マーシュオブアビス",
+    45: "アンクルスネア", 129: "スパイダーウェブ", 737: "火傷",
+    637: "回復不可", 1205: "深い暗闇", 1206: "深い沈黙", 1207: "倦怠", 1208: "凍傷", 1209: "気絶",
+    1210: "感電", 1211: "結晶化", 1212: "発火", 1213: "不運", 1214: "致死毒", 1215: "憂鬱", 1216: "聖火",
+}
+OPT1_NAMES = {1: "石化", 2: "凍結", 3: "スタン", 4: "睡眠", 6: "石化", 7: "火傷", 8: "拘束"}
+OPT2_NAMES = {0x0001: "毒", 0x0002: "呪い", 0x0004: "沈黙", 0x0008: "混乱", 0x0010: "暗闇", 0x0040: "出血",
+              0x0080: "猛毒", 0x0100: "恐怖"}
+CAUSE_SEC = 3           # 状態異常になる前この秒数以内に受けた技を「原因」とみなす
+OPS = ({OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE, OP_OPT, OP_CAST} | set(OP_SPAWN) | set(OP_POS)
+       | set(OP_ICON) | set(OP_USE))
 POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
 
@@ -140,6 +165,10 @@ class DmgCore(object):
         self.gear = None                    # キャラ名 -> いまの装備のまとめ(char_core.CharCore.gear_profile)
         self.sets = {}                      # 装備セットID -> {"p": まとめ, "first": 時刻, "last": 時刻, "n": 回数}
         self.gstats = {}                    # キャラ -> MD -> 装備セットID -> "相手|技" -> 行(stats と同じ形)
+        self.ails = {}                      # キャラ -> MD -> "状態異常|相手|技" -> [回数, 最後]
+        self.acts = {}                      # キャラ -> MD -> "相手|技" -> [回数, 最後](ダメージの無い技)
+        self.active = {}                    # 接続 -> いまかかっている状態異常の名前の集まり
+        self.last_act = {}                  # 接続 -> 最後に受けた技 (時刻, 相手, 技)
         self.pos = {}                       # ID -> [x0, y0, x1, y1, 開始時刻, 速さ](いるマップの中だけ)
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
@@ -152,7 +181,7 @@ class DmgCore(object):
     # ---------------- 保存 ----------------
     def snapshot(self):
         return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen,
-                "sets": self.sets, "gstats": self.gstats}
+                "sets": self.sets, "gstats": self.gstats, "ails": self.ails, "acts": self.acts}
 
     def restore(self, d):
         if d:
@@ -161,6 +190,8 @@ class DmgCore(object):
             self.seen = d.get("seen") or {}
             self.sets = d.get("sets") or {}
             self.gstats = d.get("gstats") or {}
+            self.ails = d.get("ails") or {}
+            self.acts = d.get("acts") or {}
             self._fix_bad_names()
 
     def _fix_bad_names(self):
@@ -288,9 +319,11 @@ class DmgCore(object):
         if char:
             self.stats.pop(char, None)
             self.gstats.pop(char, None)
+            self.ails.pop(char, None)
+            self.acts.pop(char, None)
             self.recent = [r for r in self.recent if r.get("char") != char]
         else:
-            self.stats, self.recent, self.gstats, self.sets = {}, [], {}, {}
+            self.stats, self.recent, self.gstats, self.sets, self.ails, self.acts = {}, [], {}, {}, {}, {}
         self.changed = True
 
     # ---------------- 通信 ----------------
@@ -318,7 +351,9 @@ class DmgCore(object):
         if op not in OPS:
             return
         try:
-            if op in OP_POS:
+            if op in OP_ICON or op == OP_OPT or op in OP_USE or op == OP_CAST:
+                self._status(key, op, pkt)
+            elif op in OP_POS:
                 self._pos(key, op, pkt)
                 self._move(key, op, pkt)
             elif op in OP_SPAWN:
@@ -378,6 +413,78 @@ class DmgCore(object):
         lst.append({"t": int(time.time()), "ms": int(time.time() * 1000) % 100000000, "len": len(pkt),
                     "hex": pkt[:40].hex()})
         del lst[:-POS_RAW_MAX]
+
+    def _status(self, key, op, pkt):
+        """状態異常(自分のアイコン)と、自分に使われたダメージの無い技。"""
+        now = time.time()
+        tag = "st_{:04X}".format(op)
+        if op in OP_ICON and len(pkt) >= 9:
+            icon, aid = struct.unpack_from("<HI", pkt, 2)
+            if not self._mine(key, aid):
+                return
+            on = pkt[8] != 0
+            name = AILMENT_ICON.get(icon)
+            self._raw_st(key, tag, pkt, {"icon": icon, "on": on, "name": name or ""}, keep=bool(name))
+            if name:
+                self._ailment(key, name, on, now)
+        elif op == OP_OPT and len(pkt) >= 15:
+            aid, body, health = struct.unpack_from("<IHH", pkt, 2)
+            if not self._mine(key, aid):
+                return
+            self._raw_st(key, tag, pkt, {"body": body, "health": health}, keep=bool(body or health))
+            names = {OPT1_NAMES[body]} if body in OPT1_NAMES else set()
+            names |= {n for bit, n in OPT2_NAMES.items() if health & bit}
+            # 0229 は今の状態の全部なので、ここに無いもの(このしくみで分かるもの)は治った
+            for n in set(OPT1_NAMES.values()) | set(OPT2_NAMES.values()):
+                self._ailment(key, n, n in names, now, quiet=True)
+        elif op in OP_USE and len(pkt) >= struct.calcsize(OP_USE[op]):
+            skid, lv, tgt, src, res = struct.unpack_from(OP_USE[op], pkt, 2)
+            if not self._mine(key, tgt) or src == tgt or self._mine(key, src):
+                return
+            self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res}, keep=True)
+            who = self.names.get(src) or "ID{}".format(src)
+            skill = self.skill_name(skid)
+            self.last_act[key] = (now, who, skill)
+            name = self.md.name_for(key)
+            if name:
+                k = "{}|{}".format(who, skill)
+                st = self.acts.setdefault(name, {}).setdefault(self._where(key), {}).setdefault(k, [0, 0])
+                st[0] += 1
+                st[1] = int(now)
+                self.changed = True
+        elif op == OP_CAST and len(pkt) >= 16:
+            src, tgt = struct.unpack_from("<II", pkt, 2)
+            skid = struct.unpack_from("<H", pkt, 14)[0]
+            if self._mine(key, tgt) and not self._mine(key, src):
+                self._raw_st(key, tag, pkt, {"skid": skid, "src": src}, keep=True)
+
+    def _raw_st(self, key, tag, pkt, parsed, keep):
+        if not keep:
+            return
+        lst = self.raw.setdefault(tag, [])
+        rec = {"t": int(time.time()), "hex": pkt[:40].hex(), "len": len(pkt)}
+        rec.update(parsed)
+        lst.append(rec)
+        del lst[:-POS_RAW_MAX]
+
+    def _ailment(self, key, ail, on, now, quiet=False):
+        act = self.active.setdefault(key, set())
+        if not on:
+            act.discard(ail)
+            return
+        if ail in act:                 # もうかかっている(アイコンと 0229 の両方で届く)
+            return
+        act.add(ail)
+        name = self.md.name_for(key)
+        if not name:
+            return
+        la = self.last_act.get(key)
+        who, skill = (la[1], la[2]) if la and now - la[0] <= CAUSE_SEC else ("", "")
+        k = "{}|{}|{}".format(ail, who, skill)
+        st = self.ails.setdefault(name, {}).setdefault(self._where(key), {}).setdefault(k, [0, 0])
+        st[0] += 1
+        st[1] = int(now)
+        self.changed = True
 
     def _move(self, key, op, pkt):
         """位置を覚える(距離で近接/遠距離を決める用)。"""
@@ -465,6 +572,7 @@ class DmgCore(object):
         who = self.names.get(src) or "ID{}".format(src)
         skill = self.skill_name(skid)
         where = self._where(key)
+        self.last_act[key] = (time.time(), who, skill)
         now = int(time.time())
         if skid:
             sv = self.seen.setdefault(str(skid), {"n": 0, "max": 0, "last": 0})
@@ -511,6 +619,10 @@ class DmgCore(object):
                 rows = sorted(d.items(), key=lambda kv: -kv[1][2])[:top]
                 out.setdefault(where, {})[gid] = {k: v for k, v in rows}
         return out
+
+    def for_char_status(self, name):
+        """キャラの状態異常と、ダメージの無い技(MDごと)。"""
+        return self.ails.get(name) or {}, self.acts.get(name) or {}
 
     def for_char(self, name, top=40):
         """キャラの被ダメまとめ(MDごと、最大ダメージ順に top 件)。"""

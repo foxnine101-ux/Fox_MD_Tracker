@@ -570,6 +570,8 @@ td.dm-max{font-weight:700}
 .ek-聖{color:#c99a06;border-color:#c99a06}.ek-闇{color:#7048e8;border-color:#7048e8}.ek-念{color:#9c36b5;border-color:#9c36b5}.ek-毒{color:#5c940d;border-color:#5c940d}
 .ek-不死{color:#495057;border-color:#495057}.ek-無{color:var(--muted)}
 .kd{font-size:12px;color:var(--muted)}.kd-魔法{color:#7048e8}.kd-固定{color:#c92a2a}
+.dm-st{display:flex;flex-wrap:wrap;gap:4px 8px;font-size:12px;margin:0 0 6px;align-items:center}
+.ail{border:1px solid var(--line);border-radius:999px;padding:1px 8px;background:var(--panel)}
 .dm-mix{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:12px;margin:0 0 6px}.dm-mix b{font-weight:700}
 input.skfix{font:inherit;font-size:13px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);width:180px}
 input.skfix.saved{border-color:var(--ok)}
@@ -747,6 +749,29 @@ function dmgTable(W, showChars, limit) {
   }
   return h + `</tbody></table>`;
 }
+// 受けた状態異常と、ダメージの無い技(そのMD・選んでいるキャラぶん)
+function statusHtml(chars, where) {
+  const ail = {}, act = {};
+  for (const c of chars) {
+    for (const [k, v] of Object.entries(((DATA.chars[c] || {}).ail || {})[where] || {})) { const x = ail[k] = ail[k] || [0, 0]; x[0] += v[0]; x[1] = Math.max(x[1], v[1]); }
+    for (const [k, v] of Object.entries(((DATA.chars[c] || {}).act || {})[where] || {})) { const x = act[k] = act[k] || [0, 0]; x[0] += v[0]; x[1] = Math.max(x[1], v[1]); }
+  }
+  let h = "";
+  if (Object.keys(ail).length) {
+    // 状態異常ごとにまとめて、原因の技を並べる
+    const by = {};
+    for (const [k, v] of Object.entries(ail)) { const [a, who, sk] = k.split("|"); (by[a] = by[a] || { n: 0, src: [] }).n += v[0]; by[a].src.push([who, sk, v[0]]); }
+    h += `<div class="dm-st"><span class="muted">受けた状態異常</span>${Object.entries(by).sort((a, b) => b[1].n - a[1].n).map(([a, o]) =>
+      `<span class="ail" title="${esc(o.src.sort((x, y) => y[2] - x[2]).map(([w, sk, n]) => (sk ? `${w}の${sk}` : "原因不明") + ` ${n}回`).join("\n"))}"><b>${esc(a)}</b> ×${o.n}${o.src[0][1] ? ` <span class="muted">${esc(o.src[0][1])}${o.src.length > 1 ? " ほか" : ""}</span>` : ""}</span>`).join("")}</div>`;
+  }
+  if (Object.keys(act).length) {
+    h += `<div class="dm-st"><span class="muted">ダメージの無い技</span>${Object.entries(act).sort((a, b) => b[1][0] - a[1][0]).map(([k, v]) => {
+      const [who, sk] = k.split("|");
+      return `<span class="ail" title="${esc(who)}"><b>${esc(sk)}</b> ×${v[0]} <span class="muted">${esc(who)}</span></span>`;
+    }).join("")}</div>`;
+  }
+  return h;
+}
 function renderDmg(chars, now) {
   const withDmg = chars.filter((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length);
   if (DMG_CHAR && !withDmg.includes(DMG_CHAR)) DMG_CHAR = "";
@@ -770,7 +795,7 @@ function renderDmg(chars, now) {
   for (const [w, W] of mds) {
     if (DMG_MD && w !== DMG_MD) continue;
     const E = resistMatch(RZ.entries, "", w) || resistFind(RZ.entries, w);
-    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${dmgTable(W, !DMG_CHAR, 0)}</div>`;
+    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${statusHtml(DMG_CHAR ? [DMG_CHAR] : withDmg, w)}${dmgTable(W, !DMG_CHAR, 0)}</div>`;
   }
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || r.gear === DMG_GEAR)).slice(-60).reverse();
   if (usedGear.size) {
@@ -783,7 +808,7 @@ function renderDmg(chars, now) {
     for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
-  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。</p>`;
+  h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
   $("#view").innerHTML = h + skillFixHtml();
   bindDmg();
 }

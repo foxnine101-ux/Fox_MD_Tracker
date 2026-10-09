@@ -28,7 +28,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -215,6 +215,11 @@ def build_payload(core, history=100):
             d = DMG.for_char(name)
             if d:
                 chars[name]["dmg"] = d          # 被ダメのまとめ(MDごと)
+            ail, act = DMG.for_char_status(name)
+            if ail:
+                chars[name]["ail"] = ail        # 受けた状態異常(MDごと)
+            if act:
+                chars[name]["act"] = act        # ダメージの無い技(MDごと)
             g = DMG.for_char_gear(name)
             if g:
                 chars[name]["dmg_g"] = g        # 被ダメのまとめ(MDごと・装備セットごと)
@@ -460,7 +465,7 @@ class _Scanner(gp.StreamScanner):
     def _handle(self, pkt):
         if len(pkt) >= 2:
             op = pkt[0] | (pkt[1] << 8)
-            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF):   # 被ダメ関係も数える
+            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB):   # 被ダメ関係も数える
                 STATS["ops"][op] = STATS["ops"].get(op, 0) + 1
         with self.lock:
             try:
