@@ -144,12 +144,16 @@ def where_at(p, tick):
 
 
 def _merge(x, v):
-    """記録の行 v を x にまとめる [回数, 合計, 最大, 最後, ヒット, (近接の合計, 遠距離の合計)]"""
+    """記録の行 v を x にまとめる [回数, 合計, 最大, 最後, ヒット, 近接の合計, 遠距離の合計, 最新のダメージ]
+    (前の版の行は5つか7つ。[7] 最新のダメージ は足さずに、新しいほうを残す)"""
     while len(x) < len(v):
         x.append(0)
+    newer = v[3] >= x[3]
     x[0] += v[0]; x[1] += v[1]; x[2] = max(x[2], v[2]); x[3] = max(x[3], v[3]); x[4] += v[4]
-    for i in range(5, len(v)):
+    for i in range(5, min(len(v), 7)):
         x[i] += v[i]
+    if len(v) > 7 and v[7] and (newer or not x[7]):
+        x[7] = v[7]
 
 
 def load_skill_info(path):
@@ -794,11 +798,14 @@ class DmgCore(object):
             while len(st) < 7:
                 st.append(0)
             st[5 if kind == "物理・近接" else 6] += dmg  # [5]=近接の合計 [6]=遠距離の合計
+        while len(st) < 8:
+            st.append(0)
+        st[7] = dmg                                   # [7]=最新のダメージ
         gid = self._gear_set(name, now)
         if gid:                                       # 装備セットごとにも同じ形で数える
-            row = [1, dmg, dmg, now, max(div, 1)]
+            row = [1, dmg, dmg, now, max(div, 1), 0, 0, dmg]
             if kind.startswith("物理・"):
-                row += [dmg, 0] if kind == "物理・近接" else [0, dmg]
+                row[5 if kind == "物理・近接" else 6] = dmg
             g = self.gstats.setdefault(name, {}).setdefault(where, {}).setdefault(gid, {})
             if k in g:
                 _merge(g[k], row)

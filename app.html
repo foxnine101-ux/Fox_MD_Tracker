@@ -862,6 +862,8 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.dm-gear{margin-top:10px}
+.dm-gh{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:2px}
 .slotmake{margin-top:8px}
 .slotmake button{font-size:14px;padding:6px 14px;font-weight:700}
 .tgrip{opacity:1;color:inherit;padding:0;cursor:pointer}
@@ -1123,7 +1125,7 @@ function gearSets() {      // {装備セットID: {letter(記号), name, p(最�
   const old = Object.keys(out).filter((m) => !(EQ.sets || {})[m]).sort((a, b) => (out[a].first || 0) - (out[b].first || 0));
   for (const [m, x] of Object.entries(out)) {
     const st = (EQ.sets || {})[m];
-    x.letter = st ? st.tag || "?" : "旧" + (old.indexOf(m) + 1);
+    x.letter = st ? st.tag || "履歴" : "旧" + (old.indexOf(m) + 1);
     x.color = st ? tagColor(st) : "";
     x.name = st ? (st.name || st.auto || "") : "";
   }
@@ -1779,8 +1781,8 @@ function simcPresetBar(m) {
     <button class="settab more" id="sccbsave" title="いまオンにしているものを、名前を付けて保存します">＋いまのオンを保存</button><button class="settab more" id="sccboff">全部オフ</button></div></div>`;
 }
 // 被ダメタブの「検証」: その攻撃を選んだ状態で、計算機の「被ダメの検証」の枠を開く
-function simcGoDmg(char, md, src, skill) {
-  Object.assign(SIM, { char, md, key: src + "|" + skill, manual: false, base: "", eleOv: "" });
+function simcGoDmg(char, md, src, skill, base) {
+  Object.assign(SIM, { char, md, key: src + "|" + skill, manual: false, base: base || "", eleOv: "", sets: null });
   TAB = "sim"; store.set("md_tab", TAB); SIMV = "dmg"; store.set("md_simv", SIMV); render();     // 被ダメシミュ(サブタブ)を、その攻撃を選んだ状態で開く
 }
 document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-simgo]"); if (b) { try { simcGoDmg(...JSON.parse(b.dataset.simgo)); } catch (err) { console.warn(err); } } });
@@ -3213,7 +3215,7 @@ function renderGSets(chars) {
   $("#view").querySelectorAll("input.eqcolor").forEach((el) => el.onchange = async () => { await post({ sid: el.dataset.sid, color: el.value }); el.blur(); load(); });
   $("#view").querySelectorAll("[data-colreset]").forEach((b) => b.onclick = async () => { await post({ sid: b.dataset.colreset, color: "" }); load(); });
   $("#view").querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { GS_OPEN[b.dataset.open] = !GS_OPEN[b.dataset.open]; render(); });
-  $("#view").querySelectorAll("[data-dmg]").forEach((b) => b.onclick = () => { DMG_CHAR = ""; DMG_GEAR = b.dataset.dmg; DMG_MD = ""; TAB = "dmg"; store.set("md_tab", TAB); render(); });
+  $("#view").querySelectorAll("[data-dmg]").forEach((b) => b.onclick = () => { DMG_CHAR = ""; DMG_CHAR_AUTO = false; DMG_GEAR = b.dataset.dmg; DMG_MD = ""; TAB = "dmg"; store.set("md_tab", TAB); render(); });
   $("#view").querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
     if (b.dataset.ok !== "1") { b.dataset.ok = "1"; b.textContent = "本当に消す？"; return; }
     await post({ sid: b.dataset.del, delete: 1 }); load();
@@ -3232,7 +3234,8 @@ function mergeGear(g, gear) {
   if (ids.length === 1) return g[ids[0]];
   const out = {};
   for (const id of ids) for (const [k, v] of Object.entries(g[id])) {
-    const x = out[k] = out[k] || [0, 0, 0, 0, 0, 0, 0];
+    const x = out[k] = out[k] || [0, 0, 0, 0, 0, 0, 0, 0];
+    if (v[7] && (v[3] >= x[3] || !x[7])) x[7] = v[7];
     x[0] += v[0]; x[1] += v[1]; x[2] = Math.max(x[2], v[2]); x[3] = Math.max(x[3], v[3]); x[4] += v[4] || 0; x[5] += v[5] || 0; x[6] += v[6] || 0;
   }
   return out;
@@ -3244,7 +3247,8 @@ function dmgMerge(chars, gear) {      // {MD: {"相手|技": [回数, 合計, �
   for (const c of chars) for (const [where, d] of Object.entries(src(c))) {
     const W = out[where] = out[where] || {};
     for (const [k, v] of Object.entries(d)) {
-      const x = W[k] = W[k] || [0, 0, 0, 0, 0, new Set(), 0, 0];
+      const x = W[k] = W[k] || [0, 0, 0, 0, 0, new Set(), 0, 0, 0, ""];
+      if (v[7] && (v[3] >= x[3] || !x[8])) { x[8] = v[7]; x[9] = c; }      // [8] 最新のダメージ、[9] そのときのキャラ
       x[0] += v[0]; x[1] += v[1]; x[2] = Math.max(x[2], v[2]); x[3] = Math.max(x[3], v[3]); x[4] += v[4] || v[0]; x[5].add(c);
       x[6] += v[5] || 0; x[7] += v[6] || 0;
     }
@@ -3290,13 +3294,13 @@ function dmgMix(W) {      // 受けたダメージ(合計)の内訳: 属性ご�
     .map(([k, n]) => `<span>${k === "?" ? "不明" : tag(k)} <b>${Math.round(n * 100 / all)}%</b></span>`).join("");
   return `<div class="dm-mix"><span class="muted">合計ダメージの内訳（反射は除く）</span>${fmt(kind, (k) => kindTag(k))}<span class="muted">｜</span>${fmt(ele, eleTag)}</div>`;
 }
-function dmgTable(W, showChars, limit) {
-  const rows = Object.entries(W).sort((a, b) => b[1][2] - a[1][2]).slice(0, limit || 999);
-  let h = `<table class="dm-t"><thead><tr><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>回数</th><th>最大</th><th>平均</th><th>合計</th>${showChars ? '<th class="l">キャラ</th>' : ""}<th>最後</th></tr></thead><tbody>`;
+function dmgTable(W, showChars, limit, go) {       // go = {md, gear}: 各行に「シミュ」(その攻撃・その装備で被ダメシミュを開く)を出す
+  const rows = Object.entries(W).sort((a, b) => b[1][2] - a[1][2]).slice(0, limit || 999), sim = go && typeof LOCAL !== "undefined" && LOCAL;
+  let h = `<table class="dm-t"><thead><tr><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>回数</th><th>最大</th><th>平均</th><th title="いちばん最近に受けたときのダメージ">最新</th>${showChars ? '<th class="l">キャラ</th>' : ""}<th>最後</th>${sim ? "<th></th>" : ""}</tr></thead><tbody>`;
   for (const [k, v] of rows) {
     const [who, skill] = k.split("|");
     const [kd, el, tip] = rowKind(skill, v);
-    h += `<tr><td class="l">${esc(who)}${mobTag(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].map(cn).join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
+    h += `<tr><td class="l">${esc(who)}${mobTag(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${v[8] ? fmtN(v[8]) : `<span class="muted">-</span>`}</td>${showChars ? `<td class="l muted">${esc([...v[5]].map(cn).join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td>${sim ? `<td><button class="ghost simgo" data-simgo="${esc(JSON.stringify([v[9] || [...v[5]][0] || "", go.md, who, skill, go.gear || ""]))}" title="この攻撃を、この装備で受けたものとして、被ダメシミュを開きます（別の装備なら耐えられたか）">シミュ</button></td>` : ""}</tr>`;
   }
   return h + `</tbody></table>`;
 }
@@ -3323,8 +3327,40 @@ function statusHtml(chars, where) {
   }
   return h;
 }
+// 場所ごとの表を、攻撃を受けたときの装備セットごとに分ける(同じ装備セットのシャドウ違いはまとめる)。装備の記録が無い攻撃は「装備の記録なし」
+function dmgByGear(cs, w, W, G) {
+  const groups = {};                      // 装備セットID -> {"相手|技": dmgMerge と同じ形の行, [10] = 最新のときの 装備+シャドウ の ID}
+  for (const c of cs) for (const [id, d] of Object.entries(((DATA.chars[c] || {}).dmg_g || {})[w] || {})) {
+    const known = !!((DATA.equip || {}).sets || {})[gearMain(id)];
+    if (DMG_GEAR && gearMain(id) !== DMG_GEAR) continue;
+    const gm = known || DMG_GEAR ? gearMain(id) : "_old";      // 装備セットのしくみになる前の記録(旧1, 旧2…)は、1つにまとめる
+    const Gp = groups[gm] = groups[gm] || { rows: {}, full: id, last: 0 };
+    for (const [k, v] of Object.entries(d)) {
+      const x = Gp.rows[k] = Gp.rows[k] || [0, 0, 0, 0, 0, new Set(), 0, 0, 0, ""];
+      if (v[7] && (v[3] >= x[3] || !x[8])) { x[8] = v[7]; x[9] = c; }
+      if (v[3] >= Gp.last) { Gp.last = v[3]; Gp.full = id; }
+      x[0] += v[0]; x[1] += v[1]; x[2] = Math.max(x[2], v[2]); x[3] = Math.max(x[3], v[3]); x[4] += v[4] || v[0]; x[5].add(c); x[6] += v[5] || 0; x[7] += v[6] || 0;
+    }
+  }
+  const ids = Object.keys(groups).sort((a, b) => (a === "_old") - (b === "_old") || groups[b].last - groups[a].last);
+  if (!ids.length) return dmgTable(W, !DMG_CHAR, 0, { md: w, gear: "" });
+  let h = ids.map((gm) => {
+    if (gm === "_old") return `<div class="dm-gear"><div class="dm-gh"><span class="tag">前の記録</span> <span class="muted">装備セットのしくみになる前の記録（まとめて表示）</span></div>${dmgTable(groups[gm].rows, !DMG_CHAR, 0, { md: w, gear: "" })}</div>`;
+    const g = G[gm] || { letter: "?", p: {} }, p = g.p || {};
+    return `<div class="dm-gear"><div class="dm-gh"><span class="tag ${g.color ? "stag" : ""}" ${g.color ? `style="background:${g.color}"` : ""}>${esc(g.letter)}</span> ${g.name ? `<b>${esc(g.name)}</b>` : ""}
+      <span class="muted">${p.armor ? `${eleTag(p.armor)}鎧　` : ""}${Object.keys(p.res || {}).length ? "耐性 " + Object.entries(p.res).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") : ""}　最後 ${when(groups[gm].last)}</span></div>
+      ${dmgTable(groups[gm].rows, !DMG_CHAR, 0, { md: w, gear: groups[gm].full })}</div>`;
+  }).join("");
+  if (!DMG_GEAR) {                         // 装備の記録が無いときの攻撃(前の版の記録や、装備がそろっていなかったとき)
+    const seen = new Set(ids.flatMap((gm) => Object.keys(groups[gm].rows))), rest = Object.fromEntries(Object.entries(W).filter(([k]) => !seen.has(k)));
+    if (Object.keys(rest).length) h += `<div class="dm-gear"><div class="dm-gh"><span class="tag">装備の記録なし</span></div>${dmgTable(rest, !DMG_CHAR, 0, { md: w, gear: "" })}</div>`;
+  }
+  return h;
+}
+let DMG_CHAR_AUTO = true;                 // キャラを自分で選ぶまでは、いまログインしているキャラを出す
 function renderDmg(chars, now) {
   const withDmg = chars.filter((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length);
+  if (DMG_CHAR_AUTO) { const nc = nowChar(); if (nc && withDmg.includes(nc)) DMG_CHAR = nc; }
   if (DMG_CHAR && !withDmg.includes(DMG_CHAR)) DMG_CHAR = "";
   const G = gearSets();
   // 選んでいるキャラ・場所で使った装備セット
@@ -3346,7 +3382,7 @@ function renderDmg(chars, now) {
   for (const [w, W] of mds) {
     if (DMG_MD && w !== DMG_MD) continue;
     const E = resistMatch(RZ.entries, "", w) || resistFind(RZ.entries, w);
-    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${statusHtml(DMG_CHAR ? [DMG_CHAR] : withDmg, w)}${dmgTable(W, !DMG_CHAR, 0)}</div>`;
+    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・装備セットごと・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${statusHtml(DMG_CHAR ? [DMG_CHAR] : withDmg, w)}${dmgByGear(DMG_CHAR ? [DMG_CHAR] : withDmg, w, W, G)}</div>`;
   }
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || gearMain(r.gear) === DMG_GEAR)).slice(-60).reverse();
   if (usedGear.size) {
@@ -3419,7 +3455,7 @@ function bindSkillFix() {
 function bindDmg() {
   bindSkillFix();
   const c = $("#dmc"), m = $("#dmm"), x = $("#dmclear");
-  if (c) c.onchange = () => { DMG_CHAR = c.value; render(); };
+  if (c) c.onchange = () => { DMG_CHAR = c.value; DMG_CHAR_AUTO = false; render(); };
   if (m) m.onchange = () => { DMG_MD = m.value; render(); };
   const g = $("#dmgear");
   if (g) g.onchange = () => { DMG_GEAR = g.value; render(); };
