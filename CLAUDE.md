@@ -54,6 +54,24 @@
 - まだ本物で確かめていない: 状態異常(0983/043F/0196/0229)、ダメージの無い技(09CB/011A)、装備の付けかえ(0999/099A)
   → 利用者の `被ダメ_確認用データ.json`(`raw` の `st_XXXX` など)で確かめる
 
+## 改良版ラトリオ(キャラと装備のシミュレーター)の方針(2026-10-10 に利用者と決めた。これから作る)
+- 目的: ラトリオを土台に、入出力しやすいキャラ・装備シミュを Fox の中に作る。1からキャラを作る/個別に保存/ラトリオ互換URLを出す/
+  Fox のキャラ・装備セットを取り込む/装備をプルダウンで編集/レイアウトはラトリオに近く。**大事なのはプルダウンで選ぶとステータスやディレイに反映されるデータベース**。
+  ダメージ・被ダメのシミュは二の次(被ダメの記録から「そのときのキャラ・装備・敵・技」を入れるのは、キャラと装備のシミュができてから)
+- 計算は「画面のラトリオを外から操作」ではなく、ラトリオの**画面なしの計算の入口**を使う(実験で確認ずみ):
+  - `engine/runtime/calc-headless.js` の `calcCoreFromModel(model)` / `calcFromModel(model)`(`window._ratorioReg` にも登録される)。
+    model は `engine/runtime/calc-model.js` の `createEmptyModel()` の形(プレーンな JSON・約5KB。status / weapon / defPlus / defTranscendence /
+    equip[] / card[] / costume[] / shadowEquip{itemId,refined,rndOpt} / passiveSkill / buff4,7,8 / conf* / learnedSkill …。ID はラトリオ独自の番号)
+  - **裏に隠した calcx.html(iframe)を計算係にして、その中の `_ratorioReg.calcCoreFromModel(model)` を直接呼ぶ**。1回 約0.1秒。入力欄は変わらない。
+    AGI 86→120 で ASPD 191.7→193、VIT→1 で MaxHP 262,854→168,870、靴を外すと HP・ASPD が下がることを確認
+  - 空のページから import しただけだと、装備の効果(specData)はほぼ合うが、最終ステータス(charaData: MaxHP・ASPD など)が NaN になる
+    (calcx.html の起動時の下ごしらえが要る)→ 計算係は calcx.html の中で動かす
+  - 保存URL → model: iframe に `calcx.html?<保存データ>` を読み込んで `_ratorioReg.extractModelFromDom()`(2〜3秒)
+  - model → 保存URL: `CSaveController.encodeToURL()` は**画面の入力欄**から作る(HydrateFromModel だけでは反映されない)
+    → 書き出すときだけ、入力欄に model の内容を入れてから呼ぶ
+  - charaData の添字(ASPD = 37、MaxHP = 5、MaxSP = 6 など)は `CHARA_DATA_INDEX_*` を見る。specData は装備効果の集計(451項目)
+- 本家の更新: フォークを更新 →「ラトリオを更新」で取り込むだけ(入口の名前と model の形が変わったときだけ Fox 側を直す)
+
 ## 計算機(被ダメの検証。app.html の `renderSim`)
 - 記録から逆算: 軽減前 = (受けたダメージ + 引かれる分) ÷ 受けたときの軽減 → 別の装備セットの軽減をかけ直す
 - 軽減の段階(`simStages`): 鎧の属性の相性 × 属性耐性(上限95%) × 種族 × ボス/一般 × サイズ × 遠距離/魔法 × DEF(4000+d)/(4000+10d) または MDEF(1000+d)/(1000+10d) × RES/MRES(2000+r)/(2000+5r) × 補助。最後にステータスの DEF/MDEF を引く
