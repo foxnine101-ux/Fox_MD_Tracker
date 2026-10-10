@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.18.3"
+VERSION = "2.19.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -56,6 +56,7 @@ if sys.stdout is None:   # exe(--noconsole)だと出力先が無い → 部品�
 TRAY = None
 SHOW_HOOK = None   # 専用の窓を前に出す関数(窓があるとき)
 UPD = None         # updater.Updater(アップデート)
+CALC_DATA = {}     # calc_data.json(属性の相性表など。ラトリオのデータから tools/make_calc_data.py で作る)
 RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
 
@@ -359,6 +360,7 @@ def start_live_server(core, lock, cfg):
                     data["servers"] = SERVERS.view()          # 見たことのあるサーバー(設定の「記録しない」用)
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
+                    data["calc"] = CALC_DATA                  # 属性の相性表など(計算機の被ダメの検証用)
                     if DMG is not None:
                         data["skill_names"] = {k: DMG.skill_name(int(k)) for ch in (CHARS.chars.values() if CHARS is not None else [])
                                                for k in (ch.get("skills") or {})}   # 覚えているスキルの名前
@@ -848,6 +850,11 @@ def main():
     load_state(core)
     load_accounts(core)
     load_servers()
+    try:
+        with open(resource("calc_data.json") or "", "r", encoding="utf-8") as f:
+            CALC_DATA.update(json.load(f))
+    except (OSError, ValueError) as e:
+        print("[計算機] calc_data.json が読めませんでした:", e)
     core.qual = SERVERS.qualify               # キャラは「名前@サーバー」で記録する(サーバーごとに分ける)
     core.on_rename = on_char_rename
     apply_nyar_fix(core)

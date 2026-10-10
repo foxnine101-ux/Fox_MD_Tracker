@@ -10,7 +10,10 @@ gear_info.json を ラトリオ(jRO 準拠)のデータから作る。rAthena �
     ro4/m/items_part*.json              … jRO のアイテムID と名前(ラトリオの番号とは名前でつなぐ)
 
   出力: {"アイテムID": {"de": 鎧の属性, "ae": 武器の属性, "re": {"属性": %},
-                       "rr": [[精錬○以上, 精錬○ごと, "属性", %], ...]}}
+                       "rr": [[精錬○以上, 精錬○ごと, "属性", %], ...],
+                       "x": {"種族:悪魔": %, "ボス": %, "一般": %, "サイズ:大": %, "遠距離": %, "魔法": %},
+                       "xr": [[精錬○以上, 精錬○ごと, "ボス", %], ...]}}
+    x / xr … 属性のほかの「受けるダメージの軽減」(計算機の被ダメの検証用)
     re … 条件なしの属性耐性
     rr … 精錬値で決まる属性耐性。精錬が「○以上」なら 値 × (精錬 ÷ ○ごと の切り捨て)。○ごと が 0 なら 値 × 1
     職業・BaseLv・ステータスなど精錬以外の条件つき、セット効果は入らないので「目安」。
@@ -33,6 +36,13 @@ SP_ARMS_ELEMENT = 229      # 武器の属性
 SP_BODY_ELEMENT = 198      # 鎧の属性
 SP_RESIST_ELM = range(60, 70)   # 無〜不死 の属性耐性
 SP_RESIST_ELM_ALL = 264    # 全属性耐性
+RACES = ("無形", "不死", "動物", "植物", "昆虫", "魚貝", "悪魔", "人間", "天使", "竜")   # EnumRaceId
+SIZES = ("小", "中", "大")
+# 属性のほかの軽減: 効果の番号 -> 軽減の名前(複数に効くものは並べる)
+SP_EXTRA = dict([(50 + i, ["種族:" + r]) for i, r in enumerate(RACES)] + [(190 + i, ["サイズ:" + s]) for i, s in enumerate(SIZES)] + [
+    (77, ["ボス"]), (79, ["一般"]), (78, ["遠距離"]), (196, ["魔法"]), (108, ["種族:人間"]),
+    (263, ["種族:" + r for r in RACES]),
+])
 
 ITEM_NAME, ITEM_SP = 8, 11     # EnumItemDataIndex
 CARD_NAME, CARD_SP = 2, 5      # EnumCardDataIndex
@@ -102,6 +112,12 @@ def attrs(effs):
                     info.setdefault("rr", []).append([over, by, e, int(val)])
                 else:
                     info.setdefault("re", {})[e] = info.get("re", {}).get(e, 0) + int(val)
+        elif sp in SP_EXTRA:
+            for k in SP_EXTRA[sp]:
+                if cond:
+                    info.setdefault("xr", []).append([over, by, k, int(val)])
+                else:
+                    info.setdefault("x", {})[k] = info.get("x", {}).get(k, 0) + int(val)
     return info
 
 

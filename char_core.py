@@ -413,6 +413,37 @@ class CharCore(object):
                 ae = RANDOPT_WEAPON[oi]
         return ae, de, res
 
+    def item_extra(self, it):
+        """装備1つ(カード・エンチャ込み)の、属性のほかの軽減 {"種族:悪魔": %, "ボス": %, "サイズ:大": %, "遠距離": %, "魔法": %}。"""
+        out = {}
+        refine = it.get("refine", 0) or 0
+        for iid in [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]:
+            g = self.gear_info.get(str(iid)) or {}
+            for k, v in (g.get("x") or {}).items():
+                out[k] = out.get(k, 0) + v
+            for over, by, k, v in g.get("xr") or []:
+                if refine >= over:
+                    out[k] = out.get(k, 0) + v * (refine // by if by else 1)
+        return out
+
+    def items_profile(self, items):
+        """装備のあつまり(装備セットなど)の軽減のまとめ: {"armor": 鎧の属性("" = この中に鎧が無い), "res": {属性: %}, "x": {…}}"""
+        armor, res, x = "", {}, {}
+        for it in items or []:
+            w = it.get("wear", 0)
+            if w & COSTUME_BITS and not w & ~COSTUME_BITS:
+                continue
+            _, de, r = self.item_attrs(it)
+            if w & 16:
+                armor = de or "無"
+            elif de:
+                armor = armor or de
+            for e, v in r.items():
+                res[e] = res.get(e, 0) + v
+            for k, v in self.item_extra(it).items():
+                x[k] = x.get(k, 0) + v
+        return {"armor": armor, "res": {e: res[e] for e in ELES if res.get(e)}, "x": {k: v for k, v in x.items() if v}}
+
     def _auto_names(self, sets, bits=(2, 16, 4)):
         """装備セットの自動の名前「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」
         (武器+武器の属性 / 鎧+鎧の属性 / 肩+いちばん高い耐性)。同じになったら (2) など。
@@ -436,6 +467,9 @@ class CharCore(object):
         """画面用: {"chars": キャラごとのいまの装備, "sets": 装備セット, "shadows": シャドウセット}"""
         self._auto_names(self.sets)
         self._auto_names(self.shadows, (131072, 65536, 262144))
+        for table in (self.sets, self.shadows):          # 軽減のまとめ(計算機の被ダメの検証用。毎回いまの耐性の表で出す)
+            for s in table.values():
+                s["prof"] = self.items_profile(s.get("items"))
         chars = {}
         for name, ch in self.chars.items():
             if name == UNKNOWN or not (ch.get("equips") or ch.get("stats") or ch.get("skills")):
