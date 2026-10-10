@@ -18,6 +18,10 @@ OP_TO_MAP = (0x0071, 0x0AC5, 0x0092, 0x0AC7)
 CHAR_PORT = 6121
 LOGIN_PORTS = (6900,)
 CHARS_MAX = 12          # サーバーごとに覚えておくキャラ名(画面でどのサーバーか見分ける用)
+# ログインサーバーが送ってくるワールドの一覧(ワールドを選ぶ画面)には、ワールドごとに
+#   キャラ選択サーバーの IP(4) ポート(2) ワールド名(20) … が並ぶ。通信の形(0x0069/0x0AC4 など)によらず
+#   「18.182.57.x + ポート6121 + 名前」の並びを生のデータから探してワールド名を覚える
+RO_NET = bytes([18, 182, 57])
 
 
 class Servers(object):
@@ -28,17 +32,20 @@ class Servers(object):
         self.conn = {}          # 接続 -> サーバー(わからなければ None)
         self.addr = {}          # "IP:ポート"(マップサーバー) -> サーバー
         self.last = None        # 最後にキャラ選択をしたサーバー
+        self.names = {}         # IP -> ワールド名(ログインサーバーのワールド一覧から)
+        self._tail = {}         # ログインの接続 -> 前のかたまりの末尾(境目をまたぐ並び用)
         self.changed = False
 
     # ---------- 保存 ----------
     def snapshot(self):
-        return {"known": self.known, "addr": self.addr, "last": self.last}
+        return {"known": self.known, "addr": self.addr, "last": self.last, "names": self.names}
 
     def restore(self, d):
         if d:
             self.known = d.get("known") or {}
             self.addr = d.get("addr") or {}
             self.last = d.get("last")
+            self.names = d.get("names") or {}
 
     def qualify(self, key, name):
         """記録に使うキャラ名: 「名前@サーバー」。サーバーがわからなければ名前のまま。"""
@@ -95,6 +102,27 @@ class Servers(object):
             self.addr[a] = srv
             self.changed = True
 
+    def login_data(self, key, data):
+        """ログインサーバーから届いた生のデータから、ワールド名とキャラ選択サーバーの IP を拾う。"""
+        buf = self._tail.get(key, b"") + bytes(data)
+        self._tail[key] = buf[-32:]
+        i = buf.find(RO_NET)
+        while 0 <= i and i + 26 <= len(buf):
+            (port,) = struct.unpack_from("<H", buf, i + 4)
+            if port == CHAR_PORT:
+                raw = buf[i + 6:i + 26].split(b"\x00", 1)[0]
+                try:
+                    name = raw.decode("cp932").strip()
+                except UnicodeDecodeError:
+                    name = ""
+                if 2 <= len(name) <= 20 and all(ch.isprintable() for ch in name):
+                    ip = "{}.{}.{}.{}".format(*buf[i:i + 4])
+                    if self.names.get(ip) != name:
+                        self.names[ip] = name
+                        self.changed = True
+                        self.log("[サーバー] ワールド {} = {}".format(name, ip))
+            i = buf.find(RO_NET, i + 1)
+
     def ignored(self, key):
         srv = self.conn.get(key)
         return srv is not None and srv in self.ignore
@@ -118,6 +146,6 @@ class Servers(object):
         """画面用: [{ip, first, last, chars, ignore}](新しく使った順)"""
         out = []
         for ip, k in sorted(self.known.items(), key=lambda kv: -(kv[1].get("last") or 0)):
-            out.append({"ip": ip, "first": k.get("first"), "last": k.get("last"), "chars": k.get("chars") or [],
-                        "ignore": ip in self.ignore})
+            out.append({"ip": ip, "name": self.names.get(ip, ""), "first": k.get("first"), "last": k.get("last"),
+                        "chars": k.get("chars") or [], "ignore": ip in self.ignore})
         return out

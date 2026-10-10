@@ -223,7 +223,9 @@ function curServer() {
   for (const [k, v] of Object.entries(DATA.chars || {})) if ((v.seen || 0) > t) { t = v.seen || 0; best = srvOf(k); }
   return best;
 }
-const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
+// タブの名前: 自分で付けた名前 → ログインのときに届いたワールド名(この PC で見ているとき) → サーバー1, 2…
+const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).name || "";
+const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
 function renderServerTabs() {
@@ -240,7 +242,7 @@ function renderServerTabs() {
     e.preventDefault();
     const ip = b.dataset.wtab;
     showCtx(e.clientX, e.clientY, [{ cap: `${serverLabel(ip)}（${ip}）` }, { label: "名前を付ける…", act: () => {
-      const v = prompt(`このサーバーの名前（例: Breidablik）。空にすると「${"サーバー" + (serverList().filter(Boolean).indexOf(ip) + 1)}」`, (SETTINGS.serverNames || {})[ip] || "");
+      const v = prompt(`このサーバーの名前（例: Breidablik）。空にすると「${worldName(ip) || "サーバー" + (serverList().filter(Boolean).indexOf(ip) + 1)}」`, (SETTINGS.serverNames || {})[ip] || "");
       if (v === null) return;
       SETTINGS.serverNames = SETTINGS.serverNames || {};
       if (v.trim()) SETTINGS.serverNames[ip] = v.trim(); else delete SETTINGS.serverNames[ip];

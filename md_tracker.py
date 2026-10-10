@@ -29,7 +29,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.12.0"
+VERSION = "2.12.1"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -669,6 +669,9 @@ class Sniffer(object):
             if not data:
                 return
             key = (ip.src, tcp.sport, ip.dst, tcp.dport)
+            if tcp.sport in server_core.LOGIN_PORTS:
+                with self.lock:
+                    SERVERS.login_data(key, data)    # ワールドの一覧(ワールド名とキャラ選択サーバーの IP)
             STATS["segments"] += 1
             if key not in STATS["conns"]:
                 STATS["conns"].add(key)
