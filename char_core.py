@@ -21,6 +21,7 @@ gear_info.json(ラトリオ=jRO 準拠のアイテムデータ。無いものは
 """
 import hashlib
 import json
+import re
 import os
 import struct
 import time
@@ -42,9 +43,48 @@ _HALF.update({k: _HALF[v] + "ﾞ" for k, v in zip("ガギグゲゴザジズゼ�
 _HALF.update({k: _HALF[v] + "ﾟ" for k, v in zip("パピプペポ", "ハヒフヘホ")})
 
 
+def slot_key(it):
+    """装備の場所の順(兜上段 → … → シャドウアクセ)。"""
+    w = it.get("wear", 0)
+    return min([SLOT_ORDER.index(b) for b in SLOT_ORDER if w & b] or [99])
+
+
+def items_sig(items):
+    """装備の中身(場所・アイテム・精錬・★・カード・ランダムOP)。同じなら同じセット。"""
+    return json.dumps([[it.get("wear", 0) & ~COSTUME_BITS, it.get("itemId"), it.get("refine", 0), it.get("grade", 0),
+                        [c.get("id") for c in it.get("cards") or []],
+                        [[o.get("index"), o.get("value")] for o in it.get("options") or []]]
+                       for it in sorted(items, key=slot_key)])
+
+
+def combo_id(mid, shid):
+    """被ダメの記録に使う ID: 装備セット + シャドウセット(シャドウが無ければ装備セットだけ)。"""
+    return "{}+{}".format(mid, shid) if mid and shid else mid
+
+
+def tag_label(i, prefix):
+    if prefix == "s":
+        return "S{}".format(i + 1)
+    s = ""
+    i += 1
+    while i:                       # A..Z, AA, AB…
+        i, r = divmod(i - 1, 26)
+        s = chr(65 + r) + s
+    return s
+
+
+def next_tag(table, prefix):
+    """まだ使っていないいちばん若いタグ(装備セットは A, B…、シャドウセットは S1, S2…)。"""
+    used = {s.get("tag") for s in table.values()}
+    i = 0
+    while tag_label(i, prefix) in used:
+        i += 1
+    return tag_label(i, prefix)
+
+
 def short_item(name, refine=0):
     """「+10ｾﾚｽ」: 精錬値 + 名前の頭3文字(カタカナは半角)。漢字で始まる名前は頭2文字(「星座」)。"""
-    name = name or ""
+    name = re.sub(r"^\s*[\[［][^\]］]*[\]］]\s*", "", name or "")    # 先頭の「[シャドウ]」「[衣装]」などは外す
     n = 2 if name and ("\u4e00" <= name[0] <= "\u9fff" or "\u3400" <= name[0] <= "\u4dbf") else 3
     head = "".join(_HALF.get(c, c) for c in name[:n])
     return ("+{}".format(refine) if refine else "") + head
@@ -81,6 +121,8 @@ SHADOW_SLOTS = [(65536, "シャドウ鎧"), (131072, "シャドウ武器"), (262
                 (1048576, "シャドウアクセ(右)"), (2097152, "シャドウアクセ(左)")]
 COSTUME_BITS = 1024 | 2048 | 4096 | 8192
 REQUIRED_BITS = sum(b for b, _ in MAIN_SLOTS + SHADOW_SLOTS)
+MAIN_BITS = sum(b for b, _ in MAIN_SLOTS)          # 装備セット(メイン10か所)
+SHADOW_BITS = sum(b for b, _ in SHADOW_SLOTS)      # シャドウセット(6か所)
 SLOT_ORDER = [b for b, _ in MAIN_SLOTS + SHADOW_SLOTS]
 # 職業(3次・4次など。それ以外は番号のまま)
 JOB_NAMES = {
@@ -150,6 +192,9 @@ class CharCore(object):
         self.opt_names = load_option_names()
         self.log = log or (lambda *a: None)
         self.chars = {}
+        self.sets = {}         # 装備セット(メイン10か所): ID -> {items, name, tag, first, last, worn, chars: {キャラ: {last, status}}}
+        self.shadows = {}      # シャドウセット(6か所): 同じ形(タグは S1, S2…)
+        self.set_map = {}      # 前の版の「キャラ:中身」の装備セットID -> 新しいID(被ダメの記録の付けかえ用)
         self.changed = False
 
     # ---------- 外から呼ぶ ----------
@@ -174,22 +219,73 @@ class CharCore(object):
         self.changed = self.changed or was
 
     def snapshot(self):
-        return {"chars": self.chars, "updated": int(time.time())}
+        return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "updated": int(time.time())}
 
     def restore(self, data):
         if data:
             self.chars = data.get("chars", {})
+            self.sets = data.get("sets") or {}
+            self.shadows = data.get("shadows") or {}
+            self._migrate_sets()
+
+    def _migrate_sets(self):
+        """前の版の「キャラごとの装備セット」(ch["sets"])を、共通の装備セット・シャドウセットにまとめる。"""
+        old = []
+        for name, ch in self.chars.items():
+            for sid, s in (ch.pop("sets", None) or {}).items():
+                old.append((s.get("first") or 0, name, ch, sid, s))
+        for _, name, ch, sid, s in sorted(old, key=lambda x: x[0]):
+            items = s.get("items") or []
+            mid = self._register(self.sets, "m", [i for i in items if i.get("wear", 0) & MAIN_BITS], name, s)
+            shid = self._register(self.shadows, "s", [i for i in items if i.get("wear", 0) & SHADOW_BITS], name, s)
+            self.set_map[sid] = combo_id(mid, shid)
+            if ch.get("cur_set") == sid:
+                ch["cur_set"], ch["cur_shadow"] = mid, shid
+        for ch in self.chars.values():                     # 前の版の ID のままの着用中は外す
+            if ch.get("cur_set") and ch["cur_set"] not in self.sets:
+                ch["cur_set"] = ""
+        if old:
+            self.changed = True
+            self.log("[キャラ] 装備セットを共通の形にまとめました: {}個 → 装備セット {}個・シャドウセット {}個".format(
+                len(old), len(self.sets), len(self.shadows)))
+
+    def _register(self, table, prefix, items, name, src=None):
+        """装備(メインかシャドウの分だけ)を表に登録して ID を返す。同じ中身は同じ ID。src は前の版のセット(引き継ぐ値)。"""
+        if not items:
+            return ""
+        sid = prefix + hashlib.sha1(items_sig(items).encode("utf-8")).hexdigest()[:10]
+        now = int(time.time())
+        s = table.get(sid)
+        if s is None:
+            s = table[sid] = {"items": [self._item_view(i) if "slot" not in i else i for i in sorted(items, key=slot_key)],
+                              "name": "", "tag": next_tag(table, prefix), "first": (src or {}).get("first") or now,
+                              "last": 0, "worn": 0, "chars": {}}
+            if src is None:
+                self.log("[キャラ] {} の新しい{}: {}".format(name, "装備セット" if prefix == "m" else "シャドウセット", s["tag"]))
+        if src is not None:                                 # 前の版から引き継ぐ
+            s["name"] = s.get("name") or src.get("name") or ""
+            s["first"] = min(s.get("first") or now, src.get("first") or now)
+            s["last"] = max(s.get("last") or 0, src.get("last") or 0)
+            s["worn"] = s.get("worn", 0) + (src.get("worn") or 0)
+            c = s["chars"].setdefault(name, {})
+            if (src.get("last") or 0) >= (c.get("last") or 0):
+                c.update({"last": src.get("last") or 0, "status": src.get("status")})
+        return sid
 
     def rename_char(self, old, new):
         """キャラの名前を付けかえる(サーバーを分ける前の記録を「名前@サーバー」へ引き継ぐ用)。"""
-        if old not in self.chars:
-            return
-        if new not in self.chars:
-            self.chars[new] = self.chars.pop(old)
-        else:                                            # 両方あれば、装備セットだけ引き継ぐ
-            o = self.chars.pop(old)
-            for sid, st in (o.get("sets") or {}).items():
-                self.chars[new].setdefault("sets", {}).setdefault(sid, st)
+        if old in self.chars:
+            if new not in self.chars:
+                self.chars[new] = self.chars.pop(old)
+            else:
+                self.chars.pop(old)
+        for table in (self.sets, self.shadows):
+            for s in table.values():
+                cs = s.get("chars") or {}
+                if old in cs:
+                    v = cs.pop(old)
+                    if (v.get("last") or 0) >= ((cs.get(new) or {}).get("last") or 0):
+                        cs[new] = v
         self.changed = True
 
     def gear_profile(self, name):
@@ -206,13 +302,14 @@ class CharCore(object):
             for e, v in r.items():
                 res[e] = res.get(e, 0) + v
         d = ch.get("derived") or {}
-        sid = ch.get("cur_set") or ""
+        mid = ch.get("cur_set") or ""
+        sid = combo_id(mid, ch.get("cur_shadow") or "") if mid else ""
         return {"armor": armor, "res": {e: res[e] for e in ELES if res.get(e)},
                 "def": [d.get("DEF", 0), d.get("DEF2", 0)], "mdef": [d.get("MDEF", 0), d.get("MDEF2", 0)],
                 "known": bool(ch.get("equips")), "sid": sid,
-                "set_name": ((ch.get("sets") or {}).get(sid) or {}).get("name", "")}
+                "set_name": (self.sets.get(mid) or {}).get("name", "")}
 
-    # ---------- 装備セット(キャラ × 全部の場所がうまった装備) ----------
+    # ---------- 装備セット(メイン10か所)・シャドウセット(6か所)。キャラをまたいで共通 ----------
     def _worn(self, ch):
         """衣装を除いた、いま着ている装備(場所の順)。"""
         worn = [it for it in ch.get("equips") or [] if it.get("wear", 0) & ~COSTUME_BITS]
@@ -238,32 +335,27 @@ class CharCore(object):
                 "stats": {k: dict(v) for k, v in (ch.get("stats") or {}).items()}, "derived": d}
 
     def _update_set(self, name, ch):
-        """いまの装備が全部の場所をうめていたら、装備セットとして覚える(同じ中身は同じセット)。"""
+        """メイン10か所が全部うまったら装備セット、シャドウ6か所が全部うまったらシャドウセットとして覚える。
+        同じ中身は(キャラが違っても)同じセット。衣装は数えない。"""
         worn = self._worn(ch)
         bits = 0
         for it in worn:
             bits |= it.get("wear", 0)
         ch["missing"] = [n for b, n in MAIN_SLOTS + SHADOW_SLOTS if not bits & b]
-        if bits & REQUIRED_BITS != REQUIRED_BITS:
-            ch["cur_set"] = ""
-            return
-        sig = json.dumps([[it.get("wear", 0) & ~COSTUME_BITS, it.get("itemId"), it.get("refine", 0), it.get("grade", 0),
-                           [c.get("id") for c in it.get("cards") or []],
-                           [[o.get("index"), o.get("value")] for o in it.get("options") or []]] for it in worn])
-        sid = "{}:{}".format(name, hashlib.sha1(sig.encode("utf-8")).hexdigest()[:10])
-        sets = ch.setdefault("sets", {})
         now = int(time.time())
-        s = sets.get(sid)
-        if s is None:
-            items = [self._item_view(it) for it in worn]
-            s = sets[sid] = {"name": "", "items": items, "first": now, "worn": 0}
-            self._auto_names(sets)
-            self.log("[キャラ] {} の新しい装備セット: {}".format(name, s["auto"]))
-        if ch.get("cur_set") != sid:
-            s["worn"] = s.get("worn", 0) + 1
-        s["last"] = now
-        s["status"] = self._status_view(name, ch)          # このセットを着ているときの Lv・ステータス(最新)
-        ch["cur_set"] = sid
+        status = None
+        for table, prefix, req, key in ((self.sets, "m", MAIN_BITS, "cur_set"), (self.shadows, "s", SHADOW_BITS, "cur_shadow")):
+            if bits & req != req:
+                ch[key] = ""
+                continue
+            sid = self._register(table, prefix, [it for it in worn if it.get("wear", 0) & req], name)
+            s = table[sid]
+            if ch.get(key) != sid:
+                s["worn"] = s.get("worn", 0) + 1
+            s["last"] = now
+            status = status or self._status_view(name, ch)
+            s.setdefault("chars", {})[name] = {"last": now, "status": status}   # このキャラが着ていたときの Lv・ステータス(最新)
+            ch[key] = sid
 
     def item_attrs(self, it):
         """装備1つ(カード・エンチャ・ランダムOP込み)の 武器の属性・鎧の属性・属性耐性。"""
@@ -292,47 +384,59 @@ class CharCore(object):
                 ae = RANDOPT_WEAPON[oi]
         return ae, de, res
 
-    def _auto_names(self, sets):
+    def _auto_names(self, sets, bits=(2, 16, 4)):
         """装備セットの自動の名前「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」
-        (武器+武器の属性 / 鎧+鎧の属性 / 肩+いちばん高い耐性)。同じになったら (2) など。"""
+        (武器+武器の属性 / 鎧+鎧の属性 / 肩+いちばん高い耐性)。同じになったら (2) など。
+        シャドウセットは シャドウ武器 / シャドウ鎧 / シャドウ盾 で同じように作る。"""
         used = {}
         for sid in sorted(sets, key=lambda k: sets[k].get("first", 0)):
             items = sets[sid].get("items") or []
             parts = []
-            for bit in (2, 16, 4):
+            for bit in bits:
                 i = next((i for i in items if i.get("wear", 0) & bit), None)
                 if not i:
                     continue
                 ae, de, res = self.item_attrs(i)
-                tag = ae if bit == 2 else (de if de and de != "無" else top_res(res)) if bit == 16 else top_res(res)
+                tag = ae if bit in (2, 131072) else (de if de and de != "無" else top_res(res)) if bit in (16, 65536) else top_res(res)
                 parts.append(short_item(i.get("name"), i.get("refine", 0)) + tag)
             base = "/".join(parts) or "装備セット"
             used[base] = used.get(base, 0) + 1
             sets[sid]["auto"] = base if used[base] == 1 else "{} ({})".format(base, used[base])
 
     def equip_view(self):
-        """画面用: キャラごとのいまの装備と装備セット。"""
-        out = {}
+        """画面用: {"chars": キャラごとのいまの装備, "sets": 装備セット, "shadows": シャドウセット}"""
+        self._auto_names(self.sets)
+        self._auto_names(self.shadows, (131072, 65536, 262144))
+        chars = {}
         for name, ch in self.chars.items():
             if name == UNKNOWN or not ch.get("equips"):
                 continue
-            self._auto_names(ch.get("sets") or {})     # 前の版で作ったセットも今の付け方で
-            out[name] = {"cur": ch.get("cur_set") or "", "missing": ch.get("missing") or [],
-                         "now": [self._item_view(it) for it in self._worn(ch)],
-                         "status": self._status_view(name, ch), "sets": ch.get("sets") or {}}
-        return out
+            chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
+                           "missing": ch.get("missing") or [],
+                           "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch)}
+        return {"chars": chars, "sets": self.sets, "shadows": self.shadows}
+
+    def _table(self, sid):
+        return self.shadows if str(sid).startswith("s") else self.sets
 
     def rename_set(self, name, sid, new):
-        s = ((self.chars.get(name) or {}).get("sets") or {}).get(sid)
+        s = self._table(sid).get(sid)
         if s is not None:
             s["name"] = (new or "").strip()[:40]
             self.changed = True
 
+    def set_tag(self, sid, tag):
+        s = self._table(sid).get(sid)
+        if s is not None:
+            s["tag"] = (tag or "").strip()[:8] or next_tag(self._table(sid), "s" if sid.startswith("s") else "m")
+            self.changed = True
+
     def delete_set(self, name, sid):
-        ch = self.chars.get(name) or {}
-        if (ch.get("sets") or {}).pop(sid, None) is not None:
-            if ch.get("cur_set") == sid:
-                ch["cur_set"] = ""
+        if self._table(sid).pop(sid, None) is not None:
+            for ch in self.chars.values():
+                for key in ("cur_set", "cur_shadow"):
+                    if ch.get(key) == sid:
+                        ch[key] = ""
             self.changed = True
 
     # ---------- 中身 ----------

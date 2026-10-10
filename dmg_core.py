@@ -285,6 +285,37 @@ class DmgCore(object):
                 s["char"] = new
         self.changed = True
 
+    def remap_sets(self, mapping):
+        """装備セットの ID を付けかえる(前の版の「キャラ:中身」→ 共通の 装備セット+シャドウセット)。同じになった行はまとめる。"""
+        if not mapping:
+            return
+        for old, new in mapping.items():
+            if old == new or old not in self.sets:
+                continue
+            o = self.sets.pop(old)
+            n = self.sets.get(new)
+            if n is None:
+                self.sets[new] = o
+            else:
+                n["n"] = n.get("n", 0) + o.get("n", 0)
+                n["first"] = min(n.get("first") or o.get("first") or 0, o.get("first") or n.get("first") or 0)
+                if (o.get("last") or 0) > (n.get("last") or 0):
+                    n.update(last=o.get("last"), p=o.get("p"), char=o.get("char"))
+        for per_char in self.gstats.values():
+            for sets in per_char.values():
+                for old in [k for k in sets if k in mapping and mapping[k] != k]:
+                    rows = sets.pop(old)
+                    tgt = sets.setdefault(mapping[old], {})
+                    for k, v in rows.items():
+                        if k in tgt:
+                            _merge(tgt[k], v)
+                        else:
+                            tgt[k] = v
+        for r in self.recent:
+            if r.get("gear") in mapping:
+                r["gear"] = mapping[r["gear"]]
+        self.changed = True
+
     def raw_snapshot(self):
         return {"note": "被ダメの通信の確認用。形が合っているか確かめるときに使います(自動で上書きされます)",
                 "skill_names": len(self.skills), "fix": self.fix, "raw": self.raw}

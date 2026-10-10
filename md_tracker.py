@@ -29,7 +29,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.12.5"
+VERSION = "2.13.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -393,9 +393,11 @@ def start_live_server(core, lock, cfg):
                         raise ValueError
                     with lock:
                         if b.get("delete"):
-                            CHARS.delete_set(str(b["char"]), str(b["sid"]))
+                            CHARS.delete_set(str(b.get("char") or ""), str(b["sid"]))
+                        elif "tag" in b:
+                            CHARS.set_tag(str(b["sid"]), str(b.get("tag") or ""))
                         else:
-                            CHARS.rename_set(str(b["char"]), str(b["sid"]), str(b.get("name") or ""))
+                            CHARS.rename_set(str(b.get("char") or ""), str(b["sid"]), str(b.get("name") or ""))
                         save_chars()
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
@@ -803,6 +805,10 @@ def main():
         print("被ダメの記録: スキル名 {}件 (手直し {}件) / モンスター {}件".format(len(DMG.skills), len(DMG.fix), len(DMG.mobs)))
         if CHARS is not None:
             DMG.gear = CHARS.gear_profile              # 当たったときの装備(鎧の属性・耐性・DEF・MDEF)も覚える
+            if CHARS.set_map:                          # 前の版の装備セットIDを、共通の 装備セット+シャドウセット に付けかえ
+                DMG.remap_sets(CHARS.set_map)
+                save_dmg()
+                save_chars()
     except Exception as e:
         print("[被ダメ] 使えません:", e)
         DMG = None
