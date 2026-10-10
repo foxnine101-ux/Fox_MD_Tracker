@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.16.0"
+VERSION = "2.17.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -237,9 +237,11 @@ def build_payload(core, history=100):
         info = dict(core.char_info.get(name, {}))
         if info.get("account") is None and len(core.account_aids) == 1:
             info["account"] = next(iter(core.account_aids))   # アカウントが1つだけならそれ
-        for k in ("lv", "job", "account"):
+        for k in ("lv", "jobLv", "job", "account"):
             if info.get(k) is not None:
                 chars[name][k] = info[k]
+        if char_core is not None and info.get("job") is not None:
+            chars[name]["jobName"] = char_core.job_name(info["job"])
         if ch.get("nyar"):
             chars[name]["nyar"] = ch["nyar"]
         if name in where:
@@ -357,6 +359,9 @@ def start_live_server(core, lock, cfg):
                     data["servers"] = SERVERS.view()          # 見たことのあるサーバー(設定の「記録しない」用)
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
+                    if DMG is not None:
+                        data["skill_names"] = {k: DMG.skill_name(int(k)) for ch in (CHARS.chars.values() if CHARS is not None else [])
+                                               for k in (ch.get("skills") or {})}   # 覚えているスキルの名前
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path.startswith("/ratorio/"):          # 計算機(ROラトリオHub)のファイル

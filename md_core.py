@@ -422,6 +422,9 @@ class MDCore(object):
                     info.update({"gid": gid, "job": job})
                     if 1 <= lv <= 300:
                         info["lv"] = lv
+                    (jlv,) = struct.unpack_from("<I", e, 24)      # JobLv(ふだんの通信では流れてこない。上がったときだけ 00B0 の 55)
+                    if 1 <= jlv <= 100:
+                        info["jobLv"] = jlv
                     acc = self.conn_account.get(key)
                     if acc:
                         info["account"] = acc

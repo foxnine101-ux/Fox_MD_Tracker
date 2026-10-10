@@ -416,7 +416,7 @@ function render() {
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);
   if (TAB === "chars" || TAB === "equip") return renderChars(chars);
-  if (TAB === "gsets") return renderGSets();
+  if (TAB === "gsets") return renderGSets(chars);
   if (TAB === "settings") return renderSettings(groups);
   renderGrid(groups.filter((G) => G.kind === TAB), chars, now);
 }
@@ -757,6 +757,15 @@ td.dm-max{font-weight:700}
 .eq-h input.eqtag{font:inherit;font-weight:700;width:3.6em;text-align:center;padding:3px 4px;border:1px solid var(--accent);border-radius:99px;background:var(--chip);color:var(--ink)}
 .eq-use{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;padding:6px 0;border-top:1px solid var(--line)}
 .eq-use:first-child{border-top:0}
+.ch-row{margin-bottom:8px;padding:0}
+.ch-h{display:flex;flex-wrap:wrap;gap:4px 14px;align-items:baseline;padding:10px 14px;cursor:pointer;border-radius:12px}
+.ch-h:hover{background:var(--chip)}
+.ch-h .ch-name{font-weight:700;min-width:9em}
+.ch-h .ch-lv{font-variant-numeric:tabular-nums}
+.ch-body{padding:2px 14px 12px;border-top:1px solid var(--line)}
+.sk-list{display:flex;flex-wrap:wrap;gap:5px 6px;margin-top:4px}
+.sk{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--chip);white-space:nowrap}
+.sk b{margin-left:4px}
 .unk-drop{border:2px dashed var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px}
 .unk-drop.over{border-color:var(--accent);background:var(--chip)}
 .eq-use input.unkname{font:inherit;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);flex:1 1 260px;min-width:160px}
@@ -1201,54 +1210,64 @@ function bindUnknownItems() {
     else { UNK.msg = "保存できませんでした。"; render(); }
   });
 }
-// キャラタブを開いているときの貼り付け(Win+Shift+S → Ctrl+V)
+// 装備セットタブを開いているときの貼り付け(Win+Shift+S → Ctrl+V)
 document.addEventListener("paste", (e) => {
-  if (TAB !== "chars" || !$("#unkdrop")) return;
+  if (TAB !== "gsets" || !$("#unkdrop")) return;
   const f = imageOf(e.clipboardData);
   if (f) { e.preventDefault(); ocrImage(f); }
 });
 
 // ---------- キャラ ----------
-// いまの装備・ステータスと、そのキャラが使った装備セット(装備セットはキャラをまたいで共通)
+// このワールドのキャラの一覧。クリックで開いて、ベース/ジョブ・ステータス・スキルを見る(装備は「装備セット」タブ)
+let CH_OPEN = "";
+function skillsHtml(sk) {
+  const L = Object.entries(sk || {}).sort((a, b) => +a[0] - +b[0]);
+  if (!L.length) return `<h3 style="margin:10px 0 2px;font-size:13px">スキル</h3><div class="muted">まだ読めていません（マップを移動するか、ログインし直すと読めます）。</div>`;
+  const N = DATA.skill_names || {};
+  return `<h3 style="margin:10px 0 2px;font-size:13px">スキル（${L.length}）</h3><div class="sk-list">${L.map(([id, lv]) => `<span class="sk" title="スキル番号 ${esc(id)}">${esc(N[id] || "スキル" + id)}<b>${lv}</b></span>`).join("")}</div>`;
+}
 function renderChars(chars) {
-  const EQ = DATA.equip || {}, E = EQ.chars || {};
-  const names = chars.filter((c) => E[c]).concat(Object.keys(E).filter((c) => !chars.includes(c) && inServer(c) && !isHiddenChar(c, new Set(SETTINGS.hiddenChars || []))));
-  if (!names.length) {
-    $("#view").innerHTML = `<div class="panel empty">まだキャラの記録がありません。<br>Fox_MD_Tracker を起動したままキャラにログインすると、装備とステータスがここに出ます。</div>`;
+  const E = (DATA.equip || {}).chars || {};
+  if (!chars.length) {
+    $("#view").innerHTML = `<div class="panel empty">まだキャラの記録がありません。<br>Fox_MD_Tracker を起動したままキャラ選択画面まで進むと、ここに出ます。</div>`;
     return;
   }
-  if (!E[EQ_CHAR]) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
-  const e = E[EQ_CHAR], S = EQ.sets || {}, SH = EQ.shadows || {};
-  const tagOf = (st) => st ? `<span class="tag">${esc(st.tag)}</span> ${esc(st.name || st.auto)}` : "";
-  let h = `<div class="opts"><label>キャラ <select id="eqc">${names.map((c) => `<option value="${esc(c)}" ${c === EQ_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label></div>`;
-  h += `<h2>いまの装備</h2><div class="panel eq-box"><div class="eq-h">`
-    + (S[e.cur] ? `<span class="muted">装備セット</span> ${tagOf(S[e.cur])}` : `<span class="muted">装備セットになっていません（メイン10か所のうち、あいている場所: ${esc((e.missing || []).filter((x) => !x.startsWith("シャドウ")).join("・") || "-")}）</span>`)
-    + `</div><div class="eq-h">`
-    + (SH[e.shadow] ? `<span class="muted">シャドウセット</span> ${tagOf(SH[e.shadow])}` : `<span class="muted">シャドウセットになっていません（あいている場所: ${esc((e.missing || []).filter((x) => x.startsWith("シャドウ")).join("・") || "-")}）</span>`)
-    + `</div>` + statusHtmlEq(e.status) + itemsTable(e.now || []) + `</div>`;
-  // このキャラが使った装備セット・シャドウセット
-  const used = (T) => Object.entries(T).filter(([, st]) => (st.chars || {})[EQ_CHAR]).sort((a, b) => (b[1].chars[EQ_CHAR].last || 0) - (a[1].chars[EQ_CHAR].last || 0));
-  const list = (T, title, cur) => {
-    const L = used(T);
-    let x = `<h2>${title}（${L.length}）</h2>`;
-    if (!L.length) return x + `<div class="panel empty">まだありません。</div>`;
-    return x + `<div class="panel list">` + L.map(([sid, st]) => `<div class="row"><span class="nm">${sid === cur ? `<span class="tag">着用中</span> ` : ""}<span class="tag">${esc(st.tag)}</span> <b>${esc(st.name || st.auto)}</b>
-      <span class="muted">最後に着た ${when(st.chars[EQ_CHAR].last)}${Object.keys(st.chars).length > 1 ? `・ほかのキャラ ${esc(Object.keys(st.chars).filter((c) => c !== EQ_CHAR).map(cn).join("、"))}` : ""}</span></span>
-      <button class="ghost" data-gs="${esc(sid)}">装備セットタブで見る</button></div>`).join("") + `</div>`;
-  };
-  h += unknownItemsHtml(EQ.unknown || []);
-  h += list(S, "このキャラが使った装備セット", e.cur) + list(SH, "このキャラが使ったシャドウセット", e.shadow);
-  h += `<p class="hint">ステータスと装備は、通信から読んだいまのもの。装備セット（メイン10か所）とシャドウセット（6か所）は、キャラをまたいで共通です。名前や記号は「装備セット」タブで変えられます。</p>`;
+  if (CH_OPEN && !chars.includes(CH_OPEN)) CH_OPEN = "";
+  let h = "";
+  for (const c of chars) {
+    const info = DATA.chars[c] || {}, e = E[c], st = (e && e.status) || {}, d = st.derived || {};
+    const lv = st.lv ?? info.lv, jlv = st.jobLv ?? info.jobLv, job = (st.jobName && !/^職業/.test(st.jobName) ? st.jobName : info.jobName) || st.jobName || "";
+    const open = c === CH_OPEN;
+    h += `<div class="panel ch-row"><div class="ch-h" data-ch="${esc(c)}"><span class="ch-name">${esc(cn(c))}</span>
+        <span class="ch-lv">Base <b>${lv ?? "-"}</b> / Job <b>${jlv ?? "-"}</b></span><span>${esc(job)}</span>
+        ${d.MaxHP !== undefined ? `<span class="muted">HP ${fmtN(d.MaxHP)}　SP ${fmtN(d.MaxSP)}</span>` : ""}
+        <span style="flex:1"></span><span class="muted">${e && Object.keys(e.skills || {}).length ? `スキル ${Object.keys(e.skills).length}` : ""}　最終確認 ${info.seen ? when(info.seen) : "-"}　${open ? "▾" : "▸"}</span></div>
+      ${open ? `<div class="ch-body">${e ? statusHtmlEq({ ...st, lv, jobLv: jlv, jobName: job }) + skillsHtml(e.skills) : `<div class="muted" style="padding-top:8px">まだステータスを読めていません。このキャラでログインすると出ます。</div>`}</div>` : ""}</div>`;
+  }
+  h += `<p class="hint">キャラをクリックすると、ベース/ジョブLv・ステータス・覚えているスキルが開きます（通信から読んだもの。装備は「装備セット」タブ）。ベース/ジョブLv はキャラ選択画面から、ステータスとスキルはログインしたときに読みます。</p>`;
   $("#view").innerHTML = h;
-  $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
-  bindUnknownItems();
-  $("#view").querySelectorAll("[data-gs]").forEach((b) => b.onclick = () => { GS_OPEN[b.dataset.gs] = true; GS_FOCUS = b.dataset.gs; TAB = "gsets"; store.set("md_tab", TAB); render(); });
+  $("#view").querySelectorAll(".ch-h").forEach((el) => el.onclick = () => { CH_OPEN = CH_OPEN === el.dataset.ch ? "" : el.dataset.ch; render(); });
 }
 
 // ---------- 装備セット ----------
 // 装備セット(メイン10か所)・シャドウセット(6か所)。同じ中身はキャラが違っても同じセット。記号(A, B… / S1, S2…)と名前を付けられる
-let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false;
-function renderGSets() {
+let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false;
+function nowGearHtml(chars) {       // いま着ている装備(キャラを選ぶ)。装備セットになっていないときもここで見られる
+  const EQ = DATA.equip || {}, E = EQ.chars || {};
+  const names = chars.filter((c) => E[c] && E[c].has_equip);
+  if (!names.length) return "";
+  if (!names.includes(EQ_CHAR)) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
+  const e = E[EQ_CHAR], S = EQ.sets || {}, SH = EQ.shadows || {};
+  const tagOf = (st) => `<span class="tag">${esc(st.tag)}</span> ${esc(st.name || st.auto)}`;
+  const miss = (shadow) => esc((e.missing || []).filter((x) => x.startsWith("シャドウ") === shadow).join("・") || "-");
+  return `<h2>いま着ている装備</h2><div class="panel eq-box"><div class="eq-h">
+      <label>キャラ <select id="eqc">${names.map((c) => `<option value="${esc(c)}" ${c === EQ_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
+      <span>${S[e.cur] ? `<span class="muted">装備セット</span> ${tagOf(S[e.cur])}` : `<span class="muted">装備セットになっていません（あいている場所: ${miss(false)}）</span>`}</span>
+      <span>${SH[e.shadow] ? `<span class="muted">シャドウ</span> ${tagOf(SH[e.shadow])}` : `<span class="muted">シャドウセットになっていません（あいている場所: ${miss(true)}）</span>`}</span>
+      <span class="eq-btns"><button class="ghost" id="gsnow">${GS_NOW ? "とじる" : "中身"}</button></span></div>
+    ${GS_NOW ? itemsTable(e.now || []) : ""}</div>` + unknownItemsHtml(EQ.unknown || []);
+}
+function renderGSets(chars) {
   const EQ = DATA.equip || {}, DS = DATA.dmg_sets || {};
   const inWorld = (st) => GS_ALL || Object.keys(st.chars || {}).some(inServer);
   const dmgN = (sid) => Object.entries(DS).filter(([id]) => gearMain(id) === sid || gearShadow(id) === sid).reduce((n, [, v]) => n + (v.n || 0), 0);
@@ -1271,11 +1290,15 @@ function renderGSets() {
     }
     return x;
   };
-  let h = `<div class="opts"><label><input type="checkbox" id="gsall" ${GS_ALL ? "checked" : ""}> ほかのワールドのキャラが使ったセットも出す</label></div>`;
+  let h = nowGearHtml(chars || []);
+  h += `<div class="opts"><label><input type="checkbox" id="gsall" ${GS_ALL ? "checked" : ""}> ほかのワールドのキャラが使ったセットも出す</label></div>`;
   h += section(EQ.sets || {}, "装備セット", false) + section(EQ.shadows || {}, "シャドウセット", true);
   h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。左の記号（A, B… / S1, S2…）と名前は自由に変えられます（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
   $("#view").innerHTML = h;
   $("#gsall").onchange = (ev) => { GS_ALL = ev.target.checked; render(); };
+  if ($("#eqc")) $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
+  if ($("#gsnow")) $("#gsnow").onclick = () => { GS_NOW = !GS_NOW; render(); };
+  bindUnknownItems();
   const post = (body) => fetch("/api/equipset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   $("#view").querySelectorAll("input.eqname").forEach((el) => {
     el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };

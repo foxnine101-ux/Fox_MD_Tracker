@@ -26,7 +26,12 @@ import os
 import struct
 import time
 
-WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A}
+WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E}
+# スキルの一覧(覚えているスキルと Lv)。jRO のリプレイで確かめた形:
+#   0x0B32 [op2][長さ2] + 15バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 上げられる1 Lv(2)2
+#   0x010F [op2][長さ2] + 37バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 名前24 上げられる1
+#   0x010E [op2] スキル番号2 Lv2 SP2 射程2 上げられる1   (1つ上がった)
+SKILL_ENTRY = {0x0B32: 15, 0x010F: 37}
 ELES = ("無", "水", "地", "火", "風", "毒", "聖", "闇", "念", "不死")
 # ランダムオプションの番号 → 耐性の属性(rAthena item_randomopt_db: ATTR_TOLERACE_*)
 RANDOPT_RES = {25: "無", 26: "水", 27: "地", 28: "火", 29: "風", 30: "毒", 31: "聖", 32: "闇", 33: "念", 34: "不死"}
@@ -126,6 +131,13 @@ SHADOW_BITS = sum(b for b, _ in SHADOW_SLOTS)      # シャドウセット(6か�
 SLOT_ORDER = [b for b, _ in MAIN_SLOTS + SHADOW_SLOTS]
 # 職業(3次・4次など。それ以外は番号のまま)
 JOB_NAMES = {
+    0: "ノービス", 1: "ソードマン", 2: "マジシャン", 3: "アーチャー", 4: "アコライト", 5: "マーチャント", 6: "シーフ",
+    7: "ナイト", 8: "プリースト", 9: "ウィザード", 10: "ブラックスミス", 11: "ハンター", 12: "アサシン",
+    14: "クルセイダー", 15: "モンク", 16: "セージ", 17: "ローグ", 18: "アルケミスト", 19: "バード", 20: "ダンサー",
+    23: "スーパーノービス", 24: "ガンスリンガー", 25: "忍者",
+    4008: "ロードナイト", 4009: "ハイプリースト", 4010: "ハイウィザード", 4011: "ホワイトスミス", 4012: "スナイパー",
+    4013: "アサシンクロス", 4015: "パラディン", 4016: "チャンピオン", 4017: "プロフェッサー", 4018: "チェイサー",
+    4019: "クリエイター", 4020: "クラウン", 4021: "ジプシー", 4046: "テコンキッド", 4047: "拳聖", 4049: "ソウルリンカー",
     4054: "ルーンナイト", 4055: "ウォーロック", 4056: "レンジャー", 4057: "アークビショップ", 4058: "メカニック",
     4059: "ギロチンクロス", 4066: "ロイヤルガード", 4067: "ソーサラー", 4068: "ミンストレル", 4069: "ワンダラー",
     4070: "修羅", 4071: "ジェネティック", 4072: "シャドウチェイサー", 4211: "影狼", 4212: "朧", 4215: "リベリオン",
@@ -346,7 +358,7 @@ class CharCore(object):
             info = self.md.char_info.get(name) or {}
         d = dict(ch.get("derived") or {})
         job = info.get("job")
-        return {"lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv"), "job": job, "jobName": job_name(job),
+        return {"lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv") or info.get("jobLv"), "job": job, "jobName": job_name(job),
                 "stats": {k: dict(v) for k, v in (ch.get("stats") or {}).items()}, "derived": d}
 
     def _update_set(self, name, ch):
@@ -424,11 +436,12 @@ class CharCore(object):
         self._auto_names(self.shadows, (131072, 65536, 262144))
         chars = {}
         for name, ch in self.chars.items():
-            if name == UNKNOWN or not ch.get("equips"):
+            if name == UNKNOWN or not (ch.get("equips") or ch.get("stats") or ch.get("skills")):
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
-                           "missing": ch.get("missing") or [],
-                           "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch)}
+                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")),
+                           "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch),
+                           "skills": ch.get("skills") or {}, "updated": ch.get("updated") or 0}
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
 
     def set_item_name(self, iid, name):
@@ -548,6 +561,26 @@ class CharCore(object):
                 ch["derived"][key] = v
             ch["updated"] = int(time.time())
             self.changed = True
+
+        elif op in SKILL_ENTRY:                          # スキルの一覧(まるごと入れかえ)
+            size, body = SKILL_ENTRY[op], pkt[4:]
+            if len(body) >= size and len(body) % size == 0:
+                skills = {}
+                for i in range(len(body) // size):
+                    skid, _typ, lv = struct.unpack_from("<HIH", body, i * size)
+                    if skid and 0 < lv <= 100:
+                        skills[str(skid)] = lv
+                ch = self._ch()
+                if ch.get("skills") != skills:
+                    ch["skills"] = skills
+                    self.changed = True
+
+        elif op == 0x010E and len(pkt) >= 6:             # スキルが1つ上がった
+            skid, lv = struct.unpack_from("<HH", pkt, 2)
+            if skid and 0 < lv <= 100:
+                ch = self._ch()
+                ch.setdefault("skills", {})[str(skid)] = lv
+                self.changed = True
 
         elif op == 0x0999 and len(pkt) >= 11:            # 装備した(結果 0 = 成功)
             idx, loc = struct.unpack_from("<HI", pkt, 2)
