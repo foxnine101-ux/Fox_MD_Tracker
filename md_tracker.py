@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.29.1"
+VERSION = "2.30.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -375,6 +375,7 @@ def start_live_server(core, lock, cfg):
                     data["servers"] = SERVERS.view()          # 見たことのあるサーバー(設定の「記録しない」用)
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
+                        data["now_chars"] = [n for n in core.currents.values() if n]      # いまログインしているキャラ(つながっている通信ごと)
                     data["calc"] = CALC_DATA                  # 属性の相性表など(計算機の被ダメの検証用)
                     if DMG is not None:
                         data["skill_names"] = {k: DMG.skill_name(int(k)) for ch in (CHARS.chars.values() if CHARS is not None else [])

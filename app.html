@@ -859,6 +859,9 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.xrow{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;width:100%}
+.xwho{font-weight:400;font-size:12px;color:var(--muted,#999);margin-left:4px}
+.settab:disabled{opacity:.45;cursor:default}
 .simgo{padding:0 8px;font-size:12px}
 .cmpbox:not(:empty){margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);overflow-x:auto}
 .simc table.cmp td.cmpd{background:rgba(227,160,8,.12)}
@@ -1375,6 +1378,8 @@ const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy:
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
+// いまログインしているキャラ(複数つながっているときは、いちばん最近動きがあったもの)。「いま着ている装備」は、このキャラの装備だけを指す
+function nowChar() { const E = (DATA.equip || {}).chars || {}; return (DATA.now_chars || []).filter((c) => E[c]).sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0] || ""; }
 const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(c.model) !== JSON.stringify(c.saved);
 function simcSave() {                     // 少しまとめてから保存
   clearTimeout(SIMC.saveT);
@@ -1681,12 +1686,14 @@ function simcFragItems(m, shadow) {       // 装備セットタブに出す用�
   return out;
 }
 const simcDirty = (m, shadow) => { const sig = shadow ? m.foxShadowSig : m.foxSetSig; return !!sig && sig !== simcFragSig(m, shadow); };
-function simcSetTabs(m, shadow) {
-  const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0;
-  return `<span class="muted">${shadow ? "シャドウのセット" : "装備セット"}</span>`
-    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-wear="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと着せかえ。右クリックで上書き・登録を外す）${sid === L.cur && dirty ? "\n＊ 着せたあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
-    + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しい装備セットとして登録します">＋登録</button>`
-    + `<button class="settab more" data-wearmore="${sh}" title="ゲームでいま着ている装備や、着たことのある組み合わせ（履歴）から選んで着せます">ゲームの装備から ▾</button>`;
+function simcSetTabs(m, shadow) {         // 装備スロット: 記号を押すとメニュー(反映 = 計算機に入れる / 上書き = いまの計算機の装備を保存 / 名前 / 登録を外す)
+  const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0, nc = nowChar(), E = (DATA.equip || {}).chars || {};
+  const hasNow = nc && (E[nc].now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
+  return `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
+    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、反映・上書きなどを選べます）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
+    + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しいスロットに保存します">＋新しいスロットに保存</button>`
+    + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `いまログインしている「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインすると使えます"}">いま着ている装備を反映</button>`
+    + `<button class="settab more" data-wearmore="${sh}" title="これまでに着たことのある組み合わせ（履歴）から選んで、計算機に入れます">保存した装備から ▾</button>`;
 }
 // ---- 支援・アイテム・スキル(数が多いので: 分類のタブ + 目的のしぼり込み + 検索 + 「オンのもの」) ----
 const SIMC_BGROUPS = [["on", "オンのもの"], ["self", "自分のスキル"], ["learn", "習得スキル"], ["item", "アイテム・食品"], ["other", "他職の支援"], ["guild", "ギルド・その他"], ["debuff", "状態異常"]];
@@ -1944,7 +1951,7 @@ function simcCmpIds(m) { const ok = new Set(simcSetList(m, false).tabs.map((x) =
 function simcCmpChips(m) {
   const tabs = simcSetList(m, false).tabs; if (!tabs.length) return "";
   const on = simcCmpIds(m);
-  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、この装備セットを着た場合を横に並べます）">${esc(st.tag)}</button>`).join("")}</span>`;
+  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備を着た場合を横に並べます。一度に2つまで）">${esc(st.tag)}</button>`).join("")}</span>`;
 }
 const simcCmpSig = (m) => simcCmpIds(m).join(",") + "|" + simcAllKinds().join(",") + "|" + JSON.stringify(m);
 function simcCmpKick(m) {
@@ -2024,7 +2031,7 @@ function simcCmpFill(m) {
   const r = SIMC.res; if (!r) return;
   simcDmgFill(m);
   const set = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
-  set("scckeycmp", simcCmpKeyHtml(m, r)); set("sccresistcmp", simcCmpXHtml(m, r, ENG_RKINDS)); set("sccxcmp", simcCmpXHtml(m, r, ENG_XKINDS.filter(([id]) => simcXKinds().includes(id))));
+  set("scckeycmp", simcCmpKeyHtml(m, r)); set("sccresistcmp", simcCmpXHtml(m, r, ENG_RKINDS)); set("sccx", simcExtraBody(r)); set("sccxcmp", "");
   $("#view").querySelectorAll("[data-cmpall]").forEach((el) => el.onchange = () => { SIMC.cmpAll = el.checked; simcCmpFill(m); });
 }
 // ---- その枠に効く支援・アイテム・スキルを、枠の中でもオンオフできるようにする(「支援・アイテム・スキル」の枠と同じもの = 同期) ----
@@ -2213,10 +2220,13 @@ function simcResistSum(r) {
   const a = top(dmg), b = top(ele);
   return [a ? `ダメージ耐性の最高: ${a}` : "", b ? `属性耐性の最高: ${b}` : "", `状態異常の無効: ${immune.length ? immune.join("・") : "なし"}`].filter(Boolean).join(" ／ ");
 }
-function simcExtraBody(r) {
-  const on = simcXKinds();
+function simcExtraBody(r) {               // 「比べる」で装備スロットを選んでいるときは、同じ表を横に並べる
+  const on = simcXKinds(), c = simcCur(), m = c && c.model;
   if (!on.length) return `<span class="muted">上のボタンで、見たい表を選んでください（いくつでも）。</span>`;
-  return ENG_XKINDS.filter(([id]) => on.includes(id)).map(([id, t]) => `<div class="xinfo"><div class="xttl">${t}</div>${(r.x || {})[id] || `<span class="muted">-</span>`}</div>`).join("");
+  const cmpOn = m && simcCmpIds(m).length, R = cmpOn && SIMC.cmpRes && SIMC.cmpRes.sig === simcCmpSig(m) ? SIMC.cmpRes : null;
+  const block = (title, html, who) => `<div class="xinfo"><div class="xttl">${title}${who ? ` <span class="xwho">${who}</span>` : ""}</div>${html || `<span class="muted">-</span>`}</div>`;
+  return ENG_XKINDS.filter(([id]) => on.includes(id)).map(([id, t]) => `<div class="xrow">${block(t, (r.x || {})[id], cmpOn ? "いまの計算機の装備" : "")}`
+    + (R ? R.cols.map((x) => block(t, (x.r.x || {})[id], `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn">${x.miss}個入らず</span>` : ""}`)).join("") : cmpOn ? `<div class="muted">比べています…</div>` : "") + `</div>`).join("");
 }
 function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履歴)の ID、または "now:キャラ名"(いまゲームで着ている装備)
   const ch = simcCur(), EQ = DATA.equip || {}; if (!ch) return;
@@ -2280,16 +2290,16 @@ function simcWear(m, items, shadow) {     // 装備セットを着せる。つ�
   }
   return rows;
 }
-async function simcFromFox(asNew) {
-  const F = SIMC.fox, EQ = DATA.equip || {}, e = (EQ.chars || {})[F.char];
+async function simcFromFox(asNew, src) {    // src = {char, set, shadow, full}。full = いまのスロットの中身を、そのキャラ(職業・Lv・ステータス・装備)で置きかえる
+  const F = src || SIMC.fox, EQ = DATA.equip || {}, e = (EQ.chars || {})[F.char];
   if (!e) return;
   const mainSet = (EQ.sets || {})[F.set], shSet = (EQ.shadows || {})[F.shadow], now = e.now || [];
   const st = (mainSet && (mainSet.chars || {})[F.char] && mainSet.chars[F.char].status) || e.status || {};
   let ch = simcCur(), id = SIMC.cur;
-  SIMC.busy = "ゲームのキャラから作っています…"; SIMC.msg = ""; render();
+  SIMC.busy = "キャラを読み込んでいます…"; SIMC.msg = ""; render();
   if (!ENG.ready) { await engInit(); if (!ENG.ready) { SIMC.busy = ""; render(); return; } }
   try {
-    if (asNew) {
+    if (asNew || F.full) {
       const jo = ENG.jobs.find(([, t]) => t === st.jobName);
       if (!jo) throw new Error(st.jobName ? `ラトリオに「${st.jobName}」という職業がありません` : "このキャラの職業がまだ読めていません（キャラ選択からログインし直すと読めます）");
       const model = await engTemplate(jo[0]);
@@ -2297,8 +2307,8 @@ async function simcFromFox(asNew) {
       if (st.jobLv) model.status.jobLv = st.jobLv;
       ["str", "agi", "vit", "int", "dex", "luk"].forEach((k) => { const v = (st.stats || {})[k.toUpperCase()]; model.status[k] = v && v.base !== undefined ? v.base : 1; });
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { const v = (st.stats || {})[k]; model.pureStatus[6 + i] = v && v.base !== undefined ? v.base : 0; });
-      id = "c" + Date.now().toString(36);
-      ch = SIMC.chars[id] = { name: cn(F.char) + (mainSet ? `（${mainSet.tag}）` : ""), model };
+      if (asNew) { id = "c" + Date.now().toString(36); ch = SIMC.chars[id] = { name: cn(F.char) + (mainSet ? `（${mainSet.tag}）` : ""), model }; }
+      else if (ch) { ch.model = model; SIMC.res = null; }
     }
     if (!ch) throw new Error("着せる先のキャラがありません");
     const main = mainSet ? mainSet.items : now.filter((i) => i.wear & 1023), shadow = shSet ? shSet.items : now.filter((i) => i.wear >= 65536), rows = [];
@@ -2306,7 +2316,7 @@ async function simcFromFox(asNew) {
     if (shadow.length) { rows.push(...simcWear(ch.model, shadow, true)); ch.model.foxShadow = shSet ? F.shadow : (e.shadow || ""); }
     SIMC.report = { id, rows, rnd: main.concat(shadow).some((i) => (i.options || []).length) };
     simcSelect(id); await simcPut(id);
-    SIMC.msg = asNew ? "ゲームのキャラから作りました。" : "装備を着せました。";
+    SIMC.msg = asNew ? "新しいスロットを作りました。" : F.full ? `「${cn(F.char)}」を反映しました。` : "装備を反映しました。";
   } catch (err) { SIMC.msg = "取り込めませんでした: " + err.message; }
   SIMC.busy = ""; render();
 }
@@ -2325,28 +2335,31 @@ function renderSimChara() {
       <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
         <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
+        <button class="ghost" id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオから作る」で中身を入れられます">新しいスロットを作成</button>
+        <button class="ghost" id="sccnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">現在のキャラを反映</button>
         <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
         <button class="ghost" id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットを、最後に保存したときの内容に戻します">元に戻す</button>
         <button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="このキャラを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button><button class="ghost" id="sccdel">消す</button>` : ""}
+      ${ch ? "" : `<button class="ghost" id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオから作る」で中身を入れられます">新しいスロットを作成</button>`}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
       ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「元に戻す」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「元に戻す」で戻せます。"}</div>` : ""}</div>`;
   {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
-    let game = `<div class="muted">ゲームにログインすると、このツールが通信から読んだ自分のキャラ（職業・Lv・ステータス・装備）をもとに作れます。</div>`;
+    let game = `<div class="muted">ゲームにログインすると、このツールがキャラ（職業・Lv・ステータス・装備）を覚えます。覚えたキャラから、新しいスロットを作れます。</div>`;
     if (names.length) {
       if (!names.includes(F.char)) F.char = names.slice().sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0];
-      const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).filter(([, st]) => st.tag).sort((x, y) => String(x[1].tag).localeCompare(String(y[1].tag), "ja", { numeric: true }))
+      const opt = (T, cur, here) => `<option value="">${F.char === nowChar() ? "いま着ている装備" : "最後に着ていた装備"}</option>` + Object.entries(T || {}).filter(([, st]) => st.tag).sort((x, y) => String(x[1].tag).localeCompare(String(y[1].tag), "ja", { numeric: true }))
         .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(setLabel(st))}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
       game = `<div class="opts"><label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
-        <label>装備セット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
-        <label>シャドウ <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
+        <label>装備スロット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
+        <label>シャドウのスロット <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
         <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>このキャラで新しいスロットを作る</button></div>
-        <div class="muted" style="font-size:12px">通信から読んだ職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。</div>`;
+        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。いまログインしているキャラは、上の「現在のキャラを反映」でも入れられます。</div>`;
     }
     const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
         <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button></div>`;
-    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkgame", "ゲームのキャラから作る", game, "", true)}${simcFold("mkrat", "ラトリオから作る", rat, ` <span class="muted">（1から作る・保存URL・セーブファイル）</span>`, false)}</div>`;
+    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "保存したキャラから作る", game, ` <span class="muted">（このツールが覚えている、ゲームのキャラ）</span>`, false)}${simcFold("mkrat", "ラトリオから作る", rat, ` <span class="muted">（1から作る・保存URL・セーブファイル）</span>`, false)}</div>`;
   }
   if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
     h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
@@ -2366,7 +2379,7 @@ function renderSimChara() {
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
-    h += `<div class="panel empty">上の「ゲームのキャラから作る」か「ラトリオから作る」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">上の「新しいスロットを作成」を押すか、「保存したキャラから作る」「ラトリオから作る」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
     h += `<div class="panel empty">${ENG.err ? "計算係（ROラトリオHub）を起動できませんでした。上の「もう一度試す」を押してください。" : "計算係（ROラトリオHub）を起動しています…<br>初回は、ラトリオの部品を全部読み込むので1分ほどかかることがあります。2回目からは速くなります。"}</div>`;
   } else {
@@ -2392,7 +2405,7 @@ function renderSimChara() {
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
-      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_XKINDS.filter(([id]) => simcXKinds().includes(id)))}</div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}</div>
+      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -2410,6 +2423,24 @@ function renderSimChara() {
     g("scpgo").onclick = simcImportPicked;
   }
   $("#view").querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+  if (g("sccnewslot")) g("sccnewslot").onclick = async () => {
+    const v = prompt("新しいスロットの名前", "新しいスロット"); if (!v || !v.trim()) return;
+    SIMC.busy = "新しいスロットを作っています…"; render();
+    try {
+      await engInit(); if (!ENG.ready) throw new Error(ENG.err || "計算係を起動できませんでした");
+      const model = await engTemplate(0);
+      Object.assign(model.status, { baseLv: 1, jobLv: 1, str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1 });
+      const id = "c" + Date.now().toString(36);
+      SIMC.chars[id] = { name: v.trim().slice(0, 40), model, saved: simcClone(model) };
+      simcSelect(id); await simcPut(id);
+      SIMC.msg = nowChar() ? "空のスロットを作りました。「現在のキャラを反映」で、ログインしているキャラを入れられます。" : "空のスロットを作りました。";
+    } catch (e) { SIMC.msg = "作れませんでした: " + e.message; }
+    SIMC.busy = ""; render();
+  };
+  if (g("sccnow")) g("sccnow").onclick = async () => {
+    const c = nowChar(); if (!c) return;
+    if (await askOnce("nowchar", `スロット「${ch.name}」に、いまログインしている「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「元に戻す」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
+  };
   if (g("sccretry")) g("sccretry").onclick = () => { ENG.err = ""; engInit().then(render); render(); };
   if (g("sccsavebtn")) g("sccsavebtn").onclick = () => { ch.saved = simcClone(ch.model); simcSave(); SIMC.msg = "保存しました。"; render(); };
   if (g("sccrevert")) g("sccrevert").onclick = async () => { if (await askOnce("revert", `「${ch.name}」を、最後に保存したときの内容に戻します。\n保存していない変更は消えます。`, "元に戻す")) { ch.model = simcClone(ch.saved); SIMC.res = null; SIMC.report = null; simcSave(); SIMC.msg = "保存したときの内容に戻しました。"; render(); } };
@@ -2460,7 +2491,7 @@ function renderSimChara() {
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
     // 装備セットを並べて比べる
-    V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else SIMC.cmp.push(sid); render(); });
+    V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else { SIMC.cmp.push(sid); while (SIMC.cmp.length > 2) SIMC.cmp.shift(); } render(); });      // 比べるのは一度に2つまで(3つ目を選ぶと、いちばん古いものを外す)
     simcCmpFill(m); simcCmpKick(m);
     // ステ振りの相談
     if (g("soa")) {
@@ -2522,24 +2553,26 @@ function renderSimChara() {
     { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」で置きかえます。\nいまの${part(shadow)}は、登録していなければ消えます。`, "置きかえる")) simcWearSet(sid, shadow); };
-    V.querySelectorAll("[data-wear]").forEach((el) => {
-      const sid = el.dataset.wear, shadow = el.dataset.sh === "1", tag = el.textContent.replace("＊", "");
-      el.onclick = (e) => { e.preventDefault(); wearAsk(sid, shadow, tag); };
-      el.oncontextmenu = (e) => {
-        e.preventDefault();
-        showCtx(e.clientX, e.clientY, [{ cap: `「${tag}」` },
-          { label: `いまの計算機の${part(shadow)}で上書き`, act: async () => { if (await askOnce("over", `「${tag}」を、いまの計算機の${part(shadow)}で上書きします。\nいまの「${tag}」の中身は履歴に戻ります。`, "上書きする")) simcRegister(shadow, sid); } },
-          { label: "登録を外す", act: async () => { if (await askOnce("unreg", `「${tag}」の登録を外します。\n装備の中身は履歴に残るので、あとでまた登録できます。`, "登録を外す")) { await postSet({ sid, unregister: 1 }); await load(); render(); } } }]);
-      };
+    V.querySelectorAll("[data-slot]").forEach((el) => {
+      const sid = el.dataset.slot, shadow = el.dataset.sh === "1", tag = el.textContent.replace("＊", ""), st = ((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[sid] || {};
+      const menu = (x, y) => showCtx(x, y, [{ cap: `スロット「${tag}」 ${st.name || st.auto || ""}` },
+        { label: `反映する（「${tag}」を計算機に入れる）`, act: () => wearAsk(sid, shadow, tag) },
+        { label: `上書きする（いまの計算機の${part(shadow)}を「${tag}」に保存）`, act: async () => { if (await askOnce("over", `スロット「${tag}」を、いまの計算機の${part(shadow)}で上書きします。\nいまの「${tag}」の中身は履歴に戻ります。`, "上書きする")) simcRegister(shadow, sid); } },
+        "-",
+        { label: "名前を変える", act: async () => { const v = prompt(`スロット「${tag}」の名前（空にすると自動の名前）`, st.name || ""); if (v !== null) { await postSet({ sid, name: v.trim() }); await load(); render(); } } },
+        { label: "記号を変える", act: async () => { const v = prompt("新しい記号（8文字まで）", tag); if (v && v.trim()) { await postSet({ sid, tag: v.trim() }); await load(); render(); } } },
+        { label: "登録を外す（履歴に戻す）", act: async () => { if (await askOnce("unreg", `スロット「${tag}」の登録を外します。\n装備の中身は履歴に残るので、あとでまた登録できます。`, "登録を外す")) { await postSet({ sid, unregister: 1 }); await load(); render(); } } }]);
+      el.onclick = (e) => { e.preventDefault(); const r = el.getBoundingClientRect(); menu(r.left, r.bottom + 4); };
+      el.oncontextmenu = (e) => { e.preventDefault(); menu(e.clientX, e.clientY); };
     });
     V.querySelectorAll("[data-simreg]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcRegister(el.dataset.simreg === "1", ""); });
+    V.querySelectorAll("[data-wearnow]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const c = nowChar(); if (c) wearAsk("now:" + c, el.dataset.wearnow === "1", cn(c) + " がいま着ている装備"); });
     V.querySelectorAll("[data-wearmore]").forEach((el) => el.onclick = (e) => {
       e.preventDefault();
-      const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow), E = (DATA.equip || {}).chars || {};
-      const now = Object.entries(E).filter(([, c]) => (c.now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023))).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0))
-        .map(([c]) => ({ v: "now:" + c, t: `いま着ている装備: ${cn(c)}`, k: c, label: cn(c) + " のいまの装備" }));
-      const hist = L.rest.filter((x) => !x.st.sim).map(({ sid, st }) => ({ v: sid, t: `履歴: ${st.name || st.auto || ""}（${Object.keys(st.chars || {}).map(cn).join("、")}）`, k: "", label: st.name || st.auto || "履歴" }));
-      pickOpen(el, now.concat(hist), null, (sid, o) => wearAsk(sid, shadow, o.label));
+      const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow);
+      const hist = L.rest.map(({ sid, st }) => ({ v: sid, t: `${st.sim ? "計算機で作った装備" : "着ていた装備"}: ${st.name || st.auto || ""}${Object.keys(st.chars || {}).length ? `（${Object.keys(st.chars).map(cn).join("、")}）` : ""}`, k: "", label: st.name || st.auto || "保存した装備" }));
+      if (!hist.length) { SIMC.msg = "スロットに登録していない装備の履歴は、まだありません。"; render(); return; }
+      pickOpen(el, hist, null, (sid, o) => wearAsk(sid, shadow, o.label));
     });
     V.querySelectorAll("[data-xk]").forEach((el) => el.onclick = () => { const id = +el.dataset.xk, on = simcXKinds(), i = on.indexOf(id); if (i >= 0) on.splice(i, 1); else on.push(id); store.set("md_simx", JSON.stringify(on)); SIMC.res = null; render(); });
     V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOpts(m.status.jobId, region), simcItemAt(m, region), (v) => { simcSetItem(m, region, v); touched(region); changed(); }); });
@@ -3047,18 +3080,17 @@ function renderChars(chars) {
 // ---------- 装備セット ----------
 // 装備セット(メイン10か所)・シャドウセット(6か所)。同じ中身はキャラが違っても同じセット。記号(A, B… / S1, S2…)と名前を付けられる
 let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false;
-function nowGearHtml(chars) {       // いま着ている装備(キャラを選ぶ)。装備セットになっていないときもここで見られる
-  const EQ = DATA.equip || {}, E = EQ.chars || {};
-  const names = chars.filter((c) => E[c] && E[c].has_equip);
-  if (!names.length) return "";
-  if (!names.includes(EQ_CHAR)) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
-  const e = E[EQ_CHAR], S = EQ.sets || {}, SH = EQ.shadows || {};
+function nowGearHtml(chars) {       // いま着ている装備 = いまログインしているキャラの装備。ここからスロットに登録・上書きできる
+  const EQ = DATA.equip || {}, E = EQ.chars || {}, c = nowChar();
+  if (!c || !E[c].has_equip) return `<h2>いま着ている装備</h2><div class="panel eq-box"><span class="muted">いまログインしているキャラがいません（ゲームにログインすると、そのキャラが着ている装備がここに出ます）。</span></div>` + unknownItemsHtml(EQ.unknown || []);
+  EQ_CHAR = c;
+  const e = E[c], S = EQ.sets || {}, SH = EQ.shadows || {};
   const tagOf = (st) => `${tagChip(st)} ${esc(st.name || st.auto)}`;
   const miss = (shadow) => esc((e.missing || []).filter((x) => x.startsWith("シャドウ") === shadow).join("・") || "-");
-  return `<h2>いま着ている装備</h2><div class="panel eq-box"><div class="eq-h">
-      <label>キャラ <select id="eqc">${names.map((c) => `<option value="${esc(c)}" ${c === EQ_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
-      <span>${S[e.cur] ? `<span class="muted">装備セット</span> ${tagOf(S[e.cur])}` : `<span class="muted">装備セットになっていません（あいている場所: ${miss(false)}）</span>`}</span>
-      <span>${SH[e.shadow] ? `<span class="muted">シャドウ</span> ${tagOf(SH[e.shadow])}` : `<span class="muted">シャドウセットになっていません（あいている場所: ${miss(true)}）</span>`}</span>
+  const reg = (sid, T, sh) => (T[sid] && !T[sid].tag ? ` <button class="ghost" data-reg="${esc(sid)}" data-sh="${sh}" title="いま着ている${sh ? "シャドウ装備" : "装備"}を、新しいスロットに登録するか、登録ずみのスロットに上書きします">スロットに登録</button>` : "");
+  return `<h2>いま着ている装備 <span class="muted" style="font-weight:400;font-size:13px">（いまログインしている ${esc(cn(c))}）</span></h2><div class="panel eq-box"><div class="eq-h">
+      <span>${S[e.cur] ? `<span class="muted">装備</span> ${tagOf(S[e.cur])}${reg(e.cur, S, 0)}` : `<span class="muted">装備がそろっていません（あいている場所: ${miss(false)}）</span>`}</span>
+      <span>${SH[e.shadow] ? `<span class="muted">シャドウ</span> ${tagOf(SH[e.shadow])}${reg(e.shadow, SH, 1)}` : `<span class="muted">シャドウ装備がそろっていません（あいている場所: ${miss(true)}）</span>`}</span>
       <span class="eq-btns"><button class="ghost" id="gsnow">${GS_NOW ? "とじる" : "中身"}</button></span></div>
     ${GS_NOW ? itemsTable(e.now || []) : ""}</div>` + unknownItemsHtml(EQ.unknown || []);
 }
@@ -3069,7 +3101,7 @@ function renderGSets(chars) {
   const section = (T, title, isShadow) => {
     const L = Object.entries(T).filter(([, st]) => st.tag || inWorld(st)).sort((a, b) => (!!b[1].tag - !!a[1].tag) || (a[1].tag ? String(a[1].tag).localeCompare(String(b[1].tag), "ja", { numeric: true }) : (b[1].last || 0) - (a[1].last || 0)));   // 登録したもの(記号の順) → 履歴(新しい順)
     const nReg = L.filter(([, st]) => st.tag).length;
-    let x = `<h2>${title}（登録 ${nReg}・履歴 ${L.length - nReg}）</h2>`, hist = false;
+    let x = `<h2>${isShadow ? "シャドウのスロット" : "装備スロット"}（登録 ${nReg}・履歴 ${L.length - nReg}）</h2>`, hist = false;
     if (!L.length) return x + `<div class="panel empty">まだありません。${isShadow ? "シャドウ装備6か所" : "兜・鎧・武器・盾・肩・靴・アクセサリー2つ"}が全部うまると記録されます。</div>`;
     for (const [sid, st] of L) {
       const cs = Object.entries(st.chars || {}).sort((a, b) => (b[1].last || 0) - (a[1].last || 0));
