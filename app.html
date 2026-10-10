@@ -832,8 +832,22 @@ td.dm-max{font-weight:700}
 .simc2{display:flex;flex-direction:column;gap:10px;align-items:stretch}
 .simrow2{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
 @media (max-width:700px){.simrow2{grid-template-columns:1fr}}
-.simc2 details>summary{cursor:pointer;white-space:normal}
+.simc2 details>summary{cursor:pointer;white-space:normal;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.simc2 details>summary::before{content:"▸";display:inline-block;width:1em;color:var(--muted,#999)}
+.simc2 details[open]>summary::before{content:"▾"}
+.simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
+.settabs.right{margin-left:auto}
+.settab.more{border-style:dashed;font-weight:400}
+.xwrap{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
+.xinfo{font-size:12px}
+.xinfo .xttl{font-weight:700;font-size:13px;margin-bottom:2px}
+.xinfo table{width:auto;border-collapse:collapse}
+.simc .xinfo td{padding:1px 6px;border-bottom:none;vertical-align:top}
+.xinfo [class*=_TITLE],.xinfo td.CSSCLS_EXTRA_INFO_DISP_TABLE{font-weight:700;border-bottom:1px solid var(--line) !important}
+.xinfo [class*=_VALUE]{text-align:right}
+.xinfo .CSSCLS_EXTRA_INFO_DISP_TABLE_BLUE{color:#5aa9ff}
+.xinfo .CSSCLS_EXTRA_INFO_DISP_TABLE_RED{color:#ff6b6b}
 .eqhead{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
 .eqhead h3{margin:0}
 .settabs{display:flex;gap:4px;align-items:center;flex-wrap:wrap}
@@ -1123,24 +1137,50 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
       rndTypes: (await imp("equip/rndopttype.dat.js")).g_rndOptTypeArray, rndListIdx: (await imp("const/EnumRndOptTypeDataIndex.js")).RND_OPT_TYPE_DATA_INDEX_LIST_ID_ARRAY };
     if (!query) { const b = ENG.reg.extractModelFromDom(); ENG.blank = (b.equip || []).slice(); ENG.blankShadow = ((b.shadowEquip || {}).itemId || []).slice(); }   // 「なし」のときの番号(開いた直後の状態)
     ENG.blank = ENG.blank || []; ENG.blankShadow = ENG.blankShadow || [];
+    try { ENG.xinfo = (await imp("ui/CExtraInfoAreaComponentManager.js")).CExtraInfoAreaComponentManager; } catch (e) { ENG.xinfo = null; }
     ENG.cache = {};
     ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
     ENG.ready = true;
   })().catch((e) => { ENG.err = e.message; }).finally(() => { ENG.loading = null; });
   return ENG.loading;
 }
-function engCalc(model) {                 // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計}
+// ラトリオの「拡張情報」の表。ラトリオの表示係(CExtraInfoAreaComponentManager)に、計算係の中の見えない枠へ描かせて、できた表を持ち帰る。
+// 表示係は「直前の計算」の値(ラトリオの中の変数)を読むので、必ず engCalc の直後(同じ計算のうち)に呼ぶ
+const ENG_XKINDS = [[5, "魔法特化"], [4, "物理特化"], [6, "属性倍率"], [7, "ダメージ耐性"], [8, "状態異常耐性"], [9, "新状態異常耐性"]];
+function engExtra(raw, kinds) {
+  const out = {};
+  if (!ENG.xinfo || !kinds.length) return out;
+  const d = ENG.frame.contentDocument, C = ENG.xinfo, inst = C.instanceManager.getInstanceList()[0];
+  if (!inst) return out;
+  const id = "OBJID_TD_EXTRA_INFO_" + inst.managerInstanceId;
+  let td = d.getElementById(id);
+  if (!td) { const t = d.createElement("table"); t.style.display = "none"; t.innerHTML = `<tbody><tr><td id="${id}"></td></tr></tbody>`; d.body.appendChild(t); td = d.getElementById(id); }
+  C.setReferData(raw.charaData, raw.specData, raw.mobData);
+  for (const k of kinds) {
+    try {
+      inst.selectedInfoId = +k; inst.RebuildDispArea(); inst.RefreshDispArea();
+      const c = td.cloneNode(true);
+      c.querySelectorAll("select,input,button,script,a").forEach((el) => el.remove());
+      c.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+      c.querySelectorAll("[style]").forEach((el) => el.removeAttribute("style"));
+      out[k] = c.innerHTML;
+    } catch (e) { console.warn("extra info", k, e); }
+  }
+  inst.selectedInfoId = 0;
+  return out;
+}
+function engCalc(model, xkinds) {         // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計, x: 拡張情報の表(頼んだときだけ)}
   const before = ENG.sw.map((x) => x.m[x.get]);
   ENG.sw.forEach((x) => x.m[x.set](true));              // 計算の間だけ「欄を開いている」ことにする → model の支援・アイテムが必ず使われる
   engRndReset(model.foxRnd);
-  let r;
-  try { r = ENG.reg.calcCoreFromModel(JSON.parse(JSON.stringify(model))); }
+  let r, x = {};
+  try { r = ENG.reg.calcCoreFromModel(JSON.parse(JSON.stringify(model))); if (xkinds && xkinds.length) x = engExtra(r, xkinds); }
   finally { ENG.sw.forEach((x, i) => x.m[x.set](before[i])); }
   const st = ENG.state, tot = {};
   for (const k of ["STR", "AGI", "VIT", "INT", "DEX", "LUK"]) tot[k] = st["n_A_" + k];
   const bonus = ENG.hm.g_bonusStatus || [];
   ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { tot[k] = ((model.pureStatus || [])[6 + i] || 0) + (bonus[6 + i] || 0); });   // 特性ステータスは 素点 + 補正
-  return { c: r.charaData, core: r.coreOutput || {}, tot };
+  return { c: r.charaData, core: r.coreOutput || {}, tot, x };
 }
 // ふつうの装備のランダムオプションは model に入らず、ラトリオの中の表(g_equipRndOptTable[場所][枠] = [種類, 値])に残る(これも隠れた状態)。
 // Fox では model.foxRnd[場所 0〜10] に持ち、計算のたびに表へ書き戻す。シャドウ装備の分は model.shadowEquip.rndOpt からラトリオが自分で入れる
@@ -1441,11 +1481,44 @@ function simcEquipHtml(m, shadow) {
   return h + `</table>`;
 }
 // 装備欄の右上に並べる「装備セットのタブ」。通信で読んで登録された装備セット(A, B… / S1…)を押すと、いまのキャラに着せかえる
+// 装備セットは着がえの途中の組み合わせも登録されて増えやすいので、タブに出すのは
+//   名前を付けたもの / 2回以上着たもの / いまゲームで着ているもの / このキャラが着ているもの  を新しい順に SIMC_TABMAX 個まで。残りは「ほか」から検索して選ぶ
+const SIMC_TABMAX = 8;
+function simcSetList(m, shadow) {
+  const EQ = DATA.equip || {}, T = EQ[shadow ? "shadows" : "sets"] || {}, cur = shadow ? m.foxShadow : m.foxSet;
+  const live = new Set(Object.values(EQ.chars || {}).map((e) => (shadow ? e.shadow : e.cur)).filter(Boolean));
+  const all = Object.entries(T).map(([sid, st]) => {
+    const cs = Object.values(st.chars || {}), n = cs.reduce((a, c) => a + (c.n || 0), 0), last = Math.max(st.last || 0, ...cs.map((c) => c.last || 0));
+    return { sid, st, last, main: !!st.name || n >= 2 || live.has(sid) || sid === cur };
+  }).sort((a, b) => b.last - a.last);
+  const tabs = all.filter((x) => x.main).slice(0, SIMC_TABMAX);
+  if (cur && T[cur] && !tabs.some((x) => x.sid === cur)) tabs.push(all.find((x) => x.sid === cur));
+  tabs.sort((a, b) => (a.st.first || 0) - (b.st.first || 0));
+  return { tabs, rest: all.filter((x) => !tabs.includes(x)), cur };
+}
 function simcSetTabs(m, shadow) {
-  const T = (DATA.equip || {})[shadow ? "shadows" : "sets"] || {}, cur = shadow ? m.foxShadow : m.foxSet;
-  const list = Object.entries(T).sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
-  if (!list.length) return `<span class="muted">ゲームで装備を着ると、ここに装備セットが並びます</span>`;
-  return `<span class="muted">${shadow ? "シャドウのセット" : "装備セット"}</span>` + list.map(([sid, st]) => `<button class="settab${sid === cur ? " on" : ""}" data-wear="${esc(sid)}" data-sh="${shadow ? 1 : 0}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと着せかえます）">${esc(st.tag)}</button>`).join("");
+  const L = simcSetList(m, shadow);
+  if (!L.tabs.length && !L.rest.length) return `<span class="muted">ゲームで装備を着ると、ここに装備セットが並びます</span>`;
+  return `<span class="muted">${shadow ? "シャドウのセット" : "装備セット"}</span>`
+    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-wear="${esc(sid)}" data-sh="${shadow ? 1 : 0}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと着せかえます）">${esc(st.tag)}</button>`).join("")
+    + (L.rest.length ? `<button class="settab more" data-wearmore="${shadow ? 1 : 0}" title="タブに出していない装備セットから、検索して選びます">ほか ${L.rest.length} ▾</button>` : "");
+}
+// たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
+const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
+function simcFold(key, title, body, head = "", openDefault = true) {
+  const st = simcFoldState(), open = st[key] === undefined ? openDefault : st[key];
+  return `<details class="panel fold" data-fold="${key}" ${open ? "open" : ""}><summary><b>${title}</b>${head}</summary>${body}</details>`;
+}
+const simcXKinds = () => { try { const v = JSON.parse(store.get("md_simx") || "[5]"); return Array.isArray(v) ? v.filter((k) => ENG_XKINDS.some(([id]) => id === k)) : [5]; } catch (e) { return [5]; } };
+function simcExtraHtml(r) {
+  const on = simcXKinds();
+  return `<div class="settabs" style="margin-bottom:6px">${ENG_XKINDS.map(([id, t]) => `<button class="settab${on.includes(id) ? " on" : ""}" data-xk="${id}">${t}</button>`).join("")}</div>`
+    + `<div class="xwrap" id="sccx">${simcExtraBody(r)}</div>`;
+}
+function simcExtraBody(r) {
+  const on = simcXKinds();
+  if (!on.length) return `<span class="muted">上のボタンで、見たい表を選んでください（いくつでも）。</span>`;
+  return ENG_XKINDS.filter(([id]) => on.includes(id)).map(([id, t]) => `<div class="xinfo"><div class="xttl">${t}</div>${(r.x || {})[id] || `<span class="muted">-</span>`}</div>`).join("");
 }
 function simcWearSet(sid, shadow) {
   const ch = simcCur(), st = ((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[sid];
@@ -1568,22 +1641,23 @@ function renderSimChara() {
     h += `<div class="panel empty">計算係（ROラトリオHub）を起動しています…</div>`;
   } else {
     const m = ch.model;
-    if (!SIMC.res) { try { SIMC.res = engCalc(m); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
+    if (!SIMC.res) { try { SIMC.res = engCalc(m, simcXKinds()); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
     const r = SIMC.res || { c: [], core: {}, tot: {} };
     const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
     const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
     h += `<div class="simc simc2">
-      <div class="simrow2"><div class="panel"><h3>基本ステータス</h3><table>
+      <div class="simrow2">${simcFold("base", "基本ステータス", `<table>
           <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
           <tr><td>BaseLv / JobLv</td><td><input type="number" min="1" max="300" data-st="baseLv" value="${m.status.baseLv ?? 1}"> / <input type="number" min="1" max="100" data-st="jobLv" value="${m.status.jobLv ?? 1}"></td></tr>
-          ${stat("STR", "str")}${stat("AGI", "agi")}${stat("VIT", "vit")}${stat("INT", "int")}${stat("DEX", "dex")}${stat("LUK", "luk")}</table></div>
-        <div class="panel"><h3>特性ステータス</h3><table>
-          ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table></div></div>
-      <details class="panel" id="sccdet" ${store.get("md_simopen") === "1" ? "open" : ""}><summary><b>ステータス（計算結果）</b> <span class="muted" id="sccsum">${simcSumText(r)}</span></summary><div id="sccres">${simcResultHtml(m, r)}</div></details>
-      <div class="panel"><h3>ASPD・詠唱・ディレイ</h3><div id="scckey">${simcKeyHtml(m, r)}</div></div>
-      <div class="panel"><div class="eqhead"><h3>装備 <span class="muted" style="font-weight:400">（名前を押すと、検索つきの一覧から選べます）</span></h3><span class="settabs">${simcSetTabs(m, false)}</span></div>${simcEquipHtml(m, false)}</div>
-      <div class="panel"><div class="eqhead"><h3>シャドウ装備</h3><span class="settabs">${simcSetTabs(m, true)}</span></div>${simcEquipHtml(m, true)}</div></div>
+          ${stat("STR", "str")}${stat("AGI", "agi")}${stat("VIT", "vit")}${stat("INT", "int")}${stat("DEX", "dex")}${stat("LUK", "luk")}</table>`)}
+        ${simcFold("trait", "特性ステータス", `<table>
+          ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
+      ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
+      ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>`)}
+      ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
+      ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
+      ${simcFold("x", "補助情報", simcExtraHtml(r), ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>`)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -1619,7 +1693,8 @@ function renderSimChara() {
   if (ch && ENG.ready) {
     // 値を変えたら、その場で計算し直して結果だけ描きかえる(入力中の欄はそのまま)
     const recalc = () => {
-      try { SIMC.res = engCalc(ch.model); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
+      try { SIMC.res = engCalc(ch.model, simcXKinds()); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
+      if (g("sccx")) g("sccx").innerHTML = simcExtraBody(SIMC.res);
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick();
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
@@ -1631,8 +1706,14 @@ function renderSimChara() {
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = (region) => { if (region >= 14) m.foxShadow = ""; else m.foxSet = ""; };      // 手で替えたら、「どの装備セットを着ているか」の印を外す
-    if (g("sccdet")) g("sccdet").ontoggle = (e) => store.set("md_simopen", e.target.open ? "1" : "0");
-    V.querySelectorAll("[data-wear]").forEach((el) => el.onclick = () => simcWearSet(el.dataset.wear, el.dataset.sh === "1"));
+    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+    V.querySelectorAll("[data-wear]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcWearSet(el.dataset.wear, el.dataset.sh === "1"); });
+    V.querySelectorAll("[data-wearmore]").forEach((el) => el.onclick = (e) => {
+      e.preventDefault();
+      const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow);
+      pickOpen(el, L.rest.map(({ sid, st }) => ({ v: sid, t: `${st.tag}: ${st.name || st.auto || ""}`, k: Object.keys(st.chars || {}).map(cn).join(" ") })), null, (sid) => simcWearSet(sid, shadow));
+    });
+    V.querySelectorAll("[data-xk]").forEach((el) => el.onclick = () => { const id = +el.dataset.xk, on = simcXKinds(), i = on.indexOf(id); if (i >= 0) on.splice(i, 1); else on.push(id); store.set("md_simx", JSON.stringify(on)); SIMC.res = null; render(); });
     V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOpts(m.status.jobId, region), simcItemAt(m, region), (v) => { simcSetItem(m, region, v); touched(region); changed(); }); });
     V.querySelectorAll("[data-card]").forEach((el) => el.onclick = () => { const [region, i] = two(el, "card"), cr = SIMC_CARD[region][i]; pickOpen(el, simcCardOpts(region, m.equip[region])[i], m.card[cr] || 0, (v) => { m.card[cr] = v; touched(region); changed(); }); });
     V.querySelectorAll("[data-rf]").forEach((el) => el.onchange = () => { simcSetRefine(m, +el.dataset.rf, +el.value); touched(+el.dataset.rf); changed(); });
