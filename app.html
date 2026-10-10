@@ -37,6 +37,10 @@
   .tabs button { background: var(--panel); color: var(--muted); border: 1px solid var(--line); padding: 7px 14px; }
   .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .srvtabs { align-self: center; }
+  /* 計算機は横に広いので、画面の幅いっぱいに出す */
+  #calcwrap { width: calc(100vw - 24px); margin-left: calc(50% - 50vw + 12px); }
+  #calcbar { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  #calcframe { width: 100%; height: calc(100vh - 190px); min-height: 420px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
   .srvtabs select { font-size: 13px; padding: 3px 8px; border-radius: 8px; }
   td.char.sel, th.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--chip); }
   .tabs .count { font-size: 12px; opacity: .85; margin-left: 4px; }
@@ -131,6 +135,8 @@
     </header>
     <div class="tabs" id="tabs"></div>
     <div id="view"></div>
+    <!-- 計算機(ROラトリオHub)。タブを切りかえても中身(入力した内容)が消えないよう、#view の外に置いたままにする -->
+    <div id="calcwrap" hidden><div id="calcbar"></div><div id="calcbody"></div></div>
   </div>
 </div>
 
@@ -373,7 +379,7 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["calc", "計算機"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
 const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
@@ -397,6 +403,9 @@ function render() {
   $("#gear").classList.toggle("on", GEAR_TABS.some(([k]) => k === TAB));
   GEAR_EVENTS = eventGroups(chars).length;
   $("#view").onclick = null;
+  $("#calcwrap").hidden = TAB !== "calc";
+  $("#view").hidden = TAB === "calc";
+  if (TAB === "calc") return renderCalc(chars);
   if (TAB === "history") return renderHistory();
   if (TAB === "nyar") return renderNyar(groups, chars, now);
   if (TAB === "event") return renderEvents(chars, now);
@@ -927,6 +936,51 @@ function statusHtmlEq(st) {
     <div class="eq-st">${cell("Atk", two("ATK", "ATK2"))}${cell("Matk", d.MATKmin !== undefined ? `${d.MATKmin} + ${d.MATKmax}` : "-")}${cell("Def", two("DEF", "DEF2"))}${cell("Mdef", two("MDEF", "MDEF2"))}${cell("Hit", d.HIT ?? "-")}${cell("Flee", two("FLEE", "FLEE2"))}${cell("Critical", d.CRIT ?? "-")}</div>
     ${d["P.ATK"] !== undefined || d.RES !== undefined ? `<div class="eq-st">${["P.ATK", "S.MATK", "RES", "MRES", "H.PLUS", "C.RATE"].map((k) => cell(k, d[k] ?? "-")).join("")}</div>` : ""}`;
 }
+// ---------- 計算機(ROラトリオHub) ----------
+// ラトリオ本体は、アプリがフォーク(GitHub)から取り込んでこの PC に置き、/ratorio/… で配る(この PC で見ているときだけ)。
+// 中身は本家そのまま。Fox は外から入力欄を動かすだけなので、本家が更新されてもこのしくみは変わらない
+let RAT = null, RAT_TIMER = null, RAT_FRAME_VER = "";
+async function ratStatus(check) {
+  try { RAT = await fetch("/api/ratorio" + (check ? "?check=1" : "")).then((r) => r.json()); } catch { RAT = { state: "error", error: "この PC の Fox_MD_Tracker につながりません" }; }
+  if (RAT.state === "downloading" && !RAT_TIMER) RAT_TIMER = setInterval(async () => { await ratStatus(); if (RAT.state !== "downloading") { clearInterval(RAT_TIMER); RAT_TIMER = null; } if (TAB === "calc") render(); }, 800);
+  return RAT;
+}
+async function ratUpdate() { RAT = await fetch("/api/ratorio", { method: "POST" }).then((r) => r.json()); await ratStatus(); render(); }
+function renderCalc(chars) {
+  const bar = $("#calcbar"), body = $("#calcbody");
+  if (!(typeof LOCAL !== "undefined" && LOCAL)) {
+    bar.innerHTML = ""; body.innerHTML = `<div class="panel empty">計算機は、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`;
+    return;
+  }
+  if (!RAT) { body.innerHTML = `<div class="panel empty">確認中…</div>`; ratStatus().then(render); return; }
+  const st = RAT;
+  const credit = `<span class="muted">計算機は <a href="https://github.com/roratorio-hub/ratorio" target="_blank" rel="noopener">ROラトリオHub</a>（PolyForm Noncommercial License）をそのまま使っています。</span>`;
+  if (!st.installed) {
+    const h = st.state === "downloading" ? `<b>取り込み中… ${st.progress}%</b>`
+      : `<button id="ratget">ラトリオを取り込む（約13MB）</button>${st.error ? `<div class="err">${esc(st.error)}</div>` : ""}`;
+    bar.innerHTML = "";
+    const html = `<div class="panel empty">ステータス・ダメージ計算機（ROラトリオHub）を、この PC に取り込んで使います。<br>最初に1回だけダウンロードします（インターネットが必要です）。<br><br>${h}<br><br>${credit}</div>`;
+    if (body.dataset.h !== html) { body.innerHTML = html; body.dataset.h = html; }
+    if ($("#ratget")) $("#ratget").onclick = ratUpdate;
+    return;
+  }
+  // 上の帯: 版と更新
+  const upd = st.state === "downloading" ? `<b>更新中… ${st.progress}%</b>`
+    : st.newer ? `<b>新しい版があります（${esc(st.latest.date)}）</b> <button class="ghost" id="ratupd">取り込む</button>`
+    : `<button class="ghost" id="ratchk">更新を確認</button>${st.latest ? ` <span class="muted">最新です</span>` : ""}`;
+  const barHtml = `<b>ROラトリオHub</b> <span class="muted">${esc(st.date)} 版（${esc(st.commit)}）</span> ${upd}
+    ${st.error ? `<span class="err">${esc(st.error)}</span>` : ""}<span style="flex:1"></span>${credit}`;
+  if (bar.dataset.h !== barHtml) { bar.innerHTML = barHtml; bar.dataset.h = barHtml; }
+  if ($("#ratchk")) $("#ratchk").onclick = async () => { $("#ratchk").textContent = "確認中…"; await ratStatus(true); render(); };
+  if ($("#ratupd")) $("#ratupd").onclick = ratUpdate;
+  // 計算機そのもの(版が変わったときだけ読み込み直す)
+  if (RAT_FRAME_VER !== st.commit && st.state !== "downloading") {
+    RAT_FRAME_VER = st.commit;
+    body.dataset.h = "";
+    body.innerHTML = `<iframe id="calcframe" title="ROラトリオHub" src="${esc(st.entry)}?v=${esc(st.commit)}"></iframe>`;
+  }
+}
+
 // ---------- 名前がわからないアイテム ----------
 // アイテムの名前は通信に無い(番号だけ)。データに無い新しいアイテムは、ゲームの「アイテムの説明の画面」の
 // スクリーンショットから文字を読んで名前を付ける(この PC で見ているときだけ)。手で打ってもよい

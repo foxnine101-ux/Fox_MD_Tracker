@@ -24,12 +24,13 @@ import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと�
 import md_core
 import quest_names
 import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
+import ratorio_core         # ROラトリオHub(計算機)をフォークから取り込んで配る
 try:
     import char_core          # キャラのステ・装備を拾う(無くても動く)
 except Exception:
     char_core = None
 
-VERSION = "2.14.0"
+VERSION = "2.15.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -55,6 +56,7 @@ if sys.stdout is None:   # exe(--noconsole)だと出力先が無い → 部品�
 TRAY = None
 SHOW_HOOK = None   # 専用の窓を前に出す関数(窓があるとき)
 UPD = None         # updater.Updater(アップデート)
+RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
 
 
@@ -357,6 +359,15 @@ def start_live_server(core, lock, cfg):
                         data["equip"] = CHARS.equip_view()
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
+            if path.startswith("/ratorio/"):          # 計算機(ROラトリオHub)のファイル
+                hit = RATORIO.resolve(path[len("/ratorio/"):])
+                if not hit:
+                    return self._send(404, "not found", "text/plain")
+                with open(hit[0], "rb") as f:
+                    return self._send(200, f.read(), hit[1])
+            if path == "/api/ratorio":
+                st = RATORIO.check() if "check=1" in self.path else RATORIO.status()
+                return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/update":
                 st = UPD.status() if UPD else {"current": VERSION, "state": "off", "can_install": False}
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
@@ -403,6 +414,9 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
+            if self.path.split("?")[0] == "/api/ratorio" and self._local_only():
+                # 計算機(ROラトリオHub)をフォークから取り込む・更新する
+                return self._send(200, json.dumps(RATORIO.update(), ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/ocr" and self._local_only():
                 # スクリーンショット(画像そのもの)から文字を読む → {"name": 1行目から出した名前, "lines": 読めた行}
                 try:

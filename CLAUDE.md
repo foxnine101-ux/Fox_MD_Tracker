@@ -14,7 +14,7 @@
 | `quest_names.py` | RO の `System` フォルダの `.lub`(Lua 5.1 バイトコード)を自前で読む小さなVM。クエスト名 |
 | `server_core.py` | どのサーバー(ワールド)の通信か。キャラは「名前@サーバーIP」で記録する(`qualify`。md_core の `qual`)。サーバーを分ける前の「名前」だけの記録は、キャラ一覧(0x006B)・名前が決まったときに `md_core._claim` が引き継ぐ(装備・被ダメも `on_rename` で付けかえ)。画面は `cn()` で @ 以降を外し、見出しのプルダウン(`#srvsel`。ふだんは最新ログインのワールド、最新ログインのワールドが変わったら選択を戻す)で切りかえ。名前は設定の「サーバー」欄(`serverNames`)。ワールド名はログインサーバー(6900)の生データから「18.182.57.x+6121+名前」の並びを探して拾う(`login_data`。0x0AC4 の形が未確認でも読める)。ワールドグループは扱わずワールド単体で分ける。キャラ選択サーバーの IP で見分け、0071/0AC5/0092/0AC7 の行き先でマップの接続に引き継ぐ。設定の「記録しない」(`ignoreServers`)のサーバーは `_Scanner` で読み飛ばす |
 | `updater.py` | GitHub リリースから自動アップデート(入れ替えバッチ) |
-| `app.html` | 画面(1ファイル・素のJS)。タブ: 週次/デイリー/その他/耐性/被ダメ/キャラ/装備セット/ニャル様。イベント/入場履歴/設定は見出しの歯車(⚙)のメニュー |
+| `app.html` | 画面(1ファイル・素のJS)。タブ: 週次/デイリー/その他/耐性/被ダメ/キャラ/装備セット/計算機/ニャル様。イベント/入場履歴/設定は見出しの歯車(⚙)のメニュー |
 | `live.html` | 耐性リアルタイム(開発版だけ) |
 | `edition.py` | `DEV = True/False`。ビルドが書きかえて 公開版/開発版 を作る |
 | `skill_names.json` | スキル番号→名前(ラトリオ) |
@@ -24,6 +24,7 @@
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
 | `id2name.json` | アイテムID→日本語名(ラトリオ) |
 | `item_names_fix.json` | ラトリオに無いアイテムの名前(大本の手直し表。id2name より優先)。利用者の `アイテム名の手直し.json` をもらったらここに足す |
+| `ratorio_core.py` | 計算機(ROラトリオHub)をフォーク `foxnine101-ux/ratorio`(本家 roratorio-hub/ratorio + 見た目の手直しだけ)から取り込んで exe の隣の「ラトリオ」フォルダに置く。GitHub の commits → git/trees → raw で、要るファイル(engine/assets/lib/pages/calcx.html。約440個・13MB)の変わった分だけ落とす。`/ratorio/…` で配り、`/api/ratorio`(状態・確認・取り込み)。ラトリオはビルド不要。画面は `#calcwrap` の iframe(タブを切りかえても消さない)。**本家の更新はフォークに merge するだけ**。Fox 側は外から入力欄(OBJID_…)を動かすつなぎ役だけを持つ |
 | `ocr_core.py` | スクショから文字を読む(Windows.Media.Ocr 日本語を PowerShell から。2倍に拡大)。アイテムの説明の画面の1行目からアイテム名(`guess_name`)。`/api/ocr`・`/api/itemname` |
 
 生成スクリプトは rAthena の `db/re/*.yml` を引数に取る(raw.githubusercontent.com から取れる)。
@@ -59,7 +60,7 @@
 
 ## 利用者のファイル(exe と同じフォルダ。git には入れない)
 - 利用者のローカルの置き場所: `C:\Users\fuso1\OneDrive\Desktop\Fox_MD_Tracker`(実測データはここ。読むだけ。`設定.json` は送信キーがあるので開かない)
-`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `動作ログ.txt` `アップデートログ.txt`
+`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
 
 ## テストのしかた
 - `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`

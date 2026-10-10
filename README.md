@@ -8,4 +8,4 @@
 
 ※ 通信を読むツールはガンホーの規約上グレーです。使うかどうかは自己責任でお願いします。
 
-アイテムのデータ(名前・属性・耐性)とモンスターのデータ(種族・サイズ・属性)は [ROラトリオHub](https://github.com/roratorio-hub/ratorio) のデータから作っています(PolyForm Noncommercial License 1.0.0)。
+計算機タブは [ROラトリオHub](https://github.com/roratorio-hub/ratorio) をそのまま取り込んで表示しています。アイテムのデータ(名前・属性・耐性)とモンスターのデータ(種族・サイズ・属性)は [ROラトリオHub](https://github.com/roratorio-hub/ratorio) のデータから作っています(PolyForm Noncommercial License 1.0.0)。
