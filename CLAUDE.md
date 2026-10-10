@@ -81,7 +81,19 @@
 - v2.20.1: 保存データの読み込みは `engLoadData(q)`(計算係の中で `_ratorioReg.CSaveController.loadFromURL(q)` → `engFullModel()`。開き直さない。開き直した場合と同じ model になることを確認ずみ)。
   セーブファイル(1行目 `#ratoriohub-savedata#`、2行目が「名前,保存データ」の `;` 区切り。名前は `CSaveController.decodeSaveName`)は `simcOpenFile` → 一覧で選ぶ(`SIMC.pick`)→ `simcImportPicked`。
   ASPD の横は「あといくつ」ではなく、AGI・DEX を単独で動かして 193 になる最小の値(`simcNeedKick` が二分探索 → `simcNeedText`)。利用者の要望:「あと2」は意味がない、AGI/DEX をどれだけ変えるかが大事
-- 残り: 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
+- **第2段階(v2.21.0)= 装備の編集と Fox からの取り込み**:
+  - 候補はラトリオの関数をそのまま呼んで作る(`ENG.x`)。装備 = `ItemObjNew` を種類(ITEM_KIND)と `IsMatchJobRestrict(itemId, jobId)` で絞る(`simcItemOpts`。武器は種類をまたいで全部出し、選ぶと `weapon.type` も合わせる)。
+    カード・エンチャント = 計算係の画面に `RebuildCardSelect(場所, itemId)` で枠を作らせて、`OBJID_〇〇_CARD_1〜4` の選択肢を読む(`simcCardOpts`)。
+    ランダムオプション = `GetRndOptTypeId(item[4])` → `g_rndOptTypeArray[種類][リスト番号の配列]` → 切り離した select に `SetUpRndOptKind` / `SetUpRndOptValue` で作らせる
+  - model の場所: 装備 `equip[0〜10]`、カード・エンチャント `card[SIMC_CARD[場所][枠]]`、精錬 `weapon.atkPlus` / `defPlus.*`、★ `weapon.transcendence` / `defTranscendence.*`、
+    シャドウ `shadowEquip.itemId/refined/rndOpt[14,15,19,21,22,23]`(シャドウのエンチャント `card[54〜71]` は表示だけ)。「なし」の番号は開いた直後の値(`ENG.blank`)
+  - **落とし穴(隠れた状態 その2)**: ふつうの装備のランダムオプションは model に入らず、ラトリオの中の表 `g_equipRndOptTable[場所][枠] = [種類, 値]` に残る。
+    Fox では `model.foxRnd[0〜10]` に持ち、`engCalc` のたびに `engRndReset` で表へ書き戻す(シャドウの分は model からラトリオが入れる)。読み込み・職業変更の前にも表を空にする
+  - 「はずす」ときはカードも全部 0 にする(「なし」の装備にもカードの枠があり、残すと計算に入る)。`engTemplate` は同じ職業のままだと前のキャラの装備が残るので、いったん別の職業にする
+  - 検索つきプルダウンは `pickOpen(anchor, opts, cur, onPick)`(body に出す。ひらがな→カタカナ・全角半角をそろえて、読み(kana)も探す)
+  - Fox からの取り込み: `simcFromFox(新規か)` → `simcWear`(場所のビット → ラトリオの場所 `SIMC_FOXBITS` / `SIMC_FOXSH`)→ 名前でつなぐ `simcFind`(ラトリオタブと同じ `SETTINGS.ratLinks` を使う)。
+    つながらなかったものは `SIMC.report.rows` → 画面の「選ぶ」で結びつけ。Fox のランダムオプション(ゲームの番号)→ ラトリオの番号の対応表はまだ無い。二刀流の左手は未対応
+- 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
   4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
 
 ## 計算機(被ダメの検証。app.html の `renderSim`)

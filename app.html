@@ -828,6 +828,25 @@ td.dm-max{font-weight:700}
 .simc .panel{padding:10px 14px}
 .simc h3{margin:0 0 6px;font-size:14px}
 .simc td:last-child{white-space:normal}
+.eqt td{vertical-align:top}
+.eqrow{display:flex;gap:4px;align-items:center}
+.eqsub{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+.eqt select{padding:1px 2px}
+.pk{flex:1;min-width:0;text-align:left;font:inherit;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pk:hover{border-color:var(--accent,#888)}
+.pk.sm{flex:0 1 auto;font-size:12px;padding:1px 6px;max-width:100%}
+.pk.none{color:var(--muted,#999)}
+.eqrnd{display:inline-flex;gap:2px}
+.eqrnd select{font-size:12px;max-width:13em}
+.sfrow{margin-top:4px}
+.pick{position:fixed;z-index:9999;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.35);padding:6px;font-size:13px}
+.pick input{width:100%;box-sizing:border-box;font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+.pick-list{max-height:280px;overflow:auto;margin-top:4px}
+.pick-o{padding:2px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick-o.cur{font-weight:700}
+.pick-o.at{background:rgba(128,128,128,.25)}
+.pick-more{padding:4px 8px}
+.pick-desc{margin-top:4px;padding:4px 8px;border-top:1px solid var(--line);font-size:12px;white-space:normal;max-height:6em;overflow:auto}
 .scpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:2px 12px;margin:8px 0;max-height:260px;overflow:auto}
 .scpick label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .simc table{width:100%;border-collapse:collapse;font-size:13px}
@@ -1085,6 +1104,14 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     ENG.skill = await w.eval('import("/ratorio/engine/skill/skillstate.js")');
     ENG.hm = await w.eval('import("/ratorio/engine/chara/hmjob.js")');
     ENG.items = (await w.eval('import("/ratorio/engine/equip/item.dat.js")')).ItemObjNew;
+    // 装備・カード・ランダムオプションの候補は、ラトリオが自分の画面を作るときの関数をそのまま呼んで作る(本家が変わっても追従する)
+    const imp = (p) => w.eval(`import("/ratorio/engine/${p}")`);
+    ENG.x = { job: (await imp("data/mig.job.h.js")).IsMatchJobRestrict, nm: await imp("equip/equip-name.js"), card: (await imp("equip/hmcard.js")).RebuildCardSelect,
+      ro: await imp("equip/hmrndopt.js"), rnd: await imp("equip/rndopttype.h.js"), rndTypeId: (await imp("equip/item.h.js")).GetRndOptTypeId,
+      rndTypes: (await imp("equip/rndopttype.dat.js")).g_rndOptTypeArray, rndListIdx: (await imp("const/EnumRndOptTypeDataIndex.js")).RND_OPT_TYPE_DATA_INDEX_LIST_ID_ARRAY };
+    if (!query) { const b = ENG.reg.extractModelFromDom(); ENG.blank = (b.equip || []).slice(); ENG.blankShadow = ((b.shadowEquip || {}).itemId || []).slice(); }   // 「なし」のときの番号(開いた直後の状態)
+    ENG.blank = ENG.blank || []; ENG.blankShadow = ENG.blankShadow || [];
+    ENG.cache = {};
     ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
     ENG.ready = true;
   })().catch((e) => { ENG.err = e.message; }).finally(() => { ENG.loading = null; });
@@ -1093,6 +1120,7 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
 function engCalc(model) {                 // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計}
   const before = ENG.sw.map((x) => x.m[x.get]);
   ENG.sw.forEach((x) => x.m[x.set](true));              // 計算の間だけ「欄を開いている」ことにする → model の支援・アイテムが必ず使われる
+  engRndReset(model.foxRnd);
   let r;
   try { r = ENG.reg.calcCoreFromModel(JSON.parse(JSON.stringify(model))); }
   finally { ENG.sw.forEach((x, i) => x.m[x.set](before[i])); }
@@ -1102,6 +1130,13 @@ function engCalc(model) {                 // 画面なしの計算。{c: 計算�
   ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { tot[k] = ((model.pureStatus || [])[6 + i] || 0) + (bonus[6 + i] || 0); });   // 特性ステータスは 素点 + 補正
   return { c: r.charaData, core: r.coreOutput || {}, tot };
 }
+// ふつうの装備のランダムオプションは model に入らず、ラトリオの中の表(g_equipRndOptTable[場所][枠] = [種類, 値])に残る(これも隠れた状態)。
+// Fox では model.foxRnd[場所 0〜10] に持ち、計算のたびに表へ書き戻す。シャドウ装備の分は model.shadowEquip.rndOpt からラトリオが自分で入れる
+function engRndReset(rnd) {
+  const T = ENG.x.rnd.g_equipRndOptTable;
+  for (let r = 0; r < T.length; r++) for (let i = 0; i < T[r].length; i++) { const v = r <= 10 ? ((rnd || [])[r] || [])[i] : null; T[r][i] = v ? [v[0] || 0, v[1] || 0] : [0, 0]; }
+}
+const engRndBlank = () => Array.from({ length: 11 }, () => Array.from({ length: 5 }, () => [0, 0]));
 function engFullModel() {                // いまの計算係の状態を model に取り出す。たたんだ欄(支援・アイテム)の値も、配列から直接読んで入れる
   const model = JSON.parse(JSON.stringify(ENG.reg.extractModelFromDom())), sk = ENG.skill;
   const copy = (arr, len) => Array.from({ length: len }, (_, i) => { const v = arr[i]; return v === undefined || v === null ? 0 : (v === true ? true : v === false ? false : v); });
@@ -1109,17 +1144,21 @@ function engFullModel() {                // いまの計算係の状態を model
   model.buff4 = copy(sk.n_A_PassSkill4 || [], 36);
   model.buff7 = copy(sk.n_A_PassSkill7 || [], 53);
   model.buff8 = copy(sk.n_A_PassSkill8 || [], 28);
+  model.foxRnd = ENG.x.rnd.g_equipRndOptTable.slice(0, 11).map((r) => r.map((x) => [x[0] || 0, x[1] || 0]));
   return model;
 }
 async function engTemplate(jobId) {       // その職業のまっさらな model(装備なし)。職業を変えたときの下ごしらえはラトリオに任せる
   const d = ENG.frame.contentDocument, sel = d.querySelector("#OBJID_SELECT_JOB");
-  sel.value = String(jobId); sel.dispatchEvent(new Event("change", { bubbles: true }));
-  await sleep(700);
+  const set = async (v) => { sel.value = String(v); sel.dispatchEvent(new Event("change", { bubbles: true })); await sleep(700); };
+  if (String(sel.value) === String(jobId)) await set(String(jobId) === "0" ? "1" : "0");   // 同じ職業のままだと、前に読み込んだキャラの装備が残る → いったん別の職業にする
+  await set(jobId);
+  engRndReset(null);
   return engFullModel();
 }
 async function engLoadData(q) {          // ラトリオの保存データ(URL の ? より後ろ)を計算係に読み込ませて、model を取り出す。開き直さないので速い
   await engInit();
   if (!ENG.ready) throw new Error(ENG.err || "計算係を起動できませんでした");
+  engRndReset(null);                       // 前の計算のランダムオプションが残らないように
   ENG.reg.CSaveController.loadFromURL(q);
   await sleep(300);
   return engFullModel();
@@ -1234,16 +1273,221 @@ function simcResultHtml(m, r) {
     ${row("スキルディレイの短縮", n(r.core.delayDownForDisp) + "%")}
     ${row("HP回復 / SP回復", `${n(c[38])} / ${n(c[39])}`)}</table>`;
 }
-const SIMC_REGIONS = [[0, "右手"], [1, "左手(武器)"], [2, "兜上段"], [3, "兜中段"], [4, "兜下段"], [5, "盾"], [6, "鎧"], [7, "肩にかける物"], [8, "靴"], [9, "アクセサリー(1)"], [10, "アクセサリー(2)"]];
+// 検索つきのプルダウン(装備・カードなど数百件から選ぶ用)。opts = [{v: 値, t: 表示, k: 読み, d: 説明}]
+const PICK = { el: null, out: null };
+const pickNorm = (t) => String(t ?? "").normalize("NFKC").toLowerCase().replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 96)).replace(/\s+/g, "");
+function pickClose() { if (PICK.el) { PICK.el.remove(); PICK.el = null; document.removeEventListener("mousedown", PICK.out, true); } }
+function pickOpen(anchor, opts, cur, onPick) {
+  pickClose();
+  const box = PICK.el = document.createElement("div"); box.className = "pick";
+  box.innerHTML = `<input type="text" placeholder="名前の一部で探す（空白で区切ると、両方を含むもの）"><div class="pick-list"></div><div class="pick-desc"></div>`;
+  document.body.appendChild(box);
+  const r = anchor.getBoundingClientRect(), W = Math.min(460, innerWidth - 16);
+  box.style.width = W + "px"; box.style.left = Math.max(8, Math.min(r.left, innerWidth - W - 8)) + "px";
+  if (innerHeight - r.bottom > 360 || r.top < 360) box.style.top = (r.bottom + 2) + "px"; else box.style.bottom = (innerHeight - r.top + 2) + "px";
+  const inp = box.querySelector("input"), list = box.querySelector(".pick-list"), desc = box.querySelector(".pick-desc");
+  const idx = opts.map((o) => pickNorm(o.t) + "\n" + pickNorm(o.k));
+  let shown = [], at = 0;
+  const mark = (scroll) => {
+    [...list.querySelectorAll(".pick-o")].forEach((el, i) => el.classList.toggle("at", i === at));
+    const el = list.querySelectorAll(".pick-o")[at]; if (scroll && el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+    const o = shown[at]; desc.textContent = o && o.d ? o.d : ""; desc.style.display = o && o.d ? "" : "none";
+  };
+  const draw = () => {
+    const terms = inp.value.split(/[\s\u3000]+/).map(pickNorm).filter(Boolean);
+    const all = []; for (let i = 0; i < opts.length; i++) if (terms.every((t) => idx[i].includes(t))) all.push(opts[i]);
+    shown = all.slice(0, 400); at = terms.length ? 0 : Math.max(0, shown.findIndex((o) => o.v === cur));
+    list.innerHTML = (shown.map((o, i) => `<div class="pick-o${o.v === cur ? " cur" : ""}" data-i="${i}">${esc(o.t)}</div>`).join("") || `<div class="muted pick-more">見つかりません</div>`)
+      + (all.length > shown.length ? `<div class="muted pick-more">ほか ${all.length - shown.length} 件（名前を入れて絞ってください）</div>` : "");
+    mark(true);
+  };
+  const choose = (o) => { pickClose(); if (o) onPick(o.v, o); };
+  inp.oninput = draw;
+  inp.onkeydown = (e) => {
+    if (e.key === "ArrowDown") { at = Math.min(shown.length - 1, at + 1); mark(true); e.preventDefault(); }
+    else if (e.key === "ArrowUp") { at = Math.max(0, at - 1); mark(true); e.preventDefault(); }
+    else if (e.key === "Enter") { choose(shown[at]); e.preventDefault(); }
+    else if (e.key === "Escape") pickClose();
+  };
+  list.onmousemove = (e) => { const el = e.target.closest(".pick-o"); if (el && +el.dataset.i !== at) { at = +el.dataset.i; mark(false); } };
+  list.onclick = (e) => { const el = e.target.closest(".pick-o"); if (el) choose(shown[+el.dataset.i]); };
+  PICK.out = (e) => { if (!box.contains(e.target)) pickClose(); };
+  setTimeout(() => document.addEventListener("mousedown", PICK.out, true), 0);
+  draw(); inp.focus();
+}
+
+// ---- 装備の編集 ----
+// 場所の番号はラトリオの EQUIP_REGION_ID(0 右手 … 10 アクセ2、14〜23 シャドウ)。カード・エンチャントは model.card[カードの場所の番号]
+const SIMC_REGIONS = [[0, "武器"], [2, "兜上段"], [3, "兜中段"], [4, "兜下段"], [5, "盾"], [6, "鎧"], [7, "肩にかける物"], [8, "靴"], [9, "アクセサリー(1)"], [10, "アクセサリー(2)"]];
 const SIMC_SHADOW = [[14, "シャドウ武器"], [15, "シャドウ盾"], [19, "シャドウ鎧"], [21, "シャドウ靴"], [22, "シャドウアクセ(右)"], [23, "シャドウアクセ(左)"]];
 const SIMC_REFINE = { 0: ["weapon", "atkPlus"], 2: ["defPlus", "head"], 5: ["defPlus", "shield"], 6: ["defPlus", "body"], 7: ["defPlus", "shoulder"], 8: ["defPlus", "shoes"] };
+const SIMC_TRANS = { 0: ["weapon", "transcendence"], 2: ["defTranscendence", "head"], 5: ["defTranscendence", "shield"], 6: ["defTranscendence", "body"], 7: ["defTranscendence", "shoulder"], 8: ["defTranscendence", "shoes"] };
+const SIMC_PREFIX = { 0: "ARMS_RIGHT", 1: "ARMS_LEFT", 2: "HEAD_TOP", 3: "HEAD_MID", 4: "HEAD_UNDER", 5: "SHIELD", 6: "BODY", 7: "SHOULDER", 8: "SHOES", 9: "ACCESSORY_1", 10: "ACCESSORY_2" };
+const SIMC_KINDS = { 2: [50], 3: [51], 4: [52], 5: [61], 6: [60], 7: [62], 8: [63], 9: [64, 65], 10: [64, 66], 14: [72], 15: [73], 19: [77], 21: [80], 22: [82], 23: [83] };   // その場所に着けられるアイテムの種類(ITEM_KIND)
+const SIMC_CARD = { 0: [0, 1, 2, 3], 1: [4, 5, 6, 7], 2: [8, 26, 27, 28], 3: [9, 29, 30, 31], 4: [16, 33, 34, 35], 5: [10, 36, 37, 38], 6: [11, 39, 40, 41], 7: [12, 42, 43, 44], 8: [13, 45, 46, 47], 9: [14, 48, 49, 50], 10: [15, 51, 52, 53] };
+const SIMC_SHCARD = { 14: [54, 55, 56], 15: [57, 58, 59], 19: [60, 61, 62], 21: [63, 64, 65], 22: [66, 67, 68], 23: [69, 70, 71] };
+const SIMC_WKIND = { 1: "短剣", 2: "片手剣", 3: "両手剣", 4: "片手槍", 5: "両手槍", 6: "片手斧", 7: "両手斧", 8: "鈍器", 9: "杖", 10: "弓", 11: "カタール", 12: "本", 13: "爪", 14: "楽器", 15: "鞭", 16: "風魔手裏剣", 17: "ハンドガン", 18: "ライフル", 19: "ショットガン", 20: "ガトリングガン", 21: "グレネードガン", 22: "両手杖" };
+const simcItemName = (id) => { const it = id && ENG.items && ENG.items[id]; return it ? String(it[8]) : ""; };
+const simcCardName = (id) => { const c = id && ENG.reg.CardObjNew && ENG.reg.CardObjNew[id]; return c ? String(c[2]) : ""; };
+const simcNoneId = (region) => (region >= 14 ? ENG.blankShadow[region] : ENG.blank[region]) || 0;
+const simcItemAt = (m, region) => (region >= 14 ? ((m.shadowEquip || {}).itemId || [])[region] : (m.equip || [])[region]) || 0;
+const simcIsNone = (region, id) => !id || id === simcNoneId(region) || /装備なし|^[(（]?なし[)）]?$/.test(simcItemName(id));
+function simcItemOpts(jobId, region) {    // その職業が、その場所に着けられるアイテム。武器は種類をまたいで全部(選ぶと武器の種類も合わせる)
+  const key = "i" + jobId + ":" + region; if (ENG.cache[key]) return ENG.cache[key];
+  const kinds = SIMC_KINDS[region], none = simcNoneId(region), out = [];
+  for (const it of ENG.items) {
+    if (!it) continue;
+    const k = it[1];
+    if (region === 0 ? !(k >= 1 && k <= 22) : !kinds.includes(k)) continue;
+    if (it[0] === none || !ENG.x.job(it[0], +jobId)) continue;
+    const n = ENG.x.nm.GetFlagAppendedItemName(it[0]);
+    out.push({ v: it[0], n, t: (region === 0 ? `[${SIMC_WKIND[k] || "武器"}] ` : "") + n, k: String(it[9] || "") });
+  }
+  out.sort((a, b) => (a.k < b.k ? -1 : a.k > b.k ? 1 : 0));
+  out.unshift({ v: none, t: "（なし）", k: "" });
+  return ENG.cache[key] = out;
+}
+function simcCardOpts(region, itemId) {   // その装備の4つの枠(カード・エンチャント)の候補。ラトリオに枠を作らせて、できた選択肢を読む
+  const key = "c" + region + ":" + itemId; if (ENG.cache[key]) return ENG.cache[key];
+  const d = ENG.frame.contentDocument, C = ENG.reg.CardObjNew || [];
+  try { ENG.x.card(region, itemId); } catch (e) { console.warn("card opts", region, itemId, e); return [[], [], [], []]; }
+  return ENG.cache[key] = [1, 2, 3, 4].map((n) => {
+    const sel = d.getElementById(`OBJID_${SIMC_PREFIX[region]}_CARD_${n}`);
+    const o = sel ? [...sel.options].map((x) => { const c = C[+x.value]; return { v: +x.value, t: x.text, k: c ? String(c[3] || "") : "", d: c && +x.value ? String(c[4] || "").replace(/<br\s*\/?>/gi, " ／ ").replace(/<[^>]+>/g, "") : "" }; }) : [];
+    const z = o.findIndex((x) => x.v === 0); if (z > 0) o.unshift(o.splice(z, 1)[0]);
+    return o;
+  });
+}
+function simcRndLists(itemId) {           // その装備の、ランダムオプションの枠ごとの候補リスト番号(付かない装備は空)
+  const it = ENG.items[itemId]; if (!it) return [];
+  const ty = ENG.x.rndTypeId(it[4]);
+  return ty > 0 && ENG.x.rndTypes[ty] ? (ENG.x.rndTypes[ty][ENG.x.rndListIdx] || []) : [];
+}
+function simcRndSel(key, fill) { if (ENG.cache[key]) return ENG.cache[key]; const sel = ENG.frame.contentDocument.createElement("select"); try { fill(sel); } catch (e) { console.warn("rnd opts", key, e); } return ENG.cache[key] = [...sel.options].map((x) => ({ v: +x.value, t: x.text })); }
+const simcRndKinds = (listId) => simcRndSel("rk" + listId, (sel) => ENG.x.ro.SetUpRndOptKind(sel, listId));
+const simcRndVals = (rndId) => simcRndSel("rv" + rndId, (sel) => ENG.x.ro.SetUpRndOptValue(sel, rndId));
+function simcRndArr(m, region) {
+  const five = () => Array.from({ length: 5 }, () => [0, 0]);
+  if (region >= 14) { const sh = m.shadowEquip; sh.rndOpt = sh.rndOpt || []; return sh.rndOpt[region] = sh.rndOpt[region] || five(); }
+  m.foxRnd = m.foxRnd || engRndBlank(); return m.foxRnd[region] = m.foxRnd[region] || five();
+}
+function simcSetItem(m, region, id) {     // 装備を替える。合わなくなったカード・エンチャントと、ランダムオプションは外す
+  if (region >= 14) {
+    const sh = m.shadowEquip; sh.itemId = sh.itemId || []; sh.refined = sh.refined || []; sh.rndOpt = sh.rndOpt || [];
+    sh.itemId[region] = id; sh.refined[region] = sh.refined[region] || 0; sh.rndOpt[region] = Array.from({ length: 5 }, () => [0, 0]);
+    SIMC_SHCARD[region].forEach((cr) => { m.card[cr] = 0; });
+    return;
+  }
+  m.equip[region] = id;
+  if (region === 0) { const k = (ENG.items[id] || [])[1]; m.weapon.type = k >= 1 && k <= 22 ? k : 0; }
+  const opts = simcCardOpts(region, id);
+  const off = simcIsNone(region, id);      // はずしたときは、カード・エンチャントも全部外す(「なし」にもカードの枠があるので、残すと計算に入ってしまう)
+  SIMC_CARD[region].forEach((cr, i) => { if (off || !opts[i].some((o) => o.v === m.card[cr])) m.card[cr] = 0; });
+  m.foxRnd = m.foxRnd || engRndBlank(); m.foxRnd[region] = Array.from({ length: 5 }, () => [0, 0]);
+}
+function simcSetRefine(m, region, refine, grade) {
+  if (region >= 14) { m.shadowEquip.refined = m.shadowEquip.refined || []; m.shadowEquip.refined[region] = refine; return; }
+  const rf = SIMC_REFINE[region], tr = SIMC_TRANS[region];
+  if (rf) m[rf[0]][rf[1]] = refine;
+  if (tr && grade !== undefined) m[tr[0]][tr[1]] = grade;
+}
 function simcEquipHtml(m) {
-  const nameOf = (id) => { const it = id && ENG.items && ENG.items[id]; return it ? it[8] : ""; };
-  const line = (label, id, refine) => { const nm = nameOf(id); return nm && !/装備なし|^（なし）$|^なし$/.test(nm) ? `<tr><td class="muted">${label}</td><td>${refine ? `+${refine} ` : ""}${esc(nm)}</td></tr>` : `<tr><td class="muted">${label}</td><td class="muted">-</td></tr>`; };
-  let h = `<table>` + SIMC_REGIONS.map(([i, l]) => { const rf = SIMC_REFINE[i]; return line(l, (m.equip || [])[i], rf ? (m[rf[0]] || {})[rf[1]] : 0); }).join("");
-  const sh = m.shadowEquip || {};
-  h += SIMC_SHADOW.map(([i, l]) => line(l, (sh.itemId || [])[i], (sh.refined || [])[i])).join("") + `</table>`;
-  return h;
+  const numSel = (attr, cur, max, label) => `<select ${attr}>${Array.from({ length: max + 1 }, (_, i) => `<option value="${i}" ${i === (cur || 0) ? "selected" : ""}>${label(i)}</option>`).join("")}</select>`;
+  const rndHtml = (region, itemId, cur) => simcRndLists(itemId).map((lid, i) => {
+    if (!lid) return "";
+    const c = (cur || [])[i] || [0, 0], kinds = simcRndKinds(lid), vals = c[0] ? simcRndVals(c[0]) : [];
+    return `<span class="eqrnd"><select data-rk="${region}:${i}">${kinds.map((o) => `<option value="${o.v}" ${o.v === c[0] ? "selected" : ""}>${esc(o.t)}</option>`).join("")}</select>`
+      + (c[0] ? `<select data-rv="${region}:${i}">${vals.map((o) => `<option value="${o.v}" ${o.v === c[1] ? "selected" : ""}>${esc(o.t)}</option>`).join("")}</select>` : "") + `</span>`;
+  }).join("");
+  const row = (region, label) => {
+    const sh = region >= 14, id = simcItemAt(m, region), none = simcIsNone(region, id), rf = SIMC_REFINE[region], tr = SIMC_TRANS[region];
+    let h = `<tr><td class="muted">${label}</td><td><div class="eqrow">`;
+    if (sh) h += numSel(`data-rf="${region}"`, ((m.shadowEquip || {}).refined || [])[region], 10, (i) => "+" + i);
+    else { if (rf) h += numSel(`data-rf="${region}"`, (m[rf[0]] || {})[rf[1]], 10, (i) => "+" + i); if (tr) h += numSel(`data-tr="${region}"`, (m[tr[0]] || {})[tr[1]], 4, (i) => (i ? "★" + i : "-")); }
+    h += `<button class="pk${none ? " none" : ""}" data-item="${region}">${none ? "（なし）" : esc(simcItemName(id))}</button></div>`;
+    if (!none) {
+      if (!sh) {
+        const opts = simcCardOpts(region, id), cs = SIMC_CARD[region];
+        const b = opts.map((o, i) => { if (o.length < 2) return ""; const v = m.card[cs[i]] || 0, hit = o.find((x) => x.v === v); return `<button class="pk sm${v ? "" : " none"}" data-card="${region}:${i}">${esc(v ? (hit ? hit.t : simcCardName(v)) : (o[0] || {}).t || "なし")}</button>`; }).join("");
+        if (b) h += `<div class="eqsub">${b}</div>`;
+      } else {
+        const en = SIMC_SHCARD[region].map((cr) => simcCardName(m.card[cr])).filter(Boolean);
+        if (en.length) h += `<div class="eqsub muted">${en.map(esc).join(" ／ ")}</div>`;
+      }
+      const r = rndHtml(region, id, sh ? ((m.shadowEquip || {}).rndOpt || [])[region] : (m.foxRnd || [])[region]);
+      if (r) h += `<div class="eqsub">${r}</div>`;
+    }
+    return h + `</td></tr>`;
+  };
+  let h = `<table class="eqt">` + SIMC_REGIONS.map(([i, l]) => row(i, l)).join("");
+  if (!simcIsNone(1, (m.equip || [])[1])) h += `<tr><td class="muted">左手(武器)</td><td>${esc(simcItemName(m.equip[1]))} <span class="muted">（二刀流の左手は、まだここでは替えられません）</span></td></tr>`;
+  return h + SIMC_SHADOW.map(([i, l]) => row(i, l)).join("") + `</table>`;
+}
+// ---- Fox のキャラ・装備セットを取り込む(通信で読んだ名前 → ラトリオの候補の名前でつなぐ) ----
+const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
+const SIMC_FOXSH = [[65536, 19], [131072, 14], [262144, 15], [524288, 21], [1048576, 22], [2097152, 23]];
+function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して
+  const nm = (o) => o.n || o.t, link = (SETTINGS.ratLinks || {})[gameId];
+  if (link) { const o = opts.find((x) => nm(x) === link); if (o) return o; }
+  const n = ratNorm(name);
+  if (!n || /^ID\d+$/.test(n)) return null;
+  const bare = n.replace(/^\[[^\]]*\]/, ""), base = (t) => ratNorm(String(t).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "").replace(/\[\d\]$/, ""));
+  const real = opts.filter((o) => o.v);
+  return real.find((o) => ratNorm(nm(o)) === n) || real.find((o) => base(nm(o)) === n) || (bare !== n ? real.find((o) => base(nm(o)) === bare) : null)
+    || (isCard ? real.find((o) => base(nm(o)) === n.replace(/カード$/, "")) : null) || null;
+}
+function simcWearCards(m, region, it) {   // Fox は空の枠を詰めて覚えているので、「その名前が候補にある、まだ空いている枠」に入れる
+  const rows = [], opts = simcCardOpts(region, m.equip[region]), cs = SIMC_CARD[region], free = [0, 1, 2, 3].filter((i) => opts[i].length > 1);
+  for (const c of (it.cards || []).filter((c) => c && c.id)) {
+    let hit = null;
+    for (const i of free) { const o = simcFind(opts[i], c.name, c.id, true); if (o) { hit = [i, o]; break; } }
+    if (hit) { m.card[cs[hit[0]]] = hit[1].v; free.splice(free.indexOf(hit[0]), 1); }
+    else rows.push({ slot: (it.slot || "") + " のカード・エンチャント", name: c.name, region, gameId: c.id, isCard: true });
+  }
+  return rows;
+}
+function simcWear(m, items, shadow) {     // 装備セットを着せる。つながらなかったものを返す
+  const rows = [], used = new Set();
+  for (const [bit, region] of shadow ? SIMC_FOXSH : SIMC_FOXBITS) {
+    const it = items.find((i) => (i.wear & bit) && !used.has(i));
+    simcSetItem(m, region, simcNoneId(region)); simcSetRefine(m, region, 0, 0);
+    if (!it) continue;
+    used.add(it);
+    const o = simcFind(simcItemOpts(m.status.jobId, region), it.name, it.itemId, false);
+    if (!o) { rows.push({ slot: it.slot || "", name: (it.refine ? `+${it.refine} ` : "") + it.name, region, gameId: it.itemId, refine: it.refine || 0, grade: it.grade || 0, cards: it.cards || [] }); continue; }
+    simcSetItem(m, region, o.v); simcSetRefine(m, region, it.refine || 0, it.grade || 0);
+    if (!shadow) rows.push(...simcWearCards(m, region, it));
+  }
+  return rows;
+}
+async function simcFromFox(asNew) {
+  const F = SIMC.fox, EQ = DATA.equip || {}, e = (EQ.chars || {})[F.char];
+  if (!e) return;
+  const mainSet = (EQ.sets || {})[F.set], shSet = (EQ.shadows || {})[F.shadow], now = e.now || [];
+  const st = (mainSet && (mainSet.chars || {})[F.char] && mainSet.chars[F.char].status) || e.status || {};
+  let ch = simcCur(), id = SIMC.cur;
+  SIMC.busy = "Fox から取り込んでいます…"; SIMC.msg = ""; render();
+  try {
+    if (asNew) {
+      const jo = ENG.jobs.find(([, t]) => t === st.jobName);
+      if (!jo) throw new Error(st.jobName ? `ラトリオに「${st.jobName}」という職業がありません` : "このキャラの職業がまだ読めていません（キャラ選択からログインし直すと読めます）");
+      const model = await engTemplate(jo[0]);
+      if (st.lv) model.status.baseLv = st.lv;
+      if (st.jobLv) model.status.jobLv = st.jobLv;
+      ["str", "agi", "vit", "int", "dex", "luk"].forEach((k) => { const v = (st.stats || {})[k.toUpperCase()]; model.status[k] = v && v.base !== undefined ? v.base : 1; });
+      ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { const v = (st.stats || {})[k]; model.pureStatus[6 + i] = v && v.base !== undefined ? v.base : 0; });
+      id = "c" + Date.now().toString(36);
+      ch = SIMC.chars[id] = { name: cn(F.char) + (mainSet ? `（${mainSet.tag}）` : ""), model };
+    }
+    if (!ch) throw new Error("着せる先のキャラがありません");
+    const main = mainSet ? mainSet.items : now.filter((i) => i.wear & 1023), shadow = shSet ? shSet.items : now.filter((i) => i.wear >= 65536), rows = [];
+    if (main.length) rows.push(...simcWear(ch.model, main, false));
+    if (shadow.length) rows.push(...simcWear(ch.model, shadow, true));
+    SIMC.report = { id, rows, rnd: main.concat(shadow).some((i) => (i.options || []).length) };
+    simcSelect(id); await simcPut(id); SIMC.fox = null;
+    SIMC.msg = asNew ? "Fox のキャラから作りました。" : "装備を着せました。";
+  } catch (err) { SIMC.msg = "取り込めませんでした: " + err.message; }
+  SIMC.busy = ""; render();
 }
 function renderSimChara() {
   if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">キャラ・装備のシミュレーターは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
@@ -1257,6 +1501,7 @@ function renderSimChara() {
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>` : ""}
       <button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>新しく作る</button>
       <button class="ghost" id="sccurl">保存URLから読み込む</button>
+      ${Object.keys((DATA.equip || {}).chars || {}).length ? `<button class="ghost" id="sccfox">Fox から取り込む</button>` : ""}
       <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
       ${ch ? `<button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…") : esc(SIMC.msg)}</span></div></div>`;
@@ -1265,6 +1510,26 @@ function renderSimChara() {
     h += `<div class="panel simbox"><div><b>セーブファイルの中身（${SIMC.pick.slots.length} 件）</b> <span class="muted">読み込むものにチェックを入れてください。1件につき数秒かかります。</span></div>
       <div class="scpick">${SIMC.pick.slots.map((x, i) => `<label><input type="checkbox" data-pick="${i}" ${x.on ? "checked" : ""}> ${esc(x.name)}</label>`).join("")}</div>
       <div class="opts"><button id="scpgo" ${on ? "" : "disabled"}>選んだ ${on} 件を読み込む</button><button class="ghost" id="scpall">すべて選ぶ／外す</button><button class="ghost" id="scpno">やめる</button></div></div>`;
+  }
+  if (SIMC.fox) {
+    const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
+    if (!names.includes(F.char)) F.char = names.find((c) => E[c].cur) || names[0];
+    const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).sort((a, b) => (a[1].first || 0) - (b[1].first || 0))
+      .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(st.tag)}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
+    h += `<div class="panel simbox"><div class="opts"><b>Fox から取り込む</b>
+      <label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
+      <label>装備セット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
+      <label>シャドウ <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label></div>
+      <div class="opts"><button id="sfnew" ${ENG.ready ? "" : "disabled"}>新しいキャラとして作る</button>
+      ${ch ? `<button class="ghost" id="sfwear" ${ENG.ready ? "" : "disabled"}>「${esc(ch.name)}」に装備だけ着せる</button>` : ""}<button class="ghost" id="sfno">やめる</button>
+      <span class="muted">職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。</span></div></div>`;
+  }
+  const rep = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report : null;
+  if (rep && (rep.rows.length || rep.rnd)) {
+    h += `<div class="panel simbox"><div><b>${rep.rows.length ? `取り込めなかったもの（${rep.rows.length} 件）` : "取り込みました"}</b>
+      <span class="muted">${rep.rows.length ? "ラトリオの候補に、同じ名前が見つかりませんでした。「選ぶ」で結びつけると、次からは自動で入ります。" : ""}${rep.rnd ? " ランダムオプションは入っていません（装備欄で選んでください）。" : ""}</span>
+      <button class="ghost" id="sfrclose">閉じる</button></div>
+      ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
     h += `<div class="panel empty">「新しく作る」で職業を選んで1から作るか、ラトリオの保存URL・セーブファイルを読み込めます。<br>作ったキャラは、この PC に保存されます。</div>`;
@@ -1284,8 +1549,8 @@ function renderSimChara() {
         <div class="panel" style="margin-top:10px"><h3>特性ステータス</h3><table>
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table></div></div>
       <div><div class="panel"><h3>ステータス（計算結果）</h3><div id="sccres">${simcResultHtml(m, r)}</div></div>
-        <div class="panel" style="margin-top:10px"><h3>装備 <span class="muted" style="font-weight:400">（いまは見るだけ。プルダウンでの編集は次の版で）</span></h3>${simcEquipHtml(m)}</div></div></div>
-      <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
+        <div class="panel" style="margin-top:10px"><h3>装備 <span class="muted" style="font-weight:400">（名前を押すと、検索つきの一覧から選べます）</span></h3>${simcEquipHtml(m)}</div></div></div>
+      <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
   bindSimNav();
@@ -1301,6 +1566,16 @@ function renderSimChara() {
     g("scpno").onclick = () => { SIMC.pick = null; render(); };
     g("scpgo").onclick = simcImportPicked;
   }
+  if (g("sccfox")) g("sccfox").onclick = () => { SIMC.fox = SIMC.fox ? null : { char: "", set: "", shadow: "" }; render(); };
+  if (SIMC.fox && g("sfc")) {
+    g("sfc").onchange = (e) => { SIMC.fox.char = e.target.value; e.target.blur(); render(); };
+    g("sfs").onchange = (e) => { SIMC.fox.set = e.target.value; };
+    g("sfh").onchange = (e) => { SIMC.fox.shadow = e.target.value; };
+    g("sfnew").onclick = () => simcFromFox(true);
+    if (g("sfwear")) g("sfwear").onclick = () => simcFromFox(false);
+    g("sfno").onclick = () => { SIMC.fox = null; render(); };
+  }
+  if (g("sfrclose")) g("sfrclose").onclick = () => { SIMC.report = null; render(); };
   simcNeedKick();
   if (g("sccdup")) g("sccdup").onclick = () => { const id = "c" + Date.now().toString(36); SIMC.chars[id] = { name: ch.name + " のコピー", model: JSON.parse(JSON.stringify(ch.model)) }; simcSelect(id); simcSave(); render(); };
   if (g("sccdel")) g("sccdel").onclick = async (e) => {
@@ -1318,6 +1593,27 @@ function renderSimChara() {
       $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });
       simcSave();
     };
+    // 装備の編集。替えたら全部描き直す(計算は 0.1秒ほど)
+    const m = ch.model, V = $("#view");
+    const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
+    const two = (el, key) => el.dataset[key].split(":").map(Number);
+    V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOpts(m.status.jobId, region), simcItemAt(m, region), (v) => { simcSetItem(m, region, v); changed(); }); });
+    V.querySelectorAll("[data-card]").forEach((el) => el.onclick = () => { const [region, i] = two(el, "card"), cr = SIMC_CARD[region][i]; pickOpen(el, simcCardOpts(region, m.equip[region])[i], m.card[cr] || 0, (v) => { m.card[cr] = v; changed(); }); });
+    V.querySelectorAll("[data-rf]").forEach((el) => el.onchange = () => { simcSetRefine(m, +el.dataset.rf, +el.value); changed(); });
+    V.querySelectorAll("[data-tr]").forEach((el) => el.onchange = () => { const tr = SIMC_TRANS[+el.dataset.tr]; m[tr[0]][tr[1]] = +el.value; changed(); });
+    V.querySelectorAll("[data-rk]").forEach((el) => el.onchange = () => { const [region, i] = two(el, "rk"), k = +el.value, vals = k ? simcRndVals(k) : []; simcRndArr(m, region)[i] = [k, vals.length ? vals[vals.length - 1].v : 0]; changed(); });
+    V.querySelectorAll("[data-rv]").forEach((el) => el.onchange = () => { const [region, i] = two(el, "rv"); simcRndArr(m, region)[i][1] = +el.value; changed(); });
+    V.querySelectorAll("[data-fix]").forEach((el) => el.onclick = () => {       // 取り込めなかったものを、手で候補に結びつける(次からは自動)
+      const rows = SIMC.report.rows, x = rows[+el.dataset.fix];
+      const opts = x.isCard ? (() => { const seen = new Set(); return simcCardOpts(x.region, m.equip[x.region]).flat().filter((o) => o.v && !seen.has(o.v) && seen.add(o.v)); })() : simcItemOpts(m.status.jobId, x.region).filter((o) => o.v !== simcNoneId(x.region));
+      pickOpen(el, opts, null, (v, o) => {
+        SETTINGS.ratLinks = SETTINGS.ratLinks || {}; SETTINGS.ratLinks[x.gameId] = o.n || o.t; saveSettings();
+        rows.splice(rows.indexOf(x), 1);
+        if (x.isCard) { const all = simcCardOpts(x.region, m.equip[x.region]), cs = SIMC_CARD[x.region], i = [0, 1, 2, 3].find((n) => !m.card[cs[n]] && all[n].some((c) => c.v === v)); if (i !== undefined) m.card[cs[i]] = v; }
+        else { simcSetItem(m, x.region, v); simcSetRefine(m, x.region, x.refine, x.grade); if (x.region < 14) rows.push(...simcWearCards(m, x.region, x)); }
+        changed();
+      });
+    });
     $("#view").querySelectorAll("[data-st]").forEach((el) => el.oninput = () => { const v = Math.max(1, Math.round(+el.value || 1)); ch.model.status[el.dataset.st] = v; recalc(); });
     $("#view").querySelectorAll("[data-pure]").forEach((el) => el.oninput = () => { ch.model.pureStatus[+el.dataset.pure] = Math.max(0, Math.round(+el.value || 0)); recalc(); });
     if (g("sccjob")) g("sccjob").onchange = async (e) => {
