@@ -859,6 +859,14 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.cmpbox:not(:empty){margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);overflow-x:auto}
+.simc table.cmp td.cmpd{background:rgba(227,160,8,.12)}
+.simc table.cmp tr.cmpk td{padding-top:8px;border-bottom:1px solid var(--line)}
+.relbox{margin-top:8px}
+.relbox>summary{font-size:13px}
+.relgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:3px 6px}
+.bfi.sm{padding:1px 6px;font-size:12px}
+.relnote{font-size:12px;margin-top:6px}
 .simc table.multi{width:auto}
 .simc table.multi th{font-weight:400;color:var(--muted,#999);font-size:12px;padding:3px 10px 3px 6px}
 .simc table.multi td{padding:3px 10px 3px 6px}
@@ -1345,7 +1353,7 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 function simcSave() {                     // 少しまとめてから保存
@@ -1758,7 +1766,7 @@ async function simcTagKick(m) {
   } catch (e) { }
   SIMC.tagBusy = false;
   const el = $("#sccbprog"); if (el) el.textContent = "";
-  if (SIMC.bf.purpose) render();
+  render();
 }
 // ---- 装備セットごとの確認: 登録した装備セットを1つずつ着せて、ASPD・詠唱を並べる。「全部のセットで 193 / 無詠唱」に要る値も出す ----
 // ステータス・シャドウ装備・支援はいまのまま。AGI・DEX の必要な値は、片方だけ動かした場合(1セットにつき 20回ほど計算するので、裏で少しずつ)
@@ -1900,6 +1908,88 @@ function simcOptHtml(m) {
       + `<br><span class="muted">条件: ${[R.aspd ? "ASPD 193" : "", R.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}／対象: ${esc(R.sets.join("・"))}／${R.calcs} 回計算。INT を下げると MATK も下がります。下げたくないときは、上の「下限」に入れてから探してください。</span></div>`;
   }
   return h;
+}
+// ---- 装備セットを並べて比べる(ASPD・詠唱・ディレイ / 耐性 / 補助情報 の3つの枠で共通) ----
+// 見出しの右の「比べる」で選んだ装備セットを、いまのキャラに着せた場合を横に並べる。ステータス・シャドウ装備・支援はいまのまま
+const simcKeySum = (r) => `ASPD ${simcNum(r.c[37], 1)} ／ 詠唱の値 ${simcNum((r.tot.DEX || 0) * 2 + (r.tot.INT || 0))} ／ 変動詠唱 −${simcNum(r.core.n_CastCutForDisp)}% ／ 固定詠唱 −${simcNum(r.c[41])}% ／ ディレイ −${simcNum(r.core.delayDownForDisp)}%`;
+function simcCmpIds(m) { const ok = new Set(simcSetList(m, false).tabs.map((x) => x.sid)); SIMC.cmp = SIMC.cmp.filter((sid) => ok.has(sid)); return SIMC.cmp; }
+function simcCmpChips(m) {
+  const tabs = simcSetList(m, false).tabs; if (!tabs.length) return "";
+  const on = simcCmpIds(m);
+  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、この装備セットを着た場合を横に並べます）">${esc(st.tag)}</button>`).join("")}</span>`;
+}
+const simcCmpSig = (m) => simcCmpIds(m).join(",") + "|" + simcAllKinds().join(",") + "|" + JSON.stringify(m);
+function simcCmpKick(m) {
+  if (!simcCmpIds(m).length) return;
+  const sig = simcCmpSig(m);
+  if (SIMC.cmpRes && SIMC.cmpRes.sig === sig) return;
+  clearTimeout(SIMC.cmpT);
+  SIMC.cmpT = setTimeout(async () => {
+    const cols = [], T = (DATA.equip || {}).sets || {};
+    for (const sid of SIMC.cmp) {
+      const st = T[sid]; if (!st) continue;
+      const mm = JSON.parse(JSON.stringify(m)); let miss = 0;
+      if (st.sim) simcApplyFrag(mm, st.sim, false); else miss = simcWear(mm, st.items || [], false).length;
+      await sleep(0);
+      const c = simcCur(); if (!c || simcCmpSig(c.model) !== sig) return;
+      try { cols.push({ sid, st, miss, r: engCalc(mm, simcAllKinds()) }); } catch (e) { console.warn("cmp", e); }
+    }
+    SIMC.cmpRes = { sig, cols };
+    simcCmpFill(m);
+  }, 300);
+}
+function simcXParse(html, hasHeader) {    // ラトリオの表 → [{k: 見出し|項目, sec, label, val, hdr}]
+  const d = document.createElement("div"); d.innerHTML = html || "";
+  let sec = "", first = true; const out = [];
+  for (const tr of d.querySelectorAll("tr")) {
+    if (tr.querySelector("table")) continue;
+    const c = [...tr.cells].map((x) => x.textContent.trim());
+    if (c.length === 1) { if (c[0]) sec = c[0]; continue; }
+    if (!c[0]) continue;
+    out.push({ k: sec + "|" + c[0], sec, label: c[0], val: c.slice(1).join(" ／ "), hdr: hasHeader && first });
+    first = false;
+  }
+  return out;
+}
+function simcCmpHead(cols) { return `<tr><th></th><th>いまの装備</th>${cols.map((x) => `<th><span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn" title="名前が合わなくて入らなかった装備・カードがあります">${x.miss}個入らず</span>` : ""}</th>`).join("")}</tr>`; }
+function simcCmpKeyHtml(m, r) {
+  const R = SIMC.cmpRes; if (!simcCmpIds(m).length) return "";
+  if (!R || R.sig !== simcCmpSig(m)) return `<div class="muted">比べています…</div>`;
+  const rows = [["ASPD", (x) => x.c[37], 1], ["詠唱の値（DEX×2+INT）", (x) => (x.tot.DEX || 0) * 2 + (x.tot.INT || 0), 0], ["変動詠唱の短縮 %", (x) => x.core.n_CastCutForDisp, 0], ["固定詠唱の短縮 %", (x) => x.c[41], 0], ["スキルディレイの短縮 %", (x) => x.core.delayDownForDisp, 0],
+    ["最大HP", (x) => x.c[23], 0], ["最大SP", (x) => x.c[24], 0], ["ATK", (x) => (x.c[25] || 0) + (x.c[26] || 0), 0], ["MATK", (x) => (x.c[27] || 0) + (x.c[28] || 0), 0], ["DEF", (x) => (x.c[29] || 0) + (x.c[30] || 0), 0], ["MDEF", (x) => (x.c[31] || 0) + (x.c[32] || 0), 0]];
+  return `<table class="multi cmp">${simcCmpHead(R.cols)}${rows.map(([label, f, dig]) => { const b = f(r); return `<tr><td>${label}</td><td class="v">${simcNum(b, dig)}</td>${R.cols.map((x) => { const v = f(x.r), d = Math.round(((v || 0) - (b || 0)) * 10) / 10; return `<td class="v${d ? " cmpd" : ""}">${simcNum(v, dig)}${d ? ` <span class="${d > 0 ? "good" : "warn"}">${d > 0 ? "+" : "−"}${simcNum(Math.abs(d), dig)}</span>` : ""}</td>`; }).join("")}</tr>`; }).join("")}</table>`;
+}
+function simcCmpXHtml(m, r, kinds) {      // kinds = [[番号, 名前]]。違いのある行だけ(「同じ行も出す」で全部)
+  const R = SIMC.cmpRes; if (!simcCmpIds(m).length) return "";
+  if (!R || R.sig !== simcCmpSig(m)) return `<div class="muted">比べています…</div>`;
+  let h = `<table class="multi cmp">${simcCmpHead(R.cols)}`;
+  for (const [id, title] of kinds) {
+    const hasH = [6, 8, 9].includes(id), base = simcXParse((r.x || {})[id], hasH), others = R.cols.map((x) => Object.fromEntries(simcXParse((x.r.x || {})[id], hasH).map((y) => [y.k, y.val])));
+    const body = base.filter((y) => !y.hdr).map((y) => { const vs = others.map((o) => o[y.k] ?? "-"), diff = vs.some((v) => v !== y.val); return diff || SIMC.cmpAll ? `<tr><td>${y.sec ? `<span class="muted">${esc(y.sec)}</span> ` : ""}${esc(y.label)}</td><td class="v">${esc(y.val)}</td>${vs.map((v) => `<td class="v${v !== y.val ? " cmpd" : ""}">${esc(v)}</td>`).join("")}</tr>` : ""; }).join("");
+    const hd = base.find((y) => y.hdr);
+    h += `<tr class="cmpk"><td colspan="${2 + R.cols.length}"><b>${title}</b>${hd ? ` <span class="muted">（${esc(hd.val)}）</span>` : ""}${body ? "" : ` <span class="muted">違いなし</span>`}</td></tr>` + body;
+  }
+  return h + `</table><label class="muted" style="font-size:12px"><input type="checkbox" data-cmpall ${SIMC.cmpAll ? "checked" : ""}> 同じ行も出す</label>`;
+}
+function simcCmpFill(m) {
+  const r = SIMC.res; if (!r) return;
+  const set = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
+  set("scckeycmp", simcCmpKeyHtml(m, r)); set("sccresistcmp", simcCmpXHtml(m, r, ENG_RKINDS)); set("sccxcmp", simcCmpXHtml(m, r, ENG_XKINDS.filter(([id]) => simcXKinds().includes(id))));
+  $("#view").querySelectorAll("[data-cmpall]").forEach((el) => el.onchange = () => { SIMC.cmpAll = el.checked; simcCmpFill(m); });
+}
+// ---- その枠に効く支援・アイテム・スキルを、枠の中でもオンオフできるようにする(「支援・アイテム・スキル」の枠と同じもの = 同期) ----
+// 効くかどうかは目的別のしぼり込みと同じ印(simcTags: a ASPD / c 詠唱・ディレイ / d 耐久)。選ぶ式のものは、オン = いちばん上の値
+function simcRelHtml(m, letters, key, title) {
+  const sc = simcSchema(m), tags = simcTags(m);
+  if (!sc || !tags) return `<div class="muted relnote">${title}は、効果を調べ終わるとここに並びます…</div>`;
+  const list = sc.filter((it) => it.g !== "learn" && it.type !== "n" && [...letters].some((l) => (tags[simcBuffKey(it)] || "").includes(l)));
+  if (!list.length) return "";
+  list.sort((a, b) => simcBuffOn(m, b) - simcBuffOn(m, a));
+  const nOn = list.filter((it) => simcBuffOn(m, it)).length, st = simcFoldState(), open = st[key] === undefined ? true : st[key];
+  return `<details class="relbox" data-fold="${key}" ${open ? "open" : ""}><summary><span>${title}</span> <span class="muted">（オン ${nOn} ／ ${list.length}。「支援・アイテム・スキル」の枠と同じものです）</span></summary><div class="relgrid">${list.map((it) => {
+    const on = simcBuffOn(m, it), v = simcBuffVal(m, it), ot = it.type === "s" && on ? (it.opts.find((o) => o[0] === Number(v)) || [])[1] : "";
+    return `<label class="bfi sm${on ? " on" : ""}" title="${esc(it.label)}"><input type="checkbox" data-rel="${simcBuffKey(it)}" ${on ? "checked" : ""}><span class="bfl">${esc(it.label)}</span>${ot ? `<span class="bfg">${esc(ot)}</span>` : ""}</label>`;
+  }).join("")}</div></details>`;
 }
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
@@ -2088,14 +2178,14 @@ function renderSimChara() {
         ${simcFold("trait", "特性ステータス", `<table>
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
-      ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>`)}
+      ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>${simcRelHtml(m, "ac", "relkey", "ASPD・詠唱・ディレイに効く支援・アイテム・スキル")}<div id="scckeycmp" class="cmpbox">${simcCmpKeyHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccksum">${esc(simcKeySum(r))}</span>${simcCmpChips(m)}`)}
       ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（ASPD 193・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
       ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
-      ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>`)}
+      ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
-      ${simcFold("x", "補助情報", simcExtraHtml(r), ` <span class="muted">（ラトリオの「拡張情報」と同じ表。耐性は上の「耐性」の枠にあります）</span>`)}</div>
+      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_XKINDS.filter(([id]) => simcXKinds().includes(id)))}</div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -2143,6 +2233,8 @@ function renderSimChara() {
       try { SIMC.res = engCalc(ch.model, simcAllKinds()); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
       if (g("sccx")) g("sccx").innerHTML = simcExtraBody(SIMC.res);
       if (g("sccresist")) { g("sccresist").innerHTML = simcResistBody(SIMC.res); g("sccrsum").textContent = simcResistSum(SIMC.res); }
+      if (g("sccksum")) g("sccksum").textContent = simcKeySum(SIMC.res);
+      simcCmpFill(ch.model); simcCmpKick(ch.model);
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick(); if (g("sccpt")) g("sccpt").innerHTML = simcPointsHtml(ch.model);
       { const mf = $("#view").querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(ch.model); }
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
@@ -2153,6 +2245,9 @@ function renderSimChara() {
     // 装備の編集。替えたら全部描き直す(計算は 0.1秒ほど)
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
+    // 装備セットを並べて比べる
+    V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else SIMC.cmp.push(sid); render(); });
+    simcCmpFill(m); simcCmpKick(m);
     // ステ振りの相談
     if (g("soa")) {
       const O = SIMC.opt, rr = () => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
@@ -2200,8 +2295,12 @@ function renderSimChara() {
         SETTINGS.simPresets = SETTINGS.simPresets || []; SETTINGS.simPresets.push({ name: v.trim().slice(0, 20), job: m.status.jobId, on }); saveSettings(); render();
       };
       if (g("sccboff")) g("sccboff").onclick = async () => { if (await askOnce("bufoff", "支援・アイテム・スキルを全部オフにします（習得スキルはそのまま）。", "全部オフ")) { simcBuffItems(m).forEach((it) => simcBuffSet(m, it, 0)); changed(); } };
-      const fold = V.querySelector('details[data-fold="buff"]');
-      if (fold && fold.open) simcTagKick(m);
+      simcTagKick(m);                       // 目的別の印は、ASPD・耐性の枠の「効く支援」にも使うので、枠の開け閉めに関係なく調べておく(職業ごとに1回)
+      V.querySelectorAll("[data-rel]").forEach((el) => el.onchange = () => {
+        const it = byKey[el.dataset.rel]; if (!it) return;
+        simcBuffSet(m, it, el.checked ? (it.type === "c" ? 1 : it.opts[it.opts.length - 1][0]) : 0);
+        changed();
+      });
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
