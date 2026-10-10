@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.27.0"
+VERSION = "2.28.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -314,12 +314,12 @@ def start_live_server(core, lock, cfg):
         def log_message(self, *a):
             pass
 
-        def _send(self, code, body, ctype):
+        def _send(self, code, body, ctype, cache="no-store"):
             if isinstance(body, str):
                 body = body.encode("utf-8")
             self.send_response(code)
             self.send_header("Content-Type", ctype)
-            self.send_header("Cache-Control", "no-store")
+            self.send_header("Cache-Control", cache)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
@@ -368,11 +368,14 @@ def start_live_server(core, lock, cfg):
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path.startswith("/ratorio/"):          # 計算機(ROラトリオHub)のファイル
-                hit = RATORIO.resolve(path[len("/ratorio/"):])
+                rest, cache = path[len("/ratorio/"):], "no-store"
+                if rest.startswith("v-"):             # /ratorio/v-<取り込んだ版>/… は中身が変わらない → ブラウザに覚えさせる(計算係の起動が、2回目から速くなる)
+                    rest, cache = rest.partition("/")[2], "public, max-age=31536000, immutable"
+                hit = RATORIO.resolve(rest)
                 if not hit:
                     return self._send(404, "not found", "text/plain")
                 with open(hit[0], "rb") as f:
-                    return self._send(200, f.read(), hit[1])
+                    return self._send(200, f.read(), hit[1], cache)
             if path == "/api/itemnames" and self._local_only():      # アイテム番号 → 名前(計算機の装備を手で結びつけるときの候補)
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
@@ -451,7 +454,7 @@ def start_live_server(core, lock, cfg):
                 # 計算機のキャラを保存・削除: {id, name, model} / {id, delete: 1}
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
-                    b = json.loads(self.rfile.read(min(n, 400000)).decode("utf-8"))
+                    b = json.loads(self.rfile.read(min(n, 800000)).decode("utf-8"))
                     cid = str(b["id"])[:40]
                     with lock:
                         chars = load_sim_chars()
@@ -461,6 +464,8 @@ def start_live_server(core, lock, cfg):
                             if not isinstance(b.get("model"), dict):
                                 raise ValueError
                             chars[cid] = {"name": str(b.get("name") or "")[:40], "model": b["model"], "updated": int(time.time())}
+                            if isinstance(b.get("saved"), dict):      # スロットに「保存」したときの中身(model は作業中の中身)
+                                chars[cid]["saved"] = b["saved"]
                         _write_json(SIM_CHARS_FILE, chars)
                 except Exception:
                     return self._send(400, "bad data", "text/plain")

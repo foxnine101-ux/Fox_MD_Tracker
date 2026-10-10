@@ -1165,6 +1165,9 @@ function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) =
 function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : renderSimChara(); }
 
 const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
+// ラトリオのファイルは /ratorio/v-<取り込んだ版>/… で読む。この形の URL はブラウザが覚えるので、2回目からは読み直さない(約440ファイル)。
+// 計算係の中の import も必ず同じ頭にする(頭が違うと、同じ部品が別物として二重に読み込まれてしまう)
+const engBase = () => "/ratorio/v-" + ((RAT && RAT.commit) || "0") + "/";
 function engInit(query) {                 // 計算係(隠したラトリオ)を用意する。query を渡すと、その保存データを読み込んだ状態で開き直す
   if (ENG.loading) return ENG.loading;
   if (ENG.ready && !query) return Promise.resolve();
@@ -1174,26 +1177,26 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     const f = ENG.frame = document.createElement("iframe");
     f.style.cssText = "position:fixed;left:-4000px;top:0;width:1400px;height:900px;visibility:hidden";
     f.setAttribute("aria-hidden", "true");
-    f.src = "/ratorio/ro4/m/calcx.html" + (query ? "?" + query : "");
+    f.src = engBase() + "ro4/m/calcx.html" + (query ? "?" + query : "");
     document.body.appendChild(f);
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 600; i++) {            // 初回は全部のファイルを読むので時間がかかる(遅い PC で1分以上)。2分半まで待つ
       await sleep(250);
       const w = f.contentWindow, reg = w && w._ratorioReg, job = f.contentDocument && f.contentDocument.querySelector("#OBJID_SELECT_JOB");
       if (reg && reg.calcCoreFromModel && reg.extractModelFromDom && job && job.options.length > 5 && (!query || +job.value > 0 || i > 40)) { ENG.reg = reg; break; }
     }
-    if (!ENG.reg) throw new Error("計算係(ラトリオ)を起動できませんでした");
+    if (!ENG.reg) throw new Error("計算係（ラトリオ）の起動に時間がかかりすぎました");
     await sleep(query ? 1200 : 300);
     const w = f.contentWindow;
-    ENG.state = await w.eval('import("/ratorio/engine/runtime/roro-state.js")');
+    ENG.state = await w.eval(`import("${engBase()}engine/runtime/roro-state.js")`);
     // 支援・アイテムの欄は「欄を開いている」印(n_Skill1/4/7/8SW)が立っているときだけ、model から計算に流し込まれる。
     // 計算の間だけ印を立てる(engCalc)。たたんだ欄の値は skillstate.js の配列に入っている(engFullModel で読む)
     ENG.sw = await Promise.all(["BuffJobSpecificSelf.js:setN_Skill1SW:n_Skill1SW", "BuffGuildAndGospel.js:setN_Skill4SW:n_Skill4SW", "BuffItemAndFood.js:setN_Skill7SW:n_Skill7SW", "BuffOtherCategory.js:setN_Skill8SW:n_Skill8SW"]
-      .map(async (x) => { const [f, set, get] = x.split(":"), m = await w.eval(`import("/ratorio/engine/ui/${f}")`); return { m, set, get }; }));
-    ENG.skill = await w.eval('import("/ratorio/engine/skill/skillstate.js")');
-    ENG.hm = await w.eval('import("/ratorio/engine/chara/hmjob.js")');
-    ENG.items = (await w.eval('import("/ratorio/engine/equip/item.dat.js")')).ItemObjNew;
+      .map(async (x) => { const [f, set, get] = x.split(":"), m = await w.eval(`import("${engBase()}engine/ui/${f}")`); return { m, set, get }; }));
+    ENG.skill = await w.eval(`import("${engBase()}engine/skill/skillstate.js")`);
+    ENG.hm = await w.eval(`import("${engBase()}engine/chara/hmjob.js")`);
+    ENG.items = (await w.eval(`import("${engBase()}engine/equip/item.dat.js")`)).ItemObjNew;
     // 装備・カード・ランダムオプションの候補は、ラトリオが自分の画面を作るときの関数をそのまま呼んで作る(本家が変わっても追従する)
-    const imp = (p) => w.eval(`import("/ratorio/engine/${p}")`);
+    const imp = (p) => w.eval(`import("${engBase()}engine/${p}")`);
     ENG.x = { job: (await imp("data/mig.job.h.js")).IsMatchJobRestrict, nm: await imp("equip/equip-name.js"), card: (await imp("equip/hmcard.js")).RebuildCardSelect,
       ro: await imp("equip/hmrndopt.js"), rnd: await imp("equip/rndopttype.h.js"), rndTypeId: (await imp("equip/item.h.js")).GetRndOptTypeId,
       rndTypes: (await imp("equip/rndopttype.dat.js")).g_rndOptTypeArray, rndListIdx: (await imp("const/EnumRndOptTypeDataIndex.js")).RND_OPT_TYPE_DATA_INDEX_LIST_ID_ARRAY };
@@ -1295,7 +1298,7 @@ async function engSchema(jobId) {
     const grab = (re, g, f) => [...d.querySelectorAll("select,input")].forEach((e) => { const mm = re.exec(e.name || e.id || ""); if (mm) item(g, "", f, +mm[1], labelOf(e), e); });
     grab(/^A_skill(\d+)$/, "self", "passiveSkill"); grab(/^A7_Skill(\d+)$/, "item", "buff7"); grab(/^A4_Skill(\d+)$/, "guild", "buff4"); grab(/^A8_Skill(\d+)$/, "guild", "buff8");
     // 他職の支援(一次〜四次)と状態異常: CConfBase の欄。定義(名前)は confDataObj、入力欄は OBJID_CONTROL_CONF_<番号>_ID_<添字>
-    const CB = (await w.eval('import("/ratorio/engine/ui/CConfBase.js")')).CConfBase;
+    const CB = (await w.eval(`import("${engBase()}engine/ui/CConfBase.js")`)).CConfBase;
     ENG_CONF.forEach(([g, sub, f], n) => {
       const t = CB.targetArray[n]; if (!t) return;
       const o = t.objThis; o.BuildUpSelectArea(t.objRoot, true);
@@ -1329,7 +1332,7 @@ async function engSettle(max = 4000) {   // ラトリオの中の後片づけ(�
 //   → 画面の入力欄から読む項目(職業・Lv・ステータス・武器の属性・カード)だけ model の値で上書き → buildSaveDataUnits() → 文字にして圧縮
 // 書き出したものを読み込み直すと、元と同じ model に戻ることを確認ずみ
 async function engExportData(model) {
-  const w = ENG.frame.contentWindow, imp = (p) => w.eval(`import("/ratorio/engine/${p}")`);
+  const w = ENG.frame.contentWindow, imp = (p) => w.eval(`import("${engBase()}engine/${p}")`);
   const X = ENG.x.save = ENG.x.save || { col: await imp("savedata/savedata-collect.js"), z: await imp("savedata/zstd-codec.js"), cv: (await imp("savedata/CSaveDataConverter.js")).CSaveDataConverter, kJob: (await imp("const/EnumConstDataKind.js")).CONST_DATA_KIND_JOB };
   engCalc(model);
   const sm = X.col.extractSaveModelFromState(), st = model.status;
@@ -1353,15 +1356,17 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
+const simcClone = (x) => JSON.parse(JSON.stringify(x));
+const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(c.model) !== JSON.stringify(c.saved);
 function simcSave() {                     // 少しまとめてから保存
   clearTimeout(SIMC.saveT);
-  SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model }) }); }, 600);
+  SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }); }, 600);
 }
 function simcSelect(id) { SIMC.cur = id; store.set("md_simchar", id); SIMC.res = null; }
-const simcPut = (id) => fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: SIMC.chars[id].name, model: SIMC.chars[id].model }) });
+const simcPut = (id) => fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: SIMC.chars[id].name, model: SIMC.chars[id].model, saved: SIMC.chars[id].saved || SIMC.chars[id].model }) });
 const simcJobName = (model) => (ENG.jobs.find(([v]) => String(v) === String(model.status.jobId)) || [0, "キャラ"])[1];
 async function simcNew(jobId, name) {
   SIMC.busy = "キャラを作っています…"; render();
@@ -2092,6 +2097,7 @@ async function simcFromFox(asNew) {
   const st = (mainSet && (mainSet.chars || {})[F.char] && mainSet.chars[F.char].status) || e.status || {};
   let ch = simcCur(), id = SIMC.cur;
   SIMC.busy = "ゲームのキャラから作っています…"; SIMC.msg = ""; render();
+  if (!ENG.ready) { await engInit(); if (!ENG.ready) { SIMC.busy = ""; render(); return; } }
   try {
     if (asNew) {
       const jo = ENG.jobs.find(([, t]) => t === st.jobName);
@@ -2109,7 +2115,7 @@ async function simcFromFox(asNew) {
     if (main.length) { rows.push(...simcWear(ch.model, main, false)); ch.model.foxSet = mainSet ? F.set : (e.cur || ""); }
     if (shadow.length) { rows.push(...simcWear(ch.model, shadow, true)); ch.model.foxShadow = shSet ? F.shadow : (e.shadow || ""); }
     SIMC.report = { id, rows, rnd: main.concat(shadow).some((i) => (i.options || []).length) };
-    simcSelect(id); await simcPut(id); SIMC.fox = null;
+    simcSelect(id); await simcPut(id);
     SIMC.msg = asNew ? "ゲームのキャラから作りました。" : "装備を着せました。";
   } catch (err) { SIMC.msg = "取り込めませんでした: " + err.message; }
   SIMC.busy = ""; render();
@@ -2121,15 +2127,36 @@ function renderSimChara() {
   if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); simcLoad().then(render); return; }
   if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const ch = simcCur(), ids = Object.keys(SIMC.chars);
+  store.set("md_simused", "1");
+  for (const c of Object.values(SIMC.chars)) if (!c.saved) c.saved = simcClone(c.model);      // 前の版のキャラ: いまの中身を「保存した中身」とみなす
+  const dirty = simcDirtySlot(ch);
   let h = simNav() + `<div class="panel simbox"><div class="opts">
-      <label>キャラ <select id="sccsel">${ids.length ? ids.map((id) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${esc(SIMC.chars[id].name)}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
-      ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>` : ""}
-      <button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>新しく作る</button>
-      <button class="ghost" id="sccurl">保存URLから読み込む</button>
-      ${Object.keys((DATA.equip || {}).chars || {}).length ? `<button class="ghost" id="sccfox" title="このツールがゲームの通信から読んだ、自分のキャラ（職業・Lv・ステータス・装備）をもとに作ります">ゲームのキャラから作る</button>` : ""}
-      <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
-      ${ch ? `<button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="このキャラを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button><button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
-      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…") : esc(SIMC.msg)}</span></div></div>`;
+      <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
+      ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
+        <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
+        <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
+        <button class="ghost" id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットを、最後に保存したときの内容に戻します">元に戻す</button>
+        <button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="このキャラを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button><button class="ghost" id="sccdel">消す</button>` : ""}
+      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
+      ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「元に戻す」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「元に戻す」で戻せます。"}</div>` : ""}</div>`;
+  {
+    const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
+    let game = `<div class="muted">ゲームにログインすると、このツールが通信から読んだ自分のキャラ（職業・Lv・ステータス・装備）をもとに作れます。</div>`;
+    if (names.length) {
+      if (!names.includes(F.char)) F.char = names.slice().sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0];
+      const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).filter(([, st]) => st.tag).sort((x, y) => String(x[1].tag).localeCompare(String(y[1].tag), "ja", { numeric: true }))
+        .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(setLabel(st))}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
+      game = `<div class="opts"><label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
+        <label>装備セット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
+        <label>シャドウ <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
+        <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>このキャラで新しいスロットを作る</button></div>
+        <div class="muted" style="font-size:12px">通信から読んだ職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。</div>`;
+    }
+    const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
+        <button class="ghost" id="sccurl">保存URLから読み込む</button>
+        <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button></div>`;
+    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkgame", "ゲームのキャラから作る", game, "", true)}${simcFold("mkrat", "ラトリオから作る", rat, ` <span class="muted">（1から作る・保存URL・セーブファイル）</span>`, false)}</div>`;
+  }
   if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
     h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
       <div class="opts"><input type="text" id="sccexpurl" readonly value="${esc(SIMC.exp.url)}" style="flex:1;min-width:16em"><button id="sccexpcopy">コピー</button><button class="ghost" id="sccexpclose">閉じる</button></div></div>`;
@@ -2140,18 +2167,6 @@ function renderSimChara() {
       <div class="scpick">${SIMC.pick.slots.map((x, i) => `<label><input type="checkbox" data-pick="${i}" ${x.on ? "checked" : ""}> ${esc(x.name)}</label>`).join("")}</div>
       <div class="opts"><button id="scpgo" ${on ? "" : "disabled"}>選んだ ${on} 件を読み込む</button><button class="ghost" id="scpall">すべて選ぶ／外す</button><button class="ghost" id="scpno">やめる</button></div></div>`;
   }
-  if (SIMC.fox) {
-    const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
-    if (!names.includes(F.char)) F.char = names.find((c) => E[c].cur) || names[0];
-    const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).sort((a, b) => (a[1].first || 0) - (b[1].first || 0))
-      .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(setLabel(st))}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
-    h += `<div class="panel simbox"><div class="opts"><b>ゲームのキャラから作る</b> <span class="muted">このツールが通信から読んだ、自分のキャラをもとに作ります。</span>
-      <label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
-      <label>装備セット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
-      <label>シャドウ <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label></div>
-      <div class="opts"><button id="sfnew" ${ENG.ready ? "" : "disabled"}>このキャラを作る</button><button class="ghost" id="sfno">やめる</button>
-      <span class="muted">職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。作ったあとは、装備欄の右上のタブで装備セットを着せかえられます。</span></div></div>`;
-  }
   const rep = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report : null;
   if (rep && (rep.rows.length || rep.rnd)) {
     h += `<div class="panel simbox"><div><b>${rep.rows.length ? `取り込めなかったもの（${rep.rows.length} 件）` : "取り込みました"}</b>
@@ -2160,9 +2175,9 @@ function renderSimChara() {
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
-    h += `<div class="panel empty">「新しく作る」で職業を選んで1から作るか、ラトリオの保存URL・セーブファイルを読み込めます。<br>作ったキャラは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">上の「ゲームのキャラから作る」か「ラトリオから作る」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
-    h += `<div class="panel empty">計算係（ROラトリオHub）を起動しています…</div>`;
+    h += `<div class="panel empty">${ENG.err ? "計算係（ROラトリオHub）を起動できませんでした。上の「もう一度試す」を押してください。" : "計算係（ROラトリオHub）を起動しています…<br>初回は、ラトリオの部品を全部読み込むので1分ほどかかることがあります。2回目からは速くなります。"}</div>`;
   } else {
     const m = ch.model;
     if (!SIMC.res) { try { SIMC.res = engCalc(m, simcAllKinds()); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
@@ -2202,13 +2217,15 @@ function renderSimChara() {
     g("scpno").onclick = () => { SIMC.pick = null; render(); };
     g("scpgo").onclick = simcImportPicked;
   }
-  if (g("sccfox")) g("sccfox").onclick = () => { SIMC.fox = SIMC.fox ? null : { char: "", set: "", shadow: "" }; render(); };
-  if (SIMC.fox && g("sfc")) {
+  $("#view").querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+  if (g("sccretry")) g("sccretry").onclick = () => { ENG.err = ""; engInit().then(render); render(); };
+  if (g("sccsavebtn")) g("sccsavebtn").onclick = () => { ch.saved = simcClone(ch.model); simcSave(); SIMC.msg = "保存しました。"; render(); };
+  if (g("sccrevert")) g("sccrevert").onclick = async () => { if (await askOnce("revert", `「${ch.name}」を、最後に保存したときの内容に戻します。\n保存していない変更は消えます。`, "元に戻す")) { ch.model = simcClone(ch.saved); SIMC.res = null; SIMC.report = null; simcSave(); SIMC.msg = "保存したときの内容に戻しました。"; render(); } };
+  if (g("sfc")) {
     g("sfc").onchange = (e) => { SIMC.fox.char = e.target.value; e.target.blur(); render(); };
     g("sfs").onchange = (e) => { SIMC.fox.set = e.target.value; };
     g("sfh").onchange = (e) => { SIMC.fox.shadow = e.target.value; };
     g("sfnew").onclick = () => simcFromFox(true);
-    g("sfno").onclick = () => { SIMC.fox = null; render(); };
   }
   if (g("sfrclose")) g("sfrclose").onclick = () => { SIMC.report = null; render(); };
   simcNeedKick();
@@ -2221,7 +2238,12 @@ function renderSimChara() {
   if (g("sccexpcopy")) g("sccexpcopy").onclick = async () => { SIMC.exp.copied = await copyText(SIMC.exp.url); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
   if (g("sccexpclose")) g("sccexpclose").onclick = () => { SIMC.exp = null; render(); };
   if (g("sccexpurl")) g("sccexpurl").onfocus = (e) => e.target.select();
-  if (g("sccdup")) g("sccdup").onclick = () => { const id = "c" + Date.now().toString(36); SIMC.chars[id] = { name: ch.name + " のコピー", model: JSON.parse(JSON.stringify(ch.model)) }; simcSelect(id); simcSave(); render(); };
+  if (g("sccdup")) g("sccdup").onclick = () => {
+    const v = prompt("新しいスロットの名前", ch.name + " (2)"); if (!v || !v.trim()) return;
+    const id = "c" + Date.now().toString(36);
+    SIMC.chars[id] = { name: v.trim().slice(0, 40), model: simcClone(ch.model), saved: simcClone(ch.model) };
+    simcSelect(id); simcSave(); SIMC.msg = "新しいスロットに保存しました。"; render();
+  };
   if (g("sccdel")) g("sccdel").onclick = async (e) => {
     if (e.target.dataset.ok !== "1") { e.target.dataset.ok = "1"; e.target.textContent = "本当に消す？"; return; }
     await fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, delete: 1 }) });
@@ -3562,6 +3584,10 @@ if (LOCAL) {
   setInterval(() => { if (!document.hidden && TAB !== "settings") load(); }, 5000);
   load();
 } else if (PW) load(); else showLogin("");
+// 計算機を使ったことがある PC では、アプリを開いたら計算係(ラトリオ)を前もって起動しておく(計算機タブを開いたときに待たなくて済む)
+setTimeout(() => {
+  try { if (typeof LOCAL !== "undefined" && LOCAL && store.get("md_simused") === "1") ratStatus().then(() => { if (RAT && RAT.installed && !ENG.ready && !ENG.loading) engInit().then(() => { if (TAB === "sim") render(); }); }).catch(() => { }); } catch (e) { }
+}, 3000);
 </script>
 </body>
 </html>
