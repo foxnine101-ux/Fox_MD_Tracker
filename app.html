@@ -126,7 +126,7 @@
       <span class="srvtabs" id="srvtabs"></span>
       <span style="flex:1"></span>
       <button class="ghost" id="reload">更新</button>
-      <button class="ghost gear" id="gear" title="設定">⚙</button>
+      <button class="ghost gear" id="gear" title="イベント・入場履歴・設定">⚙</button>
       <button class="ghost" id="logout">ログアウト</button>
     </header>
     <div class="tabs" id="tabs"></div>
@@ -372,7 +372,9 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["equip", "装備"], ["nyar", "ニャル様"], ["event", "イベント"], ["history", "入場履歴"]];   // 設定は見出しの歯車(⚙)から
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["equip", "装備"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
+const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
+let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
@@ -387,12 +389,12 @@ function render() {
   };
   $("#tabs").innerHTML = TABS.map(([k, l]) => {
     const n = ["weekly", "daily"].includes(k) ? countOk(k) : 0;
-    if (k === "event") { const m = eventGroups(chars).length; return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}">${l}${m ? `<span class="count">${m}件</span>` : ""}</button>`; }
     return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}">${l}${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
   }).join("");
   $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
   renderServerTabs();
-  $("#gear").classList.toggle("on", TAB === "settings");
+  $("#gear").classList.toggle("on", GEAR_TABS.some(([k]) => k === TAB));
+  GEAR_EVENTS = eventGroups(chars).length;
   $("#view").onclick = null;
   if (TAB === "history") return renderHistory();
   if (TAB === "nyar") return renderNyar(groups, chars, now);
@@ -1525,7 +1527,11 @@ $("#go").onclick = () => { PW = $("#pw").value.trim(); if (PW) load(); };
 $("#pw").onkeydown = (e) => { if (e.key === "Enter") $("#go").click(); };
 $("#logout").onclick = () => { store.del("md_pw"); PW = ""; DATA = null; showLogin(""); };
 $("#reload").onclick = () => { RZ.t = 0; load(); };   // 更新ボタンは耐性シートも読み直す
-$("#gear").onclick = () => { TAB = TAB === "settings" ? (store.get("md_tab_prev") || "weekly") : (store.set("md_tab_prev", TAB), "settings"); store.set("md_tab", TAB); render(); };   // もう一度押すと元のタブへ
+$("#gear").onclick = (e) => {      // 歯車: イベント・入場履歴・設定のメニュー
+  const r = e.currentTarget.getBoundingClientRect();
+  const go = (k) => { TAB = k; store.set("md_tab", TAB); render(); };
+  showCtx(Math.max(8, r.right - 200), r.bottom + 4, GEAR_TABS.map(([k, l]) => ({ label: (TAB === k ? "● " : "") + l + (k === "event" && GEAR_EVENTS ? `（${GEAR_EVENTS}件）` : ""), act: () => go(k) })));
+};
 $("#tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (!b) return; TAB = b.dataset.tab; store.set("md_tab", TAB); render(); };
 setInterval(() => { if (DATA && TAB !== "settings") render(); }, 30000);
 setInterval(() => { if (DATA && !document.hidden && TAB !== "settings") load(); }, 120000);
