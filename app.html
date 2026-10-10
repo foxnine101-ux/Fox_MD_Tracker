@@ -859,6 +859,7 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.simgo{padding:0 8px;font-size:12px}
 .cmpbox:not(:empty){margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);overflow-x:auto}
 .simc table.cmp td.cmpd{background:rgba(227,160,8,.12)}
 .simc table.cmp tr.cmpk td{padding-top:8px;border-bottom:1px solid var(--line)}
@@ -1356,7 +1357,7 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
@@ -1733,6 +1734,14 @@ function simcPresetBar(m) {
   return `<div class="bfbar"><div class="settabs"><span class="muted">よく使う組み合わせ</span>${P.map((x, i) => `<button class="settab" data-bpre="${i}" title="押すと、この組み合わせをオンにします（いまのオンに足します）。右クリックで「これだけにする」・上書き・名前の変更・消す\n${esc(Object.keys(x.on || {}).length + "個")}">${esc(x.name)}</button>`).join("")}
     <button class="settab more" id="sccbsave" title="いまオンにしているものを、名前を付けて保存します">＋いまのオンを保存</button><button class="settab more" id="sccboff">全部オフ</button></div></div>`;
 }
+// 被ダメタブの「検証」: その攻撃を選んだ状態で、計算機の「被ダメの検証」の枠を開く
+function simcGoDmg(char, md, src, skill) {
+  Object.assign(SIM, { char, md, key: src + "|" + skill, manual: false, base: "", eleOv: "" });
+  const st = simcFoldState(); st.dmg = true; store.set("md_simfold", JSON.stringify(st));
+  TAB = "sim"; store.set("md_tab", TAB); SIMV = "chara"; store.set("md_simv", SIMV); render();
+  setTimeout(() => { const el = $("#view").querySelector('details[data-fold="dmg"]'); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 300);
+}
+document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-simgo]"); if (b) { try { simcGoDmg(...JSON.parse(b.dataset.simgo)); } catch (err) { console.warn(err); } } });
 function simcSchemaKick(m) {
   if (SIMC.bfBusy || SIMC.busy || SIMC.bfErr || !ENG.ready) return;
   SIMC.bfBusy = true; SIMC.bfErr = "";
@@ -1976,8 +1985,30 @@ function simcCmpXHtml(m, r, kinds) {      // kinds = [[番号, 名前]]。違い
   }
   return h + `</table><label class="muted" style="font-size:12px"><input type="checkbox" data-cmpall ${SIMC.cmpAll ? "checked" : ""}> 同じ行も出す</label>`;
 }
+function simcDmgBind(m) {
+  const box = $("#sccdmg"); if (!box) return;
+  const redo = () => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); simcDmgFill(m); };
+  box.querySelectorAll("[data-sd]").forEach((el) => el.onchange = () => {
+    const k = el.dataset.sd, v = el.type === "checkbox" ? el.checked : el.value;
+    if (k === "char") { SIM.char = v; SIM.sets = null; SIM.base = ""; SIM.key = ""; SIM.md = ""; }
+    else if (k === "manual") { SIM.manual = v; SIM.base = ""; }
+    else if (k === "md") { SIM.md = v; SIM.key = ""; SIM.base = ""; SIM.eleOv = ""; }
+    else if (k === "key") { SIM.key = v; SIM.base = ""; SIM.eleOv = ""; }
+    else if (k === "dmg") SIM.dmg = +v || 0;
+    else SIM[k] = v;
+    redo();
+  });
+  box.querySelectorAll("[data-sdbuff]").forEach((el) => el.onchange = () => { const [w, k] = el.dataset.sdbuff.split("."); (w === "B" ? SIM.buffB : SIM.buffT)[k] = Math.min(100, Math.max(0, +el.value || 0)); redo(); });
+  const mk = $("#sdmake"); if (mk) mk.onclick = () => { const P = simAtkPick(); if (!P) return; SIMC.fox = { char: P.c, set: P.baseMain, shadow: P.baseSh }; simcFromFox(true); };
+}
+function simcDmgFill(m) {
+  const r = SIMC.res, box = $("#sccdmg"); if (!r || !box) return;
+  box.innerHTML = simcDmgHtml(m, r); const sm = $("#sccdsum"); if (sm) sm.textContent = simcDmgSum(m, r);
+  simcDmgBind(m);
+}
 function simcCmpFill(m) {
   const r = SIMC.res; if (!r) return;
+  simcDmgFill(m);
   const set = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
   set("scckeycmp", simcCmpKeyHtml(m, r)); set("sccresistcmp", simcCmpXHtml(m, r, ENG_RKINDS)); set("sccxcmp", simcCmpXHtml(m, r, ENG_XKINDS.filter(([id]) => simcXKinds().includes(id))));
   $("#view").querySelectorAll("[data-cmpall]").forEach((el) => el.onchange = () => { SIMC.cmpAll = el.checked; simcCmpFill(m); });
@@ -1995,6 +2026,151 @@ function simcRelHtml(m, letters, key, title) {
     const on = simcBuffOn(m, it), v = simcBuffVal(m, it), ot = it.type === "s" && on ? (it.opts.find((o) => o[0] === Number(v)) || [])[1] : "";
     return `<label class="bfi sm${on ? " on" : ""}" title="${esc(it.label)}"><input type="checkbox" data-rel="${simcBuffKey(it)}" ${on ? "checked" : ""}><span class="bfl">${esc(it.label)}</span>${ot ? `<span class="bfg">${esc(ot)}</span>` : ""}</label>`;
   }).join("")}</div></details>`;
+}
+// ---- 被ダメの検証(計算機のキャラで): 被ダメの記録の攻撃を、いまシミュレートしているキャラが受けたらどうなるか ----
+// 軽減前のダメージは、これまでの「被ダメの検証」と同じ逆算(受けたダメージと、そのときの装備の軽減から)。
+// かけ直す側の軽減は、計算係(ラトリオ)の結果から取る: 属性は「属性倍率」の表、種族・ボス・サイズ・遠距離は「ダメージ耐性」の表、
+// DEF/MDEF は charaData[7,8](除算・減算)/[9,10]、RES/MRES は 装備の分(specData[254,255]) + STA・WIS の分。選ぶ中身(SIM)は「被ダメの検証」の画面と共通
+function simAtkPick() {
+  const EQ = DATA.equip || {}, E = EQ.chars || {}, S = EQ.sets || {};
+  const names = Object.keys(DATA.chars || {}).filter((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length);
+  if (!names.length) return null;
+  if (!names.includes(SIM.char)) SIM.char = names[0];
+  const c = SIM.char, dmg = (DATA.chars[c] || {}).dmg || {}, dmgG = (DATA.chars[c] || {}).dmg_g || {}, mds = Object.keys(dmg);
+  if (!SIM.manual && !dmg[SIM.md]) SIM.md = mds.slice().sort((a, b) => Math.max(...Object.values(dmg[b]).map((v) => v[3])) - Math.max(...Object.values(dmg[a]).map((v) => v[3])))[0];
+  const rows = SIM.manual ? [] : Object.entries(dmg[SIM.md] || {}).filter(([k]) => kindOf(k.split("|")[1])[1] !== "属性なし").sort((a, b) => b[1][2] - a[1][2]);
+  if (!SIM.manual && !rows.some(([k]) => k === SIM.key)) SIM.key = rows.length ? rows[0][0] : "";
+  let atk, baseDmg, baseOpts = [];
+  if (SIM.manual) {
+    atk = { who: "（手で入力）", skill: "", kind: SIM.kind, ele: SIM.ele, race: SIM.race, size: SIM.size, boss: SIM.boss === "" ? "" : SIM.boss === "1" };
+    baseDmg = +SIM.dmg || 0;
+  } else {
+    const [who, skill] = SIM.key.split("|"), row = (dmg[SIM.md] || {})[SIM.key] || [0, 0, 0];
+    const [kd, el] = rowKind(skill, row), mob = (DATA.dmg_mobs || {})[who];
+    const seen = [...(DATA.dmg_recent || [])].reverse().find((r) => r.src === who && r.skill === skill && r.md === SIM.md && r.ele && !r.ele.includes("/"));
+    SIM.autoEle = (seen && seen.ele) || first(el) || "無";
+    atk = { who, skill, kind: kd === "物理・近/遠" || kd === "物理" ? "物理・近接" : kd || "魔法", ele: SIM.eleOv || SIM.autoEle, race: mob ? first(mob.race) : "", size: mob ? first(mob.size) : "", boss: mob ? first(mob.boss) === "1" : "" };
+    baseOpts = Object.entries(dmgG[SIM.md] || {}).filter(([id, g]) => g[SIM.key] && S[gearMain(id)]).map(([id, g]) => [id, g[SIM.key][2]]).sort((a, b) => b[1] - a[1]);
+    if (!baseOpts.some(([id]) => id === SIM.base) && !(SIM.base && S[gearMain(SIM.base)] && !baseOpts.length)) SIM.base = baseOpts.length ? baseOpts[0][0] : (E[c] && E[c].cur ? E[c].cur + (E[c].shadow ? "+" + E[c].shadow : "") : Object.keys(S)[0] || "");
+    baseDmg = (baseOpts.find(([id]) => id === SIM.base) || [0, row[2]])[1];
+  }
+  if (SIM.manual && !S[gearMain(SIM.base)]) SIM.base = E[c] && E[c].cur ? E[c].cur + (E[c].shadow ? "+" + E[c].shadow : "") : Object.keys(S)[0] || "";
+  return { names, c, mds, rows, atk, baseDmg, baseOpts, baseMain: gearMain(SIM.base), baseSh: gearShadow(SIM.base) };
+}
+const SIMC_RACE_RAT = { "魚貝": "魚類", "竜": "竜族" };
+function simcDmgStages(atk, r, buff) {    // 計算係の結果から作る軽減の段階(simStages と同じ形・同じ名前)
+  const out = [], pct = (v) => Math.max(0, 1 - (v || 0) / 100), nums = (t) => (String(t || "").match(/-?[\d.]+/g) || []).map(Number);
+  const phys = atk.kind.startsWith("物理"), magic = atk.kind === "魔法", fixed = atk.kind === "固定";
+  let sub = 0;
+  if (!fixed) {
+    const e6 = simcXParse((r.x || {})[6], true).find((y) => y.label === atk.ele), v6 = e6 ? nums(e6.val) : [];      // [属性耐性, 属性倍率(鎧の属性の相性), 最終倍率]
+    out.push(["鎧の属性", (v6[1] ?? 100) / 100, `${v6[1] ?? 100}%`]);
+    out.push([`${atk.ele}属性の耐性`, pct(Math.min(v6[0] || 0, 95)), `${v6[0] || 0}%`]);
+    const t7 = simcXParse((r.x || {})[7], false), get = (sec, label) => { const y = t7.find((z) => z.sec === sec && z.label === label); return y ? (nums(y.val)[0] || 0) : 0; };
+    if (atk.race) { const v = get("種族", SIMC_RACE_RAT[atk.race] || atk.race); out.push([`${atk.race}形からの耐性`, pct(v), `${v}%`]); }
+    if (atk.boss !== "") { const k = atk.boss ? "ボス" : "一般", v = get("ボス", k); out.push([`${k}モンスターからの耐性`, pct(v), `${v}%`]); }
+    if (atk.size) { const v = get("サイズ", atk.size + "型"); out.push([`${atk.size}型からの耐性`, pct(v), `${v}%`]); }
+    if (atk.kind === "物理・遠距離") { const v = get("特殊", "遠距離"); out.push(["遠距離物理の耐性", pct(v), `${v}%`]); }
+    const sp = r.spec || [], tr = (k) => r.tot[k] || 0;
+    if (phys) {
+      const hard = Math.max(0, r.c[7] || 0), res = (sp[254] || 0) + tr("STA") + Math.floor(tr("STA") / 3) * 5;
+      out.push([`DEF（装備 ${hard}）`, (4000 + hard) / (4000 + hard * 10), ""]); out.push([`RES（${res}）`, (2000 + res) / (2000 + res * 5), ""]);
+      sub = Math.max(0, r.c[8] || 0);
+    } else if (magic) {
+      const hard = Math.max(0, r.c[9] || 0), res = (sp[255] || 0) + tr("WIS") + Math.floor(tr("WIS") / 3) * 5;
+      out.push([`MDEF（装備 ${hard}）`, (1000 + hard) / (1000 + hard * 10), ""]); out.push([`MRES（${res}）`, (2000 + res) / (2000 + res * 5), ""]);
+      sub = Math.max(0, r.c[10] || 0);
+    }
+  }
+  if (buff.ec) out.push(["エナジーコート", pct(buff.ec), `${buff.ec}%`]);
+  if (buff.cut) out.push(["ダメージ減少スキル", pct(buff.cut), `${buff.cut}%`]);
+  if (buff.extra) out.push(["そのほかの軽減", pct(buff.extra), `${buff.extra}%`]);
+  return { list: out, mult: out.reduce((a, x) => a * x[1], 1), sub };
+}
+// 受けたときに近い写し: このスロットのキャラに、そのときのステータス(通信で読んだ値)と装備セットを入れて、計算係で計算したもの。
+// 計算係は RES/MRES などを全部は再現できないので、ダメージは「記録のダメージ × (いまの軽減 ÷ この写しの軽減)」で出す(計算係のくせは打ち消し合い、装備・ステータス・支援の差だけが効く)。
+// 職業が違うスロットでは写しを作れない → 記録の表(gear_info)からの逆算にもどす
+function simcDmgBase(m, P) {
+  const EQ = DATA.equip || {}, st = simStatus(P.c, P.baseMain), key = JSON.stringify([m, P.c, P.baseMain, P.baseSh, simcAllKinds()]);
+  if (SIMC.dmgBase && SIMC.dmgBase.key === key) return SIMC.dmgBase.r;
+  let r = null;
+  if (st.jobName && simcJobName(m) === st.jobName) {
+    try {
+      const mm = simcClone(m);
+      if (st.lv) mm.status.baseLv = st.lv;
+      ["str", "agi", "vit", "int", "dex", "luk"].forEach((k) => { const v = (st.stats || {})[k.toUpperCase()]; if (v && v.base !== undefined) mm.status[k] = v.base; });
+      ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, n) => { const v = (st.stats || {})[k]; if (v && v.base !== undefined) mm.pureStatus[6 + n] = v.base; });
+      const wear = (T, sid, shadow) => { const x = (T || {})[sid]; if (!x) return; if (x.sim) simcApplyFrag(mm, x.sim, shadow); else simcWear(mm, x.items || [], shadow); };
+      wear(EQ.sets, P.baseMain, false); wear(EQ.shadows, P.baseSh, true);
+      r = engCalc(mm, simcAllKinds());
+    } catch (e) { console.warn("dmg base", e); r = null; }
+  }
+  SIMC.dmgBase = { key, r };
+  return r;
+}
+function simcDmgCalc(m, r) {              // {P: 選んだ攻撃, base: 受けたときの列, raw, rel: 写しを使えたか, cols: [{label, T, dmg, hp, st}]}
+  const P = simAtkPick(); if (!P) return null;
+  const B = simStages(P.atk, simProfile(P.baseMain, P.baseSh), simStatus(P.c, P.baseMain), SIM.buffB);
+  const none = { ec: 0, cut: 0, extra: 0 }, bm = (b) => [b.ec, b.cut, b.extra].reduce((a, v) => a * Math.max(0, 1 - (v || 0) / 100), 1);
+  const rB = simcFoldState().dmg ? simcDmgBase(m, P) : (SIMC.dmgBase || {}).r || null, EB = rB ? simcDmgStages(P.atk, rB, none) : null;
+  const rel = !!(EB && EB.mult > 0 && bm(SIM.buffB) > 0);
+  const raw = rel ? (P.baseDmg + B.sub) / (EB.mult * bm(SIM.buffB)) : B.mult > 0 ? (P.baseDmg + B.sub) / B.mult : 0;
+  const col = (label, rr, st) => {
+    const T = simcDmgStages(P.atk, rr, SIM.buffT);
+    const sub = rel ? Math.max(0, B.sub + T.sub - EB.sub) : T.sub;       // 引かれる分: 記録の値に、計算係での差を足す
+    return { label, st, T: { list: T.list, mult: T.mult, sub }, dmg: Math.max(0, Math.round(raw * T.mult - sub)), hp: rr.c[23] || 0 };
+  };
+  const cols = [col("この計算機のキャラ", r)];
+  const R = SIMC.cmpRes; if (R && simcCmpIds(m).length && R.sig === simcCmpSig(m)) for (const x of R.cols) cols.push(col(x.st.tag, x.r, x.st));
+  const base = { label: "受けたとき", base: true, st: ((DATA.equip || {}).sets || {})[P.baseMain], dmg: P.baseDmg, hp: (simStatus(P.c, P.baseMain).derived || {}).MaxHP || 0,
+    T: rel ? { list: simcDmgStages(P.atk, rB, SIM.buffB).list, sub: B.sub } : B };
+  return { P, B, raw, rel, base, cols };
+}
+function simcDmgSum(m, r) {
+  const D = simcDmgCalc(m, r); if (!D || !D.P.baseDmg) return "";
+  const c = D.cols[0];
+  return `${D.P.atk.who}${D.P.atk.skill ? " の " + D.P.atk.skill : ""}: 受けたとき ${fmtN(D.P.baseDmg)} → このキャラなら ${fmtN(c.dmg)}（${c.dmg < c.hp ? "耐える・残り " + fmtN(c.hp - c.dmg) : "倒れる・HP " + fmtN(c.hp)}）`;
+}
+function simcDmgHtml(m, r) {
+  const D = simcDmgCalc(m, r);
+  if (!D) return `<div class="muted">被ダメの記録がまだありません。ゲームで攻撃を受けると、ここで「この装備なら耐えられたか」を試せます。</div>`;
+  const { P, raw, cols } = D, S = (DATA.equip || {}).sets || {}, atk = P.atk;
+  const selOpt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
+  const buffRow = (id, b, label) => `<div class="opts"><span class="muted" style="min-width:9.5em">${label}</span>
+      <label>エナジーコート <select data-sdbuff="${id}.ec">${selOpt([[0, "なし"], [6, "6%"], [12, "12%"], [18, "18%"], [24, "24%"], [30, "30%"]], b.ec)}</select></label>
+      <label>ダメージ減少スキル <select data-sdbuff="${id}.cut">${selOpt(SIM_CUTS, b.cut)}</select></label>
+      <label>そのほかの軽減 <input type="number" min="0" max="100" data-sdbuff="${id}.extra" value="${b.extra || ""}" placeholder="0"> %</label></div>`;
+  let h = `<div class="opts"><b>攻撃</b><label>受けたキャラ <select data-sd="char">${selOpt(P.names.map((x) => [x, cn(x)]), P.c)}</select></label>
+      <label><input type="checkbox" data-sd="manual" ${SIM.manual ? "checked" : ""}> 手で入れる</label>`;
+  if (SIM.manual) {
+    h += `<label>受けたダメージ <input type="number" data-sd="dmg" min="0" value="${SIM.dmg || ""}" placeholder="例 250000" style="width:8em"></label>
+      <label>種類 <select data-sd="kind">${selOpt(["物理・近接", "物理・遠距離", "魔法", "固定"].map((x) => [x, x]), SIM.kind)}</select></label>
+      <label>属性 <select data-sd="ele">${selOpt(SIM_ELES.map((x) => [x, x]), SIM.ele)}</select></label>
+      <label>種族 <select data-sd="race">${selOpt([["", "わからない"]].concat(SIM_RACES.map((x) => [x, x])), SIM.race)}</select></label>
+      <label>サイズ <select data-sd="size">${selOpt([["", "わからない"], ["小", "小"], ["中", "中"], ["大", "大"]], SIM.size)}</select></label>
+      <label>ボス <select data-sd="boss">${selOpt([["", "わからない"], ["1", "ボス"], ["0", "一般"]], SIM.boss)}</select></label></div>`;
+  } else {
+    h += `<label>場所 <select data-sd="md">${selOpt(P.mds.map((x) => [x, x]), SIM.md)}</select></label>
+      <label>攻撃 <select data-sd="key" style="max-width:380px">${selOpt(P.rows.map(([k, v]) => [k, `${k.split("|")[0]} の ${k.split("|")[1]}（最大 ${fmtN(v[2])}・${v[0]}回）`]), SIM.key)}</select></label></div>
+      <div class="opts"><span class="muted">${esc(atk.who)} ${mobTag(atk.who)}　${kindTag(atk.kind)} ${eleTag(atk.ele)}</span>
+        <label>属性 <select data-sd="eleOv">${selOpt([["", `自動（${SIM.autoEle}）`]].concat(SIM_ELES.map((x) => [x, x])), SIM.eleOv)}</select></label></div>`;
+  }
+  h += `<div class="opts"><b>受けたときの装備</b><label><select data-sd="base">${P.baseOpts.length
+      ? selOpt(P.baseOpts.map(([id, mx]) => [id, `${(S[gearMain(id)] || {}).tag || "履歴"}${shadowTagOf(id) ? "・" + shadowTagOf(id) : ""}: ${equipSetName(id)}（このときの最大 ${fmtN(mx)}）`]), SIM.base)
+      : selOpt(Object.entries(S).filter(([, st]) => !st.sim).map(([id, st]) => [id + (P.baseSh && P.baseMain === id ? "+" + P.baseSh : ""), `${setLabel(st)}: ${st.name || st.auto}`]), SIM.base)}</select></label>
+      ${S[P.baseMain] && !S[P.baseMain].sim ? `<button class="ghost" id="sdmake" title="この攻撃を受けたときのキャラ（職業・Lv・ステータス）と装備で、新しいスロットを作ります">このときのキャラ・装備でスロットを作る</button>` : ""}</div>
+    ${buffRow("B", SIM.buffB, "そのときの補助")}${buffRow("T", SIM.buffT, "計算機のキャラの補助")}`;
+  const all = [D.base].concat(cols);
+  const names = [...new Set(all.flatMap((x) => x.T.list.map((y) => y[0].replace(/（.*）$/, ""))))];
+  const cell = (T, name) => { const x = T.list.find((y) => y[0].replace(/（.*）$/, "") === name); return x ? `×${(Math.round(x[1] * 1000) / 1000).toFixed(3)}${x[2] ? ` <span class="muted">${esc(x[2])}</span>` : ""}${/（/.test(x[0]) ? ` <span class="muted">${esc(x[0].match(/（(.*)）$/)[1])}</span>` : ""}` : `<span class="muted">-</span>`; };
+  h += `<table class="multi cmp" style="margin-top:8px"><tr><th></th>${all.map((x) => `<th>${x.base ? "受けたとき" : x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span>` : esc(x.label)}${x.base && x.st ? " " + tagChip(x.st) : ""}</th>`).join("")}</tr>
+    ${names.map((n) => `<tr><td>${esc(n)}</td>${all.map((x) => `<td>${cell(x.T, n)}</td>`).join("")}</tr>`).join("")}
+    <tr><td>引かれる分（ステータスの DEF/MDEF）</td>${all.map((x) => `<td>${x.T.sub ? "−" + fmtN(x.T.sub) : "-"}</td>`).join("")}</tr>
+    <tr class="cmpk"><td><b>ダメージ</b></td>${all.map((x) => `<td class="v"><b>${fmtN(x.dmg)}</b>${x.base || !P.baseDmg ? "" : ` <span class="${x.dmg <= P.baseDmg ? "good" : "warn"}">${x.dmg <= P.baseDmg ? "−" : "+"}${Math.abs(Math.round((x.dmg - P.baseDmg) * 100 / P.baseDmg))}%</span>`}</td>`).join("")}</tr>
+    <tr><td>最大HP</td>${all.map((x) => `<td class="v">${x.hp ? fmtN(x.hp) : "-"}</td>`).join("")}</tr>
+    <tr><td><b>判定</b></td>${all.map((x) => `<td>${!x.hp ? "-" : x.dmg < x.hp ? `<span class="sim-ok">耐える</span> <span class="muted">残り ${fmtN(x.hp - x.dmg)}</span>` : `<span class="sim-ng">倒れる</span> <span class="muted">${fmtN(x.dmg - x.hp)} 足りない</span>`}</td>`).join("")}</tr></table>
+    <div class="muted" style="font-size:12px;margin-top:4px">${D.rel ? `「受けたとき」の列は、このスロットのキャラに、そのときのステータスと装備セットを入れて計算したものです。記録のダメージ（${fmtN(P.baseDmg)}）に「いまの軽減 ÷ 受けたときの軽減」をかけて出しているので、装備・ステータス・支援を変えた分だけが数字に効きます（軽減前は約 ${fmtN(Math.round(raw))}）。` : `<span class="warn">このスロットの職業が、攻撃を受けたキャラと違うので、「受けたとき」の列は記録の表からの逆算です（軽減前は約 ${fmtN(Math.round(raw))}）。数字のずれが大きくなります。「このときのキャラ・装備でスロットを作る」で作ったスロットだと、より正確です。</span>`}見出しの右の「比べる」で装備セットを選ぶと、横に並びます。魔法ダメージそのものへの耐性と、エナジーコートなどは自動では入らないので、上の「補助」で選んでください。目安です。</div>`;
+  return h;
 }
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
@@ -2197,6 +2373,7 @@ function renderSimChara() {
       ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（ASPD 193・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
       ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
+      ${simcFold("dmg", "被ダメの検証", `<div id="sccdmg">${simcDmgHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccdsum">${esc(simcDmgSum(m, r))}</span>${simcCmpChips(m)}`, false)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
@@ -3080,8 +3257,8 @@ function renderDmg(chars, now) {
       <p class="hint">攻撃を受けたときの装備です。上の「装備」で選ぶと、その装備のときの被ダメだけを見られます（装備を比べるとき用）。DEF・MDEFは通信の値。鎧の属性と耐性は、着ている装備・カード・エンチャント・ランダムオプションから出した目安です（セット効果・精錬などの条件つきの効果、スキルや薬・属性付与などの一時的な効果は入りません）。</p>`;
   }
   if (rec.length) {
-    h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
+    h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th><th></th></tr></thead><tbody>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td><td>${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost simgo" data-simgo="${esc(JSON.stringify([r.char, r.md, r.src, r.skill]))}" title="この攻撃を、計算機のキャラ（いまシミュレートしている装備・支援）で受けたらどうなるかを見ます">検証</button>` : ""}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
