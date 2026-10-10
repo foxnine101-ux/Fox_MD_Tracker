@@ -859,6 +859,8 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.unl{display:inline-block;margin-left:3px;padding:0 5px;border-radius:99px;background:#b8860b;color:#fff;font-size:11px;font-weight:700;cursor:help}
+.simlink{margin:2px 2px 0 0}
 .bfbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
 .bfbar input[type=text]{flex:1 1 14em;max-width:22em;font:inherit;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
 .bfgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:4px 8px}
@@ -1106,14 +1108,22 @@ const gearTag = (G, id) => { const g = G[gearMain(id)]; if (!g) return ""; const
 // ---------- 装備 ----------
 // キャラ × 装備セット。全部の場所(衣装をのぞく)がうまったときの装備を「装備セット」として覚えている
 let EQ_CHAR = "";
-function itemLine(it) {
+const UNL = `<span class="unl" title="ゲームのアイテムと結びついていません（耐性のまとめに入りません）">?</span>`;
+function itemLine(it, sim) {
   const head = `${it.refine ? `+${it.refine} ` : ""}${it.grade ? `[★${it.grade}] ` : ""}${it.name}`;
-  const cards = (it.cards || []).map((c) => c.name);
-  return `<span class="eq-name">${esc(head)}</span>${cards.length ? ` <span class="muted">（${esc(cards.join("，"))}）</span>` : ""}`
+  const cards = (it.cards || []).map((c) => esc(c.name) + (sim && c.id == null ? UNL : ""));
+  return `<span class="eq-name">${esc(head)}</span>${sim && it.itemId == null ? UNL : ""}${cards.length ? ` <span class="muted">（${cards.join("，")}）</span>` : ""}`
     + ((it.options || []).length ? `<div class="eq-opt">${it.options.map((o) => esc(o.text)).join(" ／ ")}</div>` : "");
 }
-function itemsTable(items) {
-  return `<table class="eq-t"><tbody>${items.map((it) => `<tr><th>${esc(it.slot)}</th><td>${itemLine(it)}</td></tr>`).join("")}</tbody></table>`;
+function itemsTable(items, sim) {
+  return `<table class="eq-t"><tbody>${items.map((it) => `<tr><th>${esc(it.slot)}</th><td>${itemLine(it, sim)}</td></tr>`).join("")}</tbody></table>`;
+}
+// 計算機で作った装備セットの中で、ゲームのアイテム番号と結びついていない名前(装備・カード・エンチャント)
+const simUnlinked = (st) => { const out = []; for (const it of st.items || []) { if (it.itemId == null) out.push(it.name); for (const c of it.cards || []) if (c.id == null) out.push(c.name); } return [...new Set(out)]; };
+let ITEMDB = null;                        // [{v: 番号, t: 名前（番号）}] 結びつける相手の候補(/api/itemnames)
+async function loadItemDb() {
+  if (!ITEMDB) { const d = await fetch("/api/itemnames").then((r) => r.json()).catch(() => ({})); ITEMDB = Object.entries(d).filter(([k]) => /^\d+$/.test(k)).map(([k, v]) => ({ v: +k, t: `${v}（${k}）` })); }
+  return ITEMDB;
 }
 function statusHtmlEq(st) {
   if (!st) return "";
@@ -1424,7 +1434,7 @@ function simcKeyHtml(m, r) {              // いつも見せる側(ASPD・詠唱
 const PICK = { el: null, out: null };
 const pickNorm = (t) => String(t ?? "").normalize("NFKC").toLowerCase().replace(/[\u3041-\u3096]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 96)).replace(/\s+/g, "");
 function pickClose() { if (PICK.el) { PICK.el.remove(); PICK.el = null; document.removeEventListener("mousedown", PICK.out, true); } }
-function pickOpen(anchor, opts, cur, onPick) {
+function pickOpen(anchor, opts, cur, onPick, q0 = "") {
   pickClose();
   const box = PICK.el = document.createElement("div"); box.className = "pick";
   box.innerHTML = `<input type="text" placeholder="名前の一部で探す（空白で区切ると、両方を含むもの）"><div class="pick-list"></div><div class="pick-desc"></div>`;
@@ -1460,7 +1470,7 @@ function pickOpen(anchor, opts, cur, onPick) {
   list.onclick = (e) => { const el = e.target.closest(".pick-o"); if (el) choose(shown[+el.dataset.i]); };
   PICK.out = (e) => { if (!box.contains(e.target)) pickClose(); };
   setTimeout(() => document.addEventListener("mousedown", PICK.out, true), 0);
-  draw(); inp.focus();
+  inp.value = q0; draw(); inp.focus(); inp.select();
 }
 
 // ---- 装備の編集 ----
@@ -1663,7 +1673,21 @@ function simcBuffHtml(m) {
     <div class="bfbar"><div class="settabs"><span class="muted">目的</span>${SIMC_BPURPOSE.map(([k, t]) => chip("data-bfp", k, t, B.purpose === k)).join("")}</div>
       ${B.tab === "other" && !B.q ? `<div class="settabs"><span class="muted">職</span>${[["", "すべて"], ["一次職", "一次"], ["二次職", "二次"], ["三次職", "三次"], ["四次職", "四次"]].map(([k, t]) => chip("data-bfs", k, t, B.sub === k)).join("")}</div>` : ""}
       ${B.tab !== "on" ? `<label class="muted"><input type="checkbox" id="sccbon" ${B.onOnly ? "checked" : ""}> オンのものだけ</label>` : ""}</div>
-    <div id="sccbuffs">${simcBuffListHtml(m)}</div><div class="muted" id="sccbprog" style="font-size:12px"></div>`;
+    ${simcPresetBar(m)}<div id="sccbuffs">${simcBuffListHtml(m)}</div><div class="muted" id="sccbprog" style="font-size:12px"></div>`;
+}
+// よく使うオンオフの組み合わせ(SETTINGS.simPresets = [{name, job, on: {"欄:添字": 値}}])。習得スキルは入れない。
+// 自分のスキル(固有自己支援)は職業ごとに中身が違うので、同じ職業のときだけ当てる
+const simcBuffItems = (m) => (simcSchema(m) || []).filter((it) => it.g !== "learn");
+function simcOnMap(m) { const out = {}; simcBuffItems(m).forEach((it) => { if (simcBuffOn(m, it)) out[simcBuffKey(it)] = simcBuffVal(m, it); }); return out; }
+function simcPresetApply(m, p, only) {
+  const list = simcBuffItems(m);
+  if (only) list.forEach((it) => simcBuffSet(m, it, 0));
+  list.forEach((it) => { const v = (p.on || {})[simcBuffKey(it)]; if (v !== undefined && (it.f !== "passiveSkill" || String(p.job) === String(m.status.jobId))) simcBuffSet(m, it, v === true ? 1 : v); });
+}
+function simcPresetBar(m) {
+  const P = SETTINGS.simPresets || [];
+  return `<div class="bfbar"><div class="settabs"><span class="muted">よく使う組み合わせ</span>${P.map((x, i) => `<button class="settab" data-bpre="${i}" title="押すと、この組み合わせをオンにします（いまのオンに足します）。右クリックで「これだけにする」・上書き・名前の変更・消す\n${esc(Object.keys(x.on || {}).length + "個")}">${esc(x.name)}</button>`).join("")}
+    <button class="settab more" id="sccbsave" title="いまオンにしているものを、名前を付けて保存します">＋いまのオンを保存</button><button class="settab more" id="sccboff">全部オフ</button></div></div>`;
 }
 function simcSchemaKick(m) {
   if (SIMC.bfBusy || SIMC.busy || SIMC.bfErr || !ENG.ready) return;
@@ -1756,10 +1780,11 @@ function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履�
 }
 async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
   const ch = simcCur(); if (!ch) return;
-  const m = ch.model, r = await postSet({ sim: { shadow, items: simcFragItems(m, shadow), data: simcGearFrag(m, shadow) }, take: take || "" });
+  const links = {}; Object.entries(SETTINGS.ratLinks || {}).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm) links[String(nm).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "")] = +id; });
+  const m = ch.model, r = await postSet({ sim: { shadow, items: simcFragItems(m, shadow), data: simcGearFrag(m, shadow) }, take: take || "", links });
   if (!r.sid) { SIMC.msg = "登録できませんでした。"; render(); return; }
   if (shadow) { m.foxShadow = r.sid; m.foxShadowSig = simcFragSig(m, true); } else { m.foxSet = r.sid; m.foxSetSig = simcFragSig(m, false); }
-  simcSave(); SIMC.msg = take ? "装備セットを上書きしました。" : "装備セットに登録しました。"; await load(); render();
+  simcSave(); SIMC.msg = (take ? "装備セットを上書きしました。" : "装備セットに登録しました。") + (r.unlinked ? `ゲームのアイテムと結びつかなかった装備が ${r.unlinked} 個あります（装備セットタブで結びつけられます）。` : ""); await load(); render();
 }
 // ---- Fox のキャラ・装備セットを取り込む(通信で読んだ名前 → ラトリオの候補の名前でつなぐ) ----
 const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
@@ -1958,6 +1983,25 @@ function renderSimChara() {
         if (g("sccbsum")) g("sccbsum").textContent = simcBuffSum(m);
         const tb = V.querySelector('[data-bft="on"]'); if (tb) tb.textContent = `オンのもの（${sc.filter((x) => x.g !== "learn" && simcBuffOn(m, x)).length}）`;
       };
+      const names = (p) => { const sc2 = Object.fromEntries(simcBuffItems(m).map((it) => [simcBuffKey(it), it.label])); return Object.keys(p.on || {}).map((k) => sc2[k]).filter(Boolean); };
+      V.querySelectorAll("[data-bpre]").forEach((el) => {
+        const i = +el.dataset.bpre, P = SETTINGS.simPresets || [], p = P[i]; if (!p) return;
+        el.onclick = () => { simcPresetApply(m, p, false); changed(); };
+        el.oncontextmenu = (e) => {
+          e.preventDefault();
+          showCtx(e.clientX, e.clientY, [{ cap: `「${p.name}」 ${names(p).slice(0, 6).join("、")}${names(p).length > 6 ? " ほか" : ""}` },
+            { label: "これだけにする（ほかはオフ）", act: async () => { if (await askOnce("bufonly", `オンオフを「${p.name}」だけにします。\nいまオンにしている、ほかのものはオフになります。`, "これだけにする")) { simcPresetApply(m, p, true); changed(); } } },
+            { label: "いまのオンで上書き", act: async () => { if (await askOnce("bufover", `「${p.name}」を、いまオンにしているもので上書きします。`, "上書きする")) { p.on = simcOnMap(m); p.job = m.status.jobId; saveSettings(); render(); } } },
+            { label: "名前を変える", act: () => { const v = prompt("組み合わせの名前", p.name); if (v && v.trim()) { p.name = v.trim().slice(0, 20); saveSettings(); render(); } } },
+            { label: "消す", act: async () => { if (await askOnce("bufdel", `「${p.name}」を消します。`, "消す")) { P.splice(P.indexOf(p), 1); saveSettings(); render(); } } }]);
+        };
+      });
+      if (g("sccbsave")) g("sccbsave").onclick = () => {
+        const on = simcOnMap(m); if (!Object.keys(on).length) { SIMC.msg = "オンにしているものがありません。"; render(); return; }
+        const v = prompt("この組み合わせの名前（例: 狩り用、ASPD 用）", ""); if (!v || !v.trim()) return;
+        SETTINGS.simPresets = SETTINGS.simPresets || []; SETTINGS.simPresets.push({ name: v.trim().slice(0, 20), job: m.status.jobId, on }); saveSettings(); render();
+      };
+      if (g("sccboff")) g("sccboff").onclick = async () => { if (await askOnce("bufoff", "支援・アイテム・スキルを全部オフにします（習得スキルはそのまま）。", "全部オフ")) { simcBuffItems(m).forEach((it) => simcBuffSet(m, it, 0)); changed(); } };
       const fold = V.querySelector('details[data-fold="buff"]');
       if (fold && fold.open) simcTagKick(m);
     }
@@ -2530,7 +2574,8 @@ function renderGSets(chars) {
           <button class="ghost" data-open="${esc(sid)}">${open ? "とじる" : "中身"}</button>
           <button class="ghost" data-del="${esc(sid)}">消す</button></span></div>
         <div class="eq-sub muted">使ったキャラ: ${cs.length ? esc(cs.map(([c]) => cn(c)).join("、")) : "-"}</div>
-        ${open ? itemsTable(st.items || []) + cs.map(([c, v]) => `<div class="eq-use"><b>${esc(cn(c))}</b><span class="muted">最後に着た ${when(v.last)}</span></div>${statusHtmlEq(v.status)}`).join("") : ""}</div>`;
+        ${st.sim && simUnlinked(st).length ? `<div class="eq-sub"><span class="muted">ゲームのアイテムと結びついていないもの（耐性のまとめに入りません）:</span> ${simUnlinked(st).map((nm) => `<button class="ghost simlink" data-simlink="${esc(nm)}" title="ゲームのアイテムの一覧から選んで結びつけます（次からは自動）">${esc(nm)}</button>`).join("")}</div>` : ""}
+        ${open ? itemsTable(st.items || [], !!st.sim) + cs.map(([c, v]) => `<div class="eq-use"><b>${esc(cn(c))}</b><span class="muted">最後に着た ${when(v.last)}</span></div>${statusHtmlEq(v.status)}`).join("") : ""}</div>`;
     }
     return x;
   };
@@ -2547,6 +2592,15 @@ function renderGSets(chars) {
   $("#view").querySelectorAll("input.eqname").forEach((el) => {
     el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
     el.onchange = async () => { await post({ sid: el.dataset.sid, name: el.value }); load(); };
+  });
+  $("#view").querySelectorAll("[data-simlink]").forEach((el) => el.onclick = async () => {
+    const name = el.dataset.simlink; el.textContent = "候補を読み込み中…"; el.disabled = true;
+    const db = await loadItemDb(); el.textContent = name; el.disabled = false;
+    pickOpen(el, db, null, async (id) => {
+      await post({ simlink: { name, id } });
+      SETTINGS.ratLinks = SETTINGS.ratLinks || {}; SETTINGS.ratLinks[id] = name; saveSettings();     // 逆向き(ゲームの装備 → 計算機)も同じ結びつけを使う
+      load();
+    }, name.replace(/^\[[^\]]*\]\s*/, "").slice(0, 5));
   });
   $("#view").querySelectorAll("[data-unreg]").forEach((el) => {
     const sid = el.dataset.unreg, tag = el.textContent;

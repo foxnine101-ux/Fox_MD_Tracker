@@ -20,6 +20,7 @@ MDトラッカー(md_tracker.py)に相乗りする前提。向こうはもう常
 gear_info.json(ラトリオ=jRO 準拠のアイテムデータ。無いものは rAthena)で出した目安。
 """
 import hashlib
+import unicodedata
 import json
 import re
 import os
@@ -210,6 +211,8 @@ class CharCore(object):
         self.sets = {}         # 装備セット(メイン10か所): ID -> {items, name, tag, first, last, worn, chars: {キャラ: {last, status}}}
         self.shadows = {}      # シャドウセット(6か所): 同じ形(タグは S1, S2…)
         self.set_map = {}      # 前の版の「キャラ:中身」の装備セットID -> 新しいID(被ダメの記録の付けかえ用)
+        self.sim_links = {}    # 計算機(ラトリオ)の名前 -> ゲームのアイテム番号。手で結びつけたもの(0 = わざと結びつけない)
+        self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
 
     # ---------- 外から呼ぶ ----------
@@ -234,14 +237,16 @@ class CharCore(object):
         self.changed = self.changed or was
 
     def snapshot(self):
-        return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "updated": int(time.time())}
+        return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "sim_links": self.sim_links, "updated": int(time.time())}
 
     def restore(self, data):
         if data:
             self.chars = data.get("chars", {})
             self.sets = data.get("sets") or {}
             self.shadows = data.get("shadows") or {}
+            self.sim_links = data.get("sim_links") or {}
             self._migrate_sets()
+            self.resolve_sim_all()
             self._refresh_names()
 
     def _refresh_names(self):
@@ -481,6 +486,7 @@ class CharCore(object):
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
 
     def set_item_name(self, iid, name):
+        self._name_idx = None                       # 名前の表が変わる → 逆引きを作り直す
         """アイテムの名前を付ける(名前がわからないアイテム用)。覚えてある装備セットの中身の名前も直す。"""
         iid, name = str(iid), (name or "").strip()[:40]
         if not iid.isdigit() or not name:
@@ -555,6 +561,71 @@ class CharCore(object):
             s["tag"] = ""
             self.changed = True
 
+    # ---------- 計算機で作った装備に、ゲームのアイテム番号を割り振る ----------
+    # 計算機(ラトリオ)の装備は名前しか持っていない。耐性のまとめ(gear_info)はゲームのアイテム番号で引くので、
+    # 名前 → 番号を id2name(ラトリオの items_part から作った表 + 手直し)の逆引きで探す。見つからないものは手で結びつける(sim_links)。
+    @staticmethod
+    def _norm_name(name):
+        s = unicodedata.normalize("NFKC", str(name or ""))
+        s = re.sub(r"\s+", "", s)
+        return re.sub(r"\[\d\]$", "", s)
+
+    def _name_index(self):
+        if self._name_idx is None:
+            idx = {}
+            for iid, nm in self.id2name.items():
+                k = self._norm_name(nm)
+                if not k or not str(iid).isdigit():
+                    continue
+                old = idx.get(k)
+                # 同じ名前が複数あるときは、耐性のデータがあるもの → 番号の小さいもの
+                if old is None or (str(iid) in self.gear_info and str(old) not in self.gear_info) \
+                        or ((str(iid) in self.gear_info) == (str(old) in self.gear_info) and int(iid) < int(old)):
+                    idx[k] = int(iid)
+            self._name_idx = idx
+        return self._name_idx
+
+    def resolve_name(self, name, card=False):
+        """計算機の名前 → ゲームのアイテム番号(わからなければ None)。"""
+        name = str(name or "")
+        if name in self.sim_links:
+            return self.sim_links[name] or None
+        idx, k = self._name_index(), self._norm_name(name)
+        hit = idx.get(k) or idx.get(re.sub(r"^\[[^\]]*\]", "", k)) or idx.get("[シャドウ]" + k)   # ゲーム側だけ頭に [シャドウ] が付く名前がある
+        if hit is None and card:
+            hit = idx.get(k + "カード")
+        return hit
+
+    def _resolve_sim(self, s):
+        n = 0
+        for it in s.get("items") or []:
+            for x, key, card in [(it, "itemId", False)] + [(c, "id", True) for c in it.get("cards") or []]:
+                new = self.resolve_name(x.get("name"), card)
+                if x.get(key) != new:
+                    x[key] = new
+                    self.changed = True
+                n += new is None
+        return n
+
+    def resolve_sim_all(self):
+        """計算機で作った装備セット全部を、いまの名前の表と結びつけで引き直す。"""
+        for table in (self.sets, self.shadows):
+            for s in table.values():
+                if s.get("sim") is not None:
+                    self._resolve_sim(s)
+
+    def link_sim(self, name, iid):
+        """計算機の名前を、ゲームのアイテム番号に手で結びつける(iid = 0 で「結びつけない」、None で結びつけを消す)。"""
+        name = str(name or "")[:80]
+        if not name:
+            return
+        if iid is None:
+            self.sim_links.pop(name, None)
+        else:
+            self.sim_links[name] = int(iid)
+        self.changed = True
+        self.resolve_sim_all()
+
     def put_sim_set(self, shadow, items, data):
         """計算機で作った装備を履歴に入れて ID を返す。items = 画面に出す用(場所・名前・精錬・カードの名前)、data = 計算機が着せ直すための中身。
         ゲームのアイテム番号は無いので、中身(data)が同じなら同じ ID。"""
@@ -569,6 +640,7 @@ class CharCore(object):
                               "cards": [{"id": None, "name": str(c.get("name") or "")[:80]} for c in (it.get("cards") or [])[:6]],
                               "options": [{"text": str(o.get("text") or "")[:60]} for o in (it.get("options") or [])[:6]]})
             t[sid] = {"items": clean, "name": "", "tag": "", "first": now, "last": now, "worn": 0, "chars": {}, "sim": data}
+        self._resolve_sim(t[sid])
         self.changed = True
         return sid
 

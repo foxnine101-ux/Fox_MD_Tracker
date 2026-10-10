@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.23.0"
+VERSION = "2.24.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -373,6 +373,10 @@ def start_live_server(core, lock, cfg):
                     return self._send(404, "not found", "text/plain")
                 with open(hit[0], "rb") as f:
                     return self._send(200, f.read(), hit[1])
+            if path == "/api/itemnames" and self._local_only():      # アイテム番号 → 名前(計算機の装備を手で結びつけるときの候補)
+                with lock:
+                    names = dict(CHARS.id2name) if CHARS is not None else {}
+                return self._send(200, json.dumps(names, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
                 return self._send(200, json.dumps(load_sim_chars(), ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/ratorio":
@@ -415,10 +419,18 @@ def start_live_server(core, lock, cfg):
                         raise ValueError
                     out = {"ok": True}
                     with lock:
-                        if isinstance(b.get("sim"), dict):      # 計算機の装備を登録: {sim: {shadow, items, data}, take: 上書きする相手の ID}
+                        if isinstance(b.get("simlink"), dict):   # 計算機の名前をゲームのアイテム番号に結びつける: {simlink: {name, id}}(id: 番号 / 0 = 結びつけない / null = 消す)
+                            v = b["simlink"].get("id")
+                            CHARS.link_sim(str(b["simlink"].get("name") or ""), None if v is None else int(v))
+                        elif isinstance(b.get("sim"), dict):      # 計算機の装備を登録: {sim: {shadow, items, data}, take: 上書きする相手の ID, links: {名前: 番号}}
                             sim = b["sim"]
+                            for nm, iid in list((b.get("links") or {}).items())[:200]:
+                                if str(nm) not in CHARS.sim_links and str(iid).isdigit():
+                                    CHARS.sim_links[str(nm)[:80]] = int(iid)
                             out["sid"] = CHARS.put_sim_set(bool(sim.get("shadow")), sim.get("items") or [], sim.get("data") or {})
                             CHARS.register_set(out["sid"], str(b.get("take") or ""))
+                            s_ = CHARS._table(out["sid"]).get(out["sid"]) or {}
+                            out["unlinked"] = sum((it.get("itemId") is None) for it in s_.get("items") or [])
                         elif b.get("register"):                 # 履歴の1つを登録: {sid, register: 1, take}
                             CHARS.register_set(str(b["sid"]), str(b.get("take") or ""))
                         elif b.get("unregister"):
