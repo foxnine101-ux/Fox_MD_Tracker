@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.29.0"
+VERSION = "2.29.1"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -287,6 +287,20 @@ def resource(name):
     return None
 
 
+def load_cdn_map():
+    """ラトリオが外部(CDN)から読む部品の写し(ratorio_cdn/)。{元の URL: ファイル名}。無ければ空(= 今までどおり外部から読む)。"""
+    try:
+        with open(resource("ratorio_cdn/map.json"), "r", encoding="utf-8") as f:
+            m = json.load(f)
+        return {u: n for u, n in m.items() if resource("ratorio_cdn/" + os.path.basename(n))}
+    except (OSError, ValueError, TypeError):
+        return {}
+
+
+CDN_MAP = load_cdn_map()
+CDN_MIME = {".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".woff2": "font/woff2"}
+
+
 def local_url():
     return "http://127.0.0.1:{}/".format(LIVE_PORT)
 _SHEET_CACHE = {"t": 0, "url": "", "body": None}
@@ -368,14 +382,28 @@ def start_live_server(core, lock, cfg):
                 return self._send(200, json.dumps({"data": data, "settings": self._settings()}, ensure_ascii=False),
                                   "application/json; charset=utf-8")
             if path.startswith("/ratorio/"):          # 計算機(ROラトリオHub)のファイル
-                rest, cache = path[len("/ratorio/"):], "no-store"
+                rest, cache, pre = path[len("/ratorio/"):], "no-store", "/ratorio/"
                 if rest.startswith("v-"):             # /ratorio/v-<取り込んだ版>/… は中身が変わらない → ブラウザに覚えさせる(計算係の起動が、2回目から速くなる)
-                    rest, cache = rest.partition("/")[2], "public, max-age=31536000, immutable"
+                    tok, _, rest = rest.partition("/")
+                    cache, pre = "public, max-age=31536000, immutable", "/ratorio/" + tok + "/"
+                if rest.startswith("_cdn/"):          # 外部(CDN)の部品の写し(アプリに同梱)
+                    name = os.path.basename(rest)
+                    full = resource("ratorio_cdn/" + name)
+                    if not full or not os.path.isfile(full):
+                        return self._send(404, "not found", "text/plain")
+                    with open(full, "rb") as f:
+                        return self._send(200, f.read(), CDN_MIME.get(os.path.splitext(name)[1].lower(), "application/octet-stream"), cache)
                 hit = RATORIO.resolve(rest)
                 if not hit:
                     return self._send(404, "not found", "text/plain")
                 with open(hit[0], "rb") as f:
-                    return self._send(200, f.read(), hit[1], cache)
+                    body = f.read()
+                # ラトリオは起動のたびに外部(CDN)から グラフ・画像化・アイコン の部品を読む。そこが遅い・つながらないと起動が止まるので、
+                # 同梱した写しを読むように URL を読みかえる(写しが無い URL はそのまま)
+                if CDN_MAP and b"https://cdn" in body and hit[1].startswith("text/"):
+                    for u, n in CDN_MAP.items():
+                        body = body.replace(u.encode("utf-8"), (pre + "_cdn/" + n).encode("utf-8"))
+                return self._send(200, body, hit[1], cache)
             if path == "/api/itemnames" and self._local_only():      # アイテム番号 → 名前(計算機の装備を手で結びつけるときの候補)
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
@@ -450,6 +478,15 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps(out), "application/json")
+            if self.path.split("?")[0] == "/api/log" and self._local_only():
+                # 画面側の状況を動作ログに残す(計算係の起動にかかった時間・失敗したときの様子など)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 4000)).decode("utf-8"))
+                    print("[画面] " + str(b.get("msg") or "")[:600].replace("\n", " "))
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
             if self.path.split("?")[0] == "/api/simchars" and self._local_only():
                 # 計算機のキャラを保存・削除: {id, name, model} / {id, delete: 1}
                 try:

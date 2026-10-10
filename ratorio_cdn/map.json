@@ -1,0 +1,5 @@
+{
+ "https://cdn.jsdelivr.net/npm/chart.js@4.5.1/auto/+esm": "chart.js",
+ "https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js": "html2canvas.min.js",
+ "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.0.0/css/all.min.css": "fa.css"
+}

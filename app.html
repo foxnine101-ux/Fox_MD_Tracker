@@ -1168,7 +1168,9 @@ function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : render
 const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
 // ラトリオのファイルは /ratorio/v-<取り込んだ版>/… で読む。この形の URL はブラウザが覚えるので、2回目からは読み直さない(約440ファイル)。
 // 計算係の中の import も必ず同じ頭にする(頭が違うと、同じ部品が別物として二重に読み込まれてしまう)
-const engBase = () => "/ratorio/v-" + ((RAT && RAT.commit) || "0") + "/";
+const engLog = (msg) => { try { fetch("/api/log", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ msg }) }).catch(() => { }); } catch (e) { } };
+const ENG_CACHE_VER = "2";                 // サーバーが配る中身を変えたら上げる(同じ URL はブラウザが覚えたままになるので。2 = 外部の部品を同梱の写しに読みかえ)
+const engBase = () => "/ratorio/v-" + ((RAT && RAT.commit) || "0") + "-" + ENG_CACHE_VER + "/";
 function engInit(query) {                 // 計算係(隠したラトリオ)を用意する。query を渡すと、その保存データを読み込んだ状態で開き直す
   if (ENG.loading) return ENG.loading;
   if (ENG.ready && !query) return Promise.resolve();
@@ -1180,12 +1182,24 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     f.setAttribute("aria-hidden", "true");
     f.src = engBase() + "ro4/m/calcx.html" + (query ? "?" + query : "");
     document.body.appendChild(f);
-    for (let i = 0; i < 600; i++) {            // 初回は全部のファイルを読むので時間がかかる(遅い PC で1分以上)。2分半まで待つ
+    // 初回は全部のファイルを読むので時間がかかる(遅い PC で1分以上)。見えている時間で2分半まで待つ(窓をしまっている間は、ブラウザが処理を遅くするので数えない)
+    const t0 = Date.now(), errs = [];
+    let seen = 0, last = "";
+    const look = () => {
+      const w = f.contentWindow, d = f.contentDocument, reg = w && w._ratorioReg, job = d && d.querySelector("#OBJID_SELECT_JOB");
+      try { if (w && !w.__foxErr) { w.__foxErr = 1; w.addEventListener("error", (e) => { if (errs.length < 5) errs.push(String(e.message || (e.target && (e.target.src || e.target.href)) || "error").slice(0, 150)); }, true); w.addEventListener("unhandledrejection", (e) => { if (errs.length < 5) errs.push(String((e.reason && e.reason.message) || e.reason).slice(0, 150)); }); } } catch (e) { }
+      let res = 0; try { res = w.performance.getEntriesByType("resource").length; } catch (e) { }
+      last = `読み込み=${d ? d.readyState : "-"}・部品=${reg ? Object.keys(reg).length : "なし"}・職業の欄=${job ? job.options.length : "-"}・読んだファイル=${res}・エラー=${errs.length ? errs.join(" / ") : "なし"}`;
+      return reg && reg.calcCoreFromModel && reg.extractModelFromDom && job && job.options.length > 5 ? reg : null;
+    };
+    for (let i = 0; seen < 150000; i++) {
       await sleep(250);
-      const w = f.contentWindow, reg = w && w._ratorioReg, job = f.contentDocument && f.contentDocument.querySelector("#OBJID_SELECT_JOB");
-      if (reg && reg.calcCoreFromModel && reg.extractModelFromDom && job && job.options.length > 5 && (!query || +job.value > 0 || i > 40)) { ENG.reg = reg; break; }
+      if (!document.hidden) seen += 250;
+      const reg = look(), job = f.contentDocument && f.contentDocument.querySelector("#OBJID_SELECT_JOB");
+      if (reg && (!query || +job.value > 0 || i > 40)) { ENG.reg = reg; break; }
     }
-    if (!ENG.reg) throw new Error("計算係（ラトリオ）の起動に時間がかかりすぎました");
+    if (!ENG.reg) { engLog(`計算係の起動に失敗(${Math.round((Date.now() - t0) / 1000)}秒): ${last}`); throw new Error("計算係（ラトリオ）の起動に時間がかかりすぎました（様子を動作ログに書きました）"); }
+    engLog(`計算係を起動しました(${Math.round((Date.now() - t0) / 100) / 10}秒): ${last}`);
     await sleep(query ? 1200 : 300);
     const w = f.contentWindow;
     ENG.state = await w.eval(`import("${engBase()}engine/runtime/roro-state.js")`);
@@ -2301,6 +2315,7 @@ function renderSimChara() {
   if (!RAT) { $("#view").innerHTML = simNav() + `<div class="panel empty">確認中…</div>`; bindSimNav(); ratStatus().then(render); return; }
   if (!RAT.installed) { $("#view").innerHTML = simNav() + `<div class="panel empty">このシミュレーターは、ROラトリオHub のデータと計算を使います。<br>先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
   if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (ENG.err && !ENG.loading && !ENG.retried) { ENG.retried = true; ENG.err = ""; }      // 前もっての起動に失敗していたら、タブを開いたときに1回だけ自動でやり直す
   if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const ch = simcCur(), ids = Object.keys(SIMC.chars);
   store.set("md_simused", "1");
@@ -3761,9 +3776,10 @@ if (LOCAL) {
   setInterval(() => { if (!document.hidden && TAB !== "settings") load(); }, 5000);
   load();
 } else if (PW) load(); else showLogin("");
-// 計算機を使ったことがある PC では、アプリを開いたら計算係(ラトリオ)を前もって起動しておく(計算機タブを開いたときに待たなくて済む)
+// アプリを開いたら、計算係(ラトリオ)を前もって起動しておく(計算機タブを開いたときに待たなくて済む。ラトリオを取り込んである PC だけ)
 setTimeout(() => {
-  try { if (typeof LOCAL !== "undefined" && LOCAL && store.get("md_simused") === "1") ratStatus().then(() => { if (RAT && RAT.installed && !ENG.ready && !ENG.loading) engInit().then(() => { if (TAB === "sim") render(); }); }).catch(() => { }); } catch (e) { }
+  const go = () => { try { if (typeof LOCAL !== "undefined" && LOCAL) ratStatus().then(() => { if (RAT && RAT.installed && !ENG.ready && !ENG.loading && !ENG.err) engInit().then(() => { if (TAB === "sim") render(); }); }).catch(() => { }); } catch (e) { } };
+  if (!document.hidden) go(); else document.addEventListener("visibilitychange", function once() { if (!document.hidden) { document.removeEventListener("visibilitychange", once); go(); } });     // 窓をしまったまま起動したときは、窓を出したときに
 }, 3000);
 </script>
 </body>
