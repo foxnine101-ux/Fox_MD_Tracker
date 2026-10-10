@@ -3123,7 +3123,8 @@ function renderChars(chars) {
 
 // ---------- 装備セット ----------
 // 装備セット(メイン10か所)・シャドウセット(6か所)。同じ中身はキャラが違っても同じセット。記号(A, B… / S1, S2…)と名前を付けられる
-let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false;
+let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false, GS_HISTALL = false;
+const GS_HISTN = 10;
 function nowGearHtml(chars) {       // いま着ている装備 = いまログインしているキャラの装備。ここからスロットに登録・上書きできる
   const EQ = DATA.equip || {}, E = EQ.chars || {}, c = nowChar();
   if (!c || !E[c].has_equip) return `<h2>いま着ている装備</h2><div class="panel eq-box"><span class="muted">いまログインしているキャラがいません（ゲームにログインすると、そのキャラが着ている装備がここに出ます）。</span></div>` + unknownItemsHtml(EQ.unknown || []);
@@ -3143,18 +3144,23 @@ function renderGSets(chars) {
   const inWorld = (st) => GS_ALL || Object.keys(st.chars || {}).some(inServer);
   const dmgN = (sid) => Object.entries(DS).filter(([id]) => gearMain(id) === sid || gearShadow(id) === sid).reduce((n, [, v]) => n + (v.n || 0), 0);
   const section = (T, title, isShadow) => {
-    const L = Object.entries(T).filter(([, st]) => st.tag || inWorld(st)).sort((a, b) => (!!b[1].tag - !!a[1].tag) || (a[1].tag ? String(a[1].tag).localeCompare(String(b[1].tag), "ja", { numeric: true }) : (b[1].last || 0) - (a[1].last || 0)));   // 登録したもの(記号の順) → 履歴(新しい順)
-    const nReg = L.filter(([, st]) => st.tag).length;
-    let x = `<h2>${isShadow ? "シャドウのスロット" : "装備スロット"}（登録 ${nReg}・履歴 ${L.length - nReg}）</h2>`, hist = false;
+    // 登録したもの(記号の順) → 履歴。履歴は、スロットに登録していない組み合わせのうち「よく使うもの」を上から GS_HISTN 件だけ出す
+    // (よく使う = 着た回数 → 被ダメの記録の数 → 新しさ の順。着がえの途中の組み合わせが下に沈む)
+    const use = (sid, st) => [st.worn || 0, dmgN(sid), st.last || 0];
+    const all = Object.entries(T).filter(([, st]) => st.tag || inWorld(st));
+    const regL = all.filter(([, st]) => st.tag).sort((a, b) => String(a[1].tag).localeCompare(String(b[1].tag), "ja", { numeric: true }));
+    const histAll = all.filter(([, st]) => !st.tag).sort((a, b) => { const x = use(...a), y = use(...b); return (y[0] - x[0]) || (y[1] - x[1]) || (y[2] - x[2]); });
+    const histL = GS_HISTALL ? histAll : histAll.slice(0, GS_HISTN), L = regL.concat(histL), nReg = regL.length;
+    let x = `<h2>${isShadow ? "シャドウのスロット" : "装備スロット"}（登録 ${nReg}・履歴 ${histAll.length}）</h2>`, hist = false;
     if (!L.length) return x + `<div class="panel empty">まだありません。${isShadow ? "シャドウ装備6か所" : "兜・鎧・武器・盾・肩・靴・アクセサリー2つ"}が全部うまると記録されます。</div>`;
     for (const [sid, st] of L) {
       const cs = Object.entries(st.chars || {}).sort((a, b) => (b[1].last || 0) - (a[1].last || 0));
       const n = dmgN(sid), open = GS_OPEN[sid];
-      if (!st.tag && !hist) { hist = true; x += `<h3 class="gshist">履歴 <span class="muted" style="font-weight:400">（着たことのある組み合わせ。残したいものだけ「登録」してください）</span></h3>`; }
+      if (!st.tag && !hist) { hist = true; x += `<h3 class="gshist">履歴 <span class="muted" style="font-weight:400">（スロットに登録していない組み合わせ。${histAll.length > GS_HISTN ? (GS_HISTALL ? `全部の ${histAll.length} 件` : `よく使う上位 ${GS_HISTN} 件／全部で ${histAll.length} 件`) : "よく使う順"}。残したいものは「登録」でスロットに）</span>${histAll.length > GS_HISTN ? ` <button class="ghost" data-histall>${GS_HISTALL ? "上位だけにする" : "全部見る"}</button>` : ""}</h3>`; }
       x += `<div class="panel eq-box${st.tag ? "" : " hist"}" data-gsid="${esc(sid)}"><div class="eq-h">
           ${st.tag ? `<button class="eqtagb" data-unreg="${esc(sid)}" title="押すと登録を外します（履歴に戻ります）。右クリックで記号を変えられます" style="background:${tagColor(st)};border-color:${tagColor(st)}">${esc(st.tag)}</button>
           <input type="color" class="eqcolor" data-sid="${esc(sid)}" value="${tagColor(st)}" title="記号の色を変える">${st.color ? `<button class="ghost" data-colreset="${esc(sid)}" title="自動の色に戻す">色を戻す</button>` : ""}`
-          : `<button class="ghost" data-reg="${esc(sid)}" data-sh="${isShadow ? 1 : 0}" title="この装備を装備セットとして登録します（記号が付きます）">登録</button>`}
+          : `<button class="ghost" data-reg="${esc(sid)}" data-sh="${isShadow ? 1 : 0}" title="この装備を、新しいスロットに登録するか、登録ずみのスロットに上書きします">スロットに登録</button>`}
           ${st.sim ? `<span class="tag" title="計算機で作った装備">計算機</span>` : ""}
           <input class="eqname" data-sid="${esc(sid)}" value="${esc(st.name || "")}" placeholder="${esc(st.auto || "")}">
           <span class="muted">${st.worn || 0}回着た・最後 ${st.last ? when(st.last) : "-"}${n ? `・被ダメ ${fmtN(n)}回` : ""}</span>
@@ -3173,6 +3179,7 @@ function renderGSets(chars) {
   h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。着た組み合わせはまず「履歴」に入り、「登録」を押したものだけに記号（A, B… / S1, S2…）が付きます。記号を押すと登録を外せます（右クリックで記号を変更）。色と名前は自由に変えられます（色は自動で分かれます。色の四角を押すと変えられます）（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
   $("#view").innerHTML = h;
   $("#gsall").onchange = (ev) => { GS_ALL = ev.target.checked; render(); };
+  $("#view").querySelectorAll("[data-histall]").forEach((el) => el.onclick = () => { GS_HISTALL = !GS_HISTALL; render(); });
   if ($("#eqc")) $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
   if ($("#gsnow")) $("#gsnow").onclick = () => { GS_NOW = !GS_NOW; render(); };
   bindUnknownItems();
@@ -3199,9 +3206,9 @@ function renderGSets(chars) {
     const sid = el.dataset.reg, T = (DATA.equip || {})[el.dataset.sh === "1" ? "shadows" : "sets"] || {};
     const reg = Object.entries(T).filter(([, st]) => st.tag).sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
     const r = el.getBoundingClientRect();
-    showCtx(r.left, r.bottom + 4, [{ label: "新しい記号で登録", act: async () => { await post({ sid, register: 1 }); load(); } }]
-      .concat(reg.length ? ["-", { cap: "登録ずみのセットを、この装備で上書き" }] : [])
-      .concat(reg.map(([tid, st]) => ({ label: `${st.tag}: ${st.name || st.auto || ""} を上書き`, act: async () => { if (await askOnce("over", `「${st.tag}」を、この装備で上書きします。\nいまの「${st.tag}」の中身は履歴に戻ります。`, "上書きする")) { await post({ sid, register: 1, take: tid }); load(); } } }))));
+    showCtx(r.left, r.bottom + 4, [{ label: "新しいスロットを作成して登録", act: async () => { await post({ sid, register: 1 }); load(); } }]
+      .concat(reg.length ? ["-", { cap: "登録ずみのスロットを、この装備で上書き" }] : [])
+      .concat(reg.map(([tid, st]) => ({ label: `スロット ${st.tag} に上書き（${st.name || st.auto || ""}）`, act: async () => { if (await askOnce("over", `「${st.tag}」を、この装備で上書きします。\nいまの「${st.tag}」の中身は履歴に戻ります。`, "上書きする")) { await post({ sid, register: 1, take: tid }); load(); } } }))));
   });
   $("#view").querySelectorAll("input.eqcolor").forEach((el) => el.onchange = async () => { await post({ sid: el.dataset.sid, color: el.value }); el.blur(); load(); });
   $("#view").querySelectorAll("[data-colreset]").forEach((b) => b.onclick = async () => { await post({ sid: b.dataset.colreset, color: "" }); load(); });
