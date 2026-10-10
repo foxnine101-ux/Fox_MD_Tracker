@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.17.0"
+VERSION = "2.18.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -413,6 +413,8 @@ def start_live_server(core, lock, cfg):
                             CHARS.delete_set(str(b.get("char") or ""), str(b["sid"]))
                         elif "tag" in b:
                             CHARS.set_tag(str(b["sid"]), str(b.get("tag") or ""))
+                        elif "color" in b:
+                            CHARS.set_color(str(b["sid"]), str(b.get("color") or ""))
                         else:
                             CHARS.rename_set(str(b.get("char") or ""), str(b["sid"]), str(b.get("name") or ""))
                         save_chars()

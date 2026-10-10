@@ -377,11 +377,13 @@ class CharCore(object):
                 continue
             sid = self._register(table, prefix, [it for it in worn if it.get("wear", 0) & req], name)
             s = table[sid]
+            c = s.setdefault("chars", {}).setdefault(name, {})
             if ch.get(key) != sid:
                 s["worn"] = s.get("worn", 0) + 1
+                c["n"] = c.get("n", 0) + 1               # このキャラが着た回数(よく使う装備セットの順に使う)
             s["last"] = now
             status = status or self._status_view(name, ch)
-            s.setdefault("chars", {})[name] = {"last": now, "status": status}   # このキャラが着ていたときの Lv・ステータス(最新)
+            c.update({"last": now, "status": status})   # このキャラが着ていたときの Lv・ステータス(最新)
             ch[key] = sid
 
     def item_attrs(self, it):
@@ -491,6 +493,17 @@ class CharCore(object):
         s = self._table(sid).get(sid)
         if s is not None:
             s["tag"] = (tag or "").strip()[:8] or next_tag(self._table(sid), "s" if sid.startswith("s") else "m")
+            self.changed = True
+
+    def set_color(self, sid, color):
+        """記号の色(#rrggbb)。空にすると自動の色に戻す。"""
+        s = self._table(sid).get(sid)
+        color = (color or "").strip()
+        if s is not None and (not color or re.match(r"^#[0-9a-fA-F]{6}$", color)):
+            if color:
+                s["color"] = color.lower()
+            else:
+                s.pop("color", None)
             self.changed = True
 
     def delete_set(self, name, sid):

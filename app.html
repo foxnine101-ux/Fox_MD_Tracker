@@ -47,6 +47,14 @@
   #calcframe { width: 100%; height: calc(100vh - 190px); min-height: 420px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
   .srvtabs select { font-size: 13px; padding: 3px 8px; border-radius: 8px; }
   td.char.sel, th.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--chip); }
+  thead th[data-g] { cursor: pointer; user-select: none; }
+  thead th[data-g] .mx-ico { cursor: grab; }
+  .grip.mx-ico { opacity: 1; padding: 0; color: inherit; }      /* アイコンは「つまみ」でも薄くしない */
+  a.stag { text-decoration: none; cursor: pointer; }
+  .eq-h input.eqcolor { width: 28px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
+  td.char { cursor: pointer; }
+  td.char .ch-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 16px; line-height: 1.2; }
+  .stag { color: #fff !important; font-weight: 700; }
   .tabs .count { font-size: 12px; opacity: .85; margin-left: 4px; }
   .tablewrap { overflow-x: auto; }
   table { border-collapse: separate; border-spacing: 0; font-size: 14px; width: 100%; }
@@ -168,7 +176,8 @@ const ICON_RULES = [
   [/悔恨の墓/, "kaikon"], [/生命の殿堂/, "seimei"],
   [/ゲフェニア/, "gefenia"], [/ヴァルキリーレルム/, "valkyrie"], [/バイオスフィア|標本環境/, "biosphere"], [/変えられない最後/, "kaerarenai"],
 ];
-function iconOf(name) { for (const [re, k] of ICON_RULES) if (re.test(name)) return MD_ICONS[k]; return null; }
+const ICON_DEFAULT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACkAAAAoCAYAAABjPNNTAAAD80lEQVR4nO2YT0hUQRzHv+6zDgaxmvVSuxj5oD9S8TBIO0S2KXYQJdz1YAdPiShUiF5WYb0EHjxI4ElBCC2k9LBRbWgERSSLpkvJGnnx/5pFoBdZXwedcea9efvetltG9D2995s3M583v9/M/GaA//rHtOT1akter7bXHKZa8no1bX1c09bHNb/bYwB17AWUXsHwzF4j2JPf7dE+NDT8ve62UkqyGiKxpCp5nD0YnsH1hwMJ9fPLldkAJ2CZ6hnht6vBEH0m36wGQzja3m6r/7gg2dFigSSXQp+jgTBXhy3D5yhXtjw4bAs0NR64sp7mbUPaOWBjwhSMFSmTXApwQtqtPxm0Past/4ICDvTvGm0C6iW5lG1Apo3NvlHsr7sTkyNmod/t0VQlD7LPxxdsTMQFZwq605YVqGmBENAEbmtx3hLOkZVjhAUo8GZ3pymo0Gh3BO3AWQGzI/vUUy1crkwnDgXciZ1kwOnrO7JyEA2EIbnAh4BOhr2bjCIBjAbCFHBrcT5hQBEsab9soB+irdEAqSp5kFsqOdcmG06k6PAj0zIO0u/2aGSRZgF/p7j2NyYgO53Qp2tcTBI3RwNhS7hPH2ctAWSnExnZ6baBo4EwZJ8PamsrZ6eQhF5yKdjsGwUADDx/DQC4lp8PAFj+/p12LjudtjpeW/jGvYugtxbnDUuU3+3RyEzn3M3ux4FX71HzoA03h4Zw/+WbuOHM9OnjrNAL1HMbE5BbKnHsyGFaRiFZV68tfMPIlwhSDpxPCEgk8pNmsCIZZjf5o7TUP5Mk60FFO5phMd936zYyujtRf7WI2tjnWHoxNUWfSRyLJDudNL4J6MlTuVgNhoQ5qQFyubWVBrddOGA7A6950IZatc4WaDzi3E1crZ+RdjTyJYJatQ690+/QO/3Odr25lYilnUKSBFS0RAyOhQw2va4cP2z5jR1JLgXL9x5zNsPEcWTlcPEyOBbCjQLx2YWVquThWHoa7hYUw3vxSlyuJqPGxiObDTlYIzvTCOjs1x8AgI5nb4UdsKNcf7UITaWFtmNZ6Oq0c4ZjBTeScysRrAZDOF18idqaSgvR8ewtcg8dNLh9cCxEfwLYDpWM7HTIPl9c26Hr8gUAgFRehcnGRkNOaUgwSarGboEsFBGBayot5Orr4USTUD9SJdUVkMqrAIgT35iZeaZ6hjszJ0sspBWgKSQBLamuAAA8738CwHg7kSy4WIAxIQmoCM7svMx+F+tMXdbTTI8Lk42NmFuJxLyKsXWDIYIlMWu2GLMqqa7gbzIATLb0WMLFBamHZdModh9mJxlZ8/Tn7M3uTppUnO3qSv5dkJlEt7OA2P2J3rD9VyL6CQ9O5YLd8MxTAAAAAElFTkSuQmCC";      // アイコンの無い MD はポリン
+function iconOf(name) { for (const [re, k] of ICON_RULES) if (re.test(name)) return MD_ICONS[k]; return ICON_DEFAULT; }
 function iconImg(name, small) {
   const src = iconOf(name);
   if (!src) return small ? "" : '<span class="mdi-ph"></span>';
@@ -315,7 +324,7 @@ function saveMdOrder(shown, all) {
 }
 // ⋮⋮ をつかんで上下(左右)に動かす(マウスでも指でも)
 let DRAGGING = false;
-function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y") {
+function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y", onTap = null) {
   const X = axis === "x";
   if (!box) return;
   box.querySelectorAll(rowSel).forEach((row) => {
@@ -326,13 +335,16 @@ function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y") {
       ev.preventDefault();
       const rows = [...box.querySelectorAll(rowSel)];
       const from = rows.indexOf(row);
-      let to = from;
+      let to = from, moved = false;
+      const x0 = ev.clientX, y0 = ev.clientY;
       DRAGGING = true;
       document.body.classList.add("is-dragging");
       row.classList.add("dragging");
       const [BEFORE, AFTER] = X ? ["drop-left", "drop-right"] : ["drop-above", "drop-below"];
       const clear = () => rows.forEach((r) => r.classList.remove(BEFORE, AFTER));
       const onMove = (e) => {
+        if (!moved && Math.abs(e.clientX - x0) + Math.abs(e.clientY - y0) < 5) return;    // 少しのぶれは「動かしていない」
+        moved = true;
         clear();
         // 指の位置にある行(列)を探す(前半分=その前に、後ろ半分=その後に入れる)
         const p = X ? e.clientX : e.clientY;
@@ -351,6 +363,7 @@ function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y") {
         clear(); row.classList.remove("dragging");
         document.body.classList.remove("is-dragging");
         DRAGGING = false;
+        if (!moved) { if (onTap) onTap(row); return; }       // 動かさずに離した = クリック
         if (to === from) return;
         const arr = names.slice(); const [x] = arr.splice(from, 1); arr.splice(to, 0, x);
         onDone(arr);
@@ -389,7 +402,7 @@ let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出�
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.srvname, input.unkname, input.ratpick")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -477,6 +490,11 @@ function hiddenMenu(hidden) {
     ...(hidden.length > 1 ? ["-", { label: "全部表示に戻す", act: () => { for (const G of hidden) delete (SETTINGS.md[G.name] || {}).kind; saveSettings(); render(); } }] : [])];
 }
 
+function charLvText(c) {        // 「230/65」(Base/Job)。わからない方は「-」
+  const info = DATA.chars[c] || {}, st = ((((DATA.equip || {}).chars || {})[c]) || {}).status || {};
+  const lv = st.lv ?? info.lv, jlv = st.jobLv ?? info.jobLv;
+  return lv || jlv ? `${lv ?? "-"}/${jlv ?? "-"}` : "";
+}
 function renderGrid(groups, chars, now) {
   const hidden = buildGroups().filter((G) => G.kind === "hide").sort((a, b) => a.label.localeCompare(b.label, "ja"));
   const hcs = Object.keys(DATA.chars || {}).filter((k) => inServer(k) && isHiddenChar(k, new Set(SETTINGS.hiddenChars || [])));
@@ -503,12 +521,11 @@ function renderGrid(groups, chars, now) {
   loadResistSheet();
   const canGo = new Map(cols.map((G) => [G.name, G.role === "md" || !!resistFind(RZ.entries, G.name)]));
   if (MX_FOCUS && !cols.some((G) => G.name === MX_FOCUS)) cols = groups;   // 戻ってきた列が隠れていたら全部出す
-  // 見出し: アイコン(クリックでグレー表示を固定) + MD名(クリックで耐性へ)
-  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックすると、まだCT中のキャラをグレーに（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
-    + (canGo.get(G.name) ? `<span class="mx-name rzgo" data-go="${esc(G.name)}" title="クリックで耐性を見る">${esc(G.label)}</span>` : `<span class="mx-name">${esc(G.label)}</span>`) + `</th>`);
+  // 見出し: アイコン(つかんで並び替え・クリックで選択) + MD名。アイコン以外の所は、クリック/なぞって選択
+  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}（クリック・なぞって選択。右クリックでメニュー）"><span class="grip mx-ico" title="つかんで左右に動かすと並び替え。クリックで選択">${iconImg(G.name)}</span><span class="mx-name">${esc(G.label)}</span></th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
-    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}</td>`;
+    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}<span class="ch-sub">${esc(charLvText(c))}</span></td>`;
     cols.forEach((G, i) => {
       const e = endOf(c, G), ci = `data-ci="${i}"`;
       if (e === null) h += `<td class="cell none" ${ci}>ー</td>`;
@@ -526,11 +543,12 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンかマスをクリックすると、まだCT中のキャラがグレーになります（グレーの所やほかをクリックすると解除）。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが、キャラ名を右クリックすると隠すメニューが出ます。Ctrl（または Shift）を押しながらキャラ名・MD名をクリックすると複数選べて、右クリックでまとめて隠す・移すことができます（Esc で選択を解除）。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの見出しをクリックするか、押したまま横になぞると、MDを選べます（もう一度で解除。Esc で全部解除）。選んで右クリックすると、まとめて隠す・分類を移すことができます。MDのアイコンは、つかんで左右に動かすと並び替え、クリックで選択です。耐性は、MDを右クリック →「耐性を見る」（耐性のカードをクリックするとここに戻ります）。マスをクリックすると、まだCT中のキャラがグレーになります（グレーの所やほかをクリックすると解除）。キャラ名をクリックするとキャラ詳細へ。キャラ名の左の ⋮⋮ をつかんで上下に動かすと並び替え、右クリックで隠す、Ctrl（または Shift）＋クリックで複数選択です。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
+  const toggleMd = (n, on) => { (on ?? !SEL.mds.has(n)) ? SEL.mds.add(n) : SEL.mds.delete(n); };
   makeSortable($("#view").querySelector("thead tr"), "th[data-g]", cols.map((G) => G.name),
-    (arr) => saveMdOrder(arr, groups.map((G) => G.name)), "x");
+    (arr) => saveMdOrder(arr, groups.map((G) => G.name)), "x", (th) => { toggleMd(th.dataset.g); if (MX_LOCK) MX_LOCK = ""; render(); });
   // 列を選ぶ → まだCT中(数字)のキャラをグレーに。アイコンやマスのクリックで固定(マウスを乗せたときの下見は複数選択の邪魔なのでやめた)
   const rows = [...$("#view").querySelectorAll("tbody tr")];
   const waitRows = cols.map((G) => new Set(chars.map((c, r) => { const e = endOf(c, G); return e !== null && e > now ? r : -1; }).filter((r) => r >= 0)));
@@ -549,9 +567,8 @@ function renderGrid(groups, chars, now) {
   };
   const lockedIdx = () => ths.findIndex((th) => th.dataset.g === MX_LOCK);
   GRID_CLICK = (ev) => {
-    const name = ev.target.closest(".mx-name[data-go]");
-    if (name) { MX_LOCK = ""; return goResist(name.dataset.go); }
-    const hit = ev.target.closest(".mx-ico, td.cell[data-ci]");
+    if (ev.target.closest("thead th[data-g], td.char")) return;      // 見出しは選択、キャラ名はキャラ詳細に使う
+    const hit = ev.target.closest("td.cell[data-ci]");
     const i = hit ? +(hit.closest("[data-ci]").dataset.ci) : -1;
     const grayCell = hit && hit.matches("td") && (hit.classList.contains("mx-off") || hit.closest("tr.mx-dim"));
     if (i >= 0 && !(MX_LOCK && lockedIdx() === i) && !grayCell) { MX_LOCK = ths[i].dataset.g; show(i, true); }
@@ -577,21 +594,30 @@ function renderGrid(groups, chars, now) {
       const G = cols.find((x) => x.name === th.dataset.g);
       if (G) showCtx(e.clientX, e.clientY, mdMenu(G, canGo.get(G.name), cols));
     };
-    // Ctrl/Shift+クリックで複数選択(ほかのクリックの動きより先に受け取る)
-    th.addEventListener("click", (e) => {
-      if (!multiKey(e)) return;
-      e.preventDefault(); e.stopPropagation();
-      const n = th.dataset.g; SEL.mds.has(n) ? SEL.mds.delete(n) : SEL.mds.add(n); render();
-    }, true);
+    // アイコン以外の所: 押すと選択/解除。押したまま横になぞると、同じ向き(選択か解除か)でまとめて切りかえ
+    th.onpointerdown = (e) => {
+      if (e.button > 0 || e.target.closest(".mx-ico")) return;     // アイコンは「つかむ・クリック」(makeSortable)
+      e.preventDefault();
+      const on = !SEL.mds.has(th.dataset.g);
+      const paint = (x) => { toggleMd(x.dataset.g, on); x.classList.toggle("sel", on); };
+      paint(th);
+      DRAGGING = true;                                             // なぞっている間は描き直さない
+      const onMove = (m) => { const x = document.elementFromPoint(m.clientX, m.clientY)?.closest?.("thead th[data-g]"); if (x && SEL.mds.has(x.dataset.g) !== on) paint(x); };
+      const onUp = () => {
+        document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); document.removeEventListener("pointercancel", onUp);
+        DRAGGING = false; if (MX_LOCK) MX_LOCK = ""; render();
+      };
+      document.addEventListener("pointermove", onMove); document.addEventListener("pointerup", onUp); document.addEventListener("pointercancel", onUp);
+    };
   });
   $("#view").querySelectorAll("tbody tr[data-char] td.char").forEach((td) => {
     const c = td.parentElement.dataset.char;
     td.oncontextmenu = (e) => { e.preventDefault(); showCtx(e.clientX, e.clientY, charMenu(c)); };
-    td.addEventListener("click", (e) => {
-      if (!multiKey(e)) return;
-      e.preventDefault(); e.stopPropagation();
-      SEL.chars.has(c) ? SEL.chars.delete(c) : SEL.chars.add(c); render();
-    }, true);
+    td.onclick = (e) => {
+      if (e.target.closest(".grip")) return;
+      if (multiKey(e)) { SEL.chars.has(c) ? SEL.chars.delete(c) : SEL.chars.add(c); render(); return; }   // Ctrl/Shift+クリックで複数選択
+      CH_OPEN = c; CH_FOCUS = c; TAB = "chars"; store.set("md_tab", TAB); render();                                     // クリックでキャラ詳細
+    };
   });
   if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
   if (hcs.length) $("#charhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenCharMenu(hcs)); };
@@ -893,6 +919,15 @@ setInterval(() => { if (DATA && !document.hidden && TAB === "resist") load(); },
 // ツールが記録した「だれの・どの技で・どれくらい受けたか」。キャラごと・MDごとに [回数, 合計, 最大, 最後, ヒット数]
 let DMG_CHAR = "", DMG_MD = "", DMG_GEAR = "";
 // 装備セット(当たったときの 鎧の属性・属性耐性・DEF・MDEF)。見つかった順に A, B, C…
+// 装備セット・シャドウセットの記号(A, B… / S1…)の色。自分で決めた色(color)が無ければ、記号の文字から自動で決める
+const TAG_COLORS = ["#3b5bdb", "#e8590c", "#2f9e44", "#c2255c", "#1098ad", "#9c36b5", "#f08c00", "#5c7cfa", "#d6336c", "#0ca678", "#7048e8", "#e03131"];
+function tagColor(st) {
+  if (st && st.color) return st.color;
+  let h = 0;
+  for (const ch of String((st && st.tag) || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return TAG_COLORS[h % TAG_COLORS.length];
+}
+const tagChip = (st) => `<span class="tag stag" style="background:${tagColor(st)}">${esc(st.tag)}</span>`;
 // 被ダメの記録の装備は「装備セット+シャドウセット」の ID。絞り込みや記号は装備セット(メイン)でまとめる
 const gearMain = (id) => String(id || "").split("+")[0];
 const gearShadow = (id) => String(id || "").split("+")[1] || "";
@@ -909,6 +944,7 @@ function gearSets() {      // {装備セットID: {letter(記号), name, p(最�
   for (const [m, x] of Object.entries(out)) {
     const st = (EQ.sets || {})[m];
     x.letter = st ? st.tag || "?" : "旧" + (old.indexOf(m) + 1);
+    x.color = st ? tagColor(st) : "";
     x.name = st ? (st.name || st.auto || "") : "";
   }
   return out;
@@ -921,7 +957,7 @@ function gearText(p) {
   return `${p.armor}鎧・耐性 ${res || "なし"}・DEF ${p.def.join("+")}・MDEF ${p.mdef.join("+")}`;
 }
 const gearTag = (G, id) => { const g = G[gearMain(id)]; if (!g) return ""; const sh = shadowTagOf(id);
-  return `<span class="tag" title="${esc((g.name ? g.name + "\n" : "") + gearText(g.p))}">${esc(g.letter)}${sh ? "・" + esc(sh) : ""}</span>`; };
+  return `<span class="tag ${g.color ? "stag" : ""}" ${g.color ? `style="background:${g.color}"` : ""} title="${esc((g.name ? g.name + "\n" : "") + gearText(g.p))}">${esc(g.letter)}${sh ? "・" + esc(sh) : ""}</span>`; };
 
 // ---------- 装備 ----------
 // キャラ × 装備セット。全部の場所(衣装をのぞく)がうまったときの装備を「装備セット」として覚えている
@@ -1219,12 +1255,21 @@ document.addEventListener("paste", (e) => {
 
 // ---------- キャラ ----------
 // このワールドのキャラの一覧。クリックで開いて、ベース/ジョブ・ステータス・スキルを見る(装備は「装備セット」タブ)
-let CH_OPEN = "";
+let CH_OPEN = "", CH_FOCUS = "";
 function skillsHtml(sk) {
   const L = Object.entries(sk || {}).sort((a, b) => +a[0] - +b[0]);
   if (!L.length) return `<h3 style="margin:10px 0 2px;font-size:13px">スキル</h3><div class="muted">まだ読めていません（マップを移動するか、ログインし直すと読めます）。</div>`;
   const N = DATA.skill_names || {};
   return `<h3 style="margin:10px 0 2px;font-size:13px">スキル（${L.length}）</h3><div class="sk-list">${L.map(([id, lv]) => `<span class="sk" title="スキル番号 ${esc(id)}">${esc(N[id] || "スキル" + id)}<b>${lv}</b></span>`).join("")}</div>`;
+}
+function charSetsHtml(c) {
+  const EQ = DATA.equip || {};
+  const pick = (T) => Object.entries(T || {}).filter(([, st]) => (st.chars || {})[c])
+    .sort((a, b) => ((b[1].chars[c].n || 0) - (a[1].chars[c].n || 0)) || ((b[1].chars[c].last || 0) - (a[1].chars[c].last || 0))).slice(0, 8);
+  const L = pick(EQ.sets).concat(pick(EQ.shadows));
+  if (!L.length) return "";
+  return `<h3 style="margin:10px 0 2px;font-size:13px">よく使う装備セット</h3><div class="sk-list">${L.map(([sid, st]) =>
+    `<a class="tag stag" data-gs="${esc(sid)}" style="background:${tagColor(st)}" title="${esc((st.name || st.auto || "") + "（" + (st.chars[c].n || 0) + "回着た・最後 " + when(st.chars[c].last) + "）クリックで装備セットへ")}">${esc(st.tag)}</a>`).join("")}</div>`;
 }
 function renderChars(chars) {
   const E = (DATA.equip || {}).chars || {};
@@ -1242,11 +1287,17 @@ function renderChars(chars) {
         <span class="ch-lv">Base <b>${lv ?? "-"}</b> / Job <b>${jlv ?? "-"}</b></span><span>${esc(job)}</span>
         ${d.MaxHP !== undefined ? `<span class="muted">HP ${fmtN(d.MaxHP)}　SP ${fmtN(d.MaxSP)}</span>` : ""}
         <span style="flex:1"></span><span class="muted">${e && Object.keys(e.skills || {}).length ? `スキル ${Object.keys(e.skills).length}` : ""}　最終確認 ${info.seen ? when(info.seen) : "-"}　${open ? "▾" : "▸"}</span></div>
-      ${open ? `<div class="ch-body">${e ? statusHtmlEq({ ...st, lv, jobLv: jlv, jobName: job }) + skillsHtml(e.skills) : `<div class="muted" style="padding-top:8px">まだステータスを読めていません。このキャラでログインすると出ます。</div>`}</div>` : ""}</div>`;
+      ${open ? `<div class="ch-body">${e ? statusHtmlEq({ ...st, lv, jobLv: jlv, jobName: job }) + skillsHtml(e.skills) + charSetsHtml(c) : `<div class="muted" style="padding-top:8px">まだステータスを読めていません。このキャラでログインすると出ます。</div>`}</div>` : ""}</div>`;
   }
   h += `<p class="hint">キャラをクリックすると、ベース/ジョブLv・ステータス・覚えているスキルが開きます（通信から読んだもの。装備は「装備セット」タブ）。ベース/ジョブLv はキャラ選択画面から、ステータスとスキルはログインしたときに読みます。</p>`;
   $("#view").innerHTML = h;
   $("#view").querySelectorAll(".ch-h").forEach((el) => el.onclick = () => { CH_OPEN = CH_OPEN === el.dataset.ch ? "" : el.dataset.ch; render(); });
+  $("#view").querySelectorAll("a[data-gs]").forEach((a) => a.onclick = (e) => { e.preventDefault(); GS_OPEN[a.dataset.gs] = true; GS_FOCUS = a.dataset.gs; TAB = "gsets"; store.set("md_tab", TAB); render(); });
+  if (CH_FOCUS) {            // MD の表から来たキャラを見せる
+    const el = [...$("#view").querySelectorAll(".ch-h")].find((x) => x.dataset.ch === CH_FOCUS);
+    CH_FOCUS = "";
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 // ---------- 装備セット ----------
@@ -1258,7 +1309,7 @@ function nowGearHtml(chars) {       // いま着ている装備(キャラを選�
   if (!names.length) return "";
   if (!names.includes(EQ_CHAR)) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
   const e = E[EQ_CHAR], S = EQ.sets || {}, SH = EQ.shadows || {};
-  const tagOf = (st) => `<span class="tag">${esc(st.tag)}</span> ${esc(st.name || st.auto)}`;
+  const tagOf = (st) => `${tagChip(st)} ${esc(st.name || st.auto)}`;
   const miss = (shadow) => esc((e.missing || []).filter((x) => x.startsWith("シャドウ") === shadow).join("・") || "-");
   return `<h2>いま着ている装備</h2><div class="panel eq-box"><div class="eq-h">
       <label>キャラ <select id="eqc">${names.map((c) => `<option value="${esc(c)}" ${c === EQ_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
@@ -1279,7 +1330,8 @@ function renderGSets(chars) {
       const cs = Object.entries(st.chars || {}).sort((a, b) => (b[1].last || 0) - (a[1].last || 0));
       const n = dmgN(sid), open = GS_OPEN[sid];
       x += `<div class="panel eq-box" data-gsid="${esc(sid)}"><div class="eq-h">
-          <input class="eqtag" data-sid="${esc(sid)}" value="${esc(st.tag || "")}" title="記号（被ダメなどに出ます）">
+          <input class="eqtag" data-sid="${esc(sid)}" value="${esc(st.tag || "")}" title="記号（被ダメなどに出ます）" style="background:${tagColor(st)};border-color:${tagColor(st)};color:#fff">
+          <input type="color" class="eqcolor" data-sid="${esc(sid)}" value="${tagColor(st)}" title="記号の色を変える">${st.color ? `<button class="ghost" data-colreset="${esc(sid)}" title="自動の色に戻す">色を戻す</button>` : ""}
           <input class="eqname" data-sid="${esc(sid)}" value="${esc(st.name || "")}" placeholder="${esc(st.auto || "")}">
           <span class="muted">${st.worn || 0}回着た・最後 ${st.last ? when(st.last) : "-"}${n ? `・被ダメ ${fmtN(n)}回` : ""}</span>
           <span class="eq-btns">${n && !isShadow ? `<button class="ghost" data-dmg="${esc(sid)}">被ダメを見る</button>` : ""}
@@ -1293,7 +1345,7 @@ function renderGSets(chars) {
   let h = nowGearHtml(chars || []);
   h += `<div class="opts"><label><input type="checkbox" id="gsall" ${GS_ALL ? "checked" : ""}> ほかのワールドのキャラが使ったセットも出す</label></div>`;
   h += section(EQ.sets || {}, "装備セット", false) + section(EQ.shadows || {}, "シャドウセット", true);
-  h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。左の記号（A, B… / S1, S2…）と名前は自由に変えられます（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
+  h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。左の記号（A, B… / S1, S2…）と色、名前は自由に変えられます（色は自動で分かれます。色の四角を押すと変えられます）（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
   $("#view").innerHTML = h;
   $("#gsall").onchange = (ev) => { GS_ALL = ev.target.checked; render(); };
   if ($("#eqc")) $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
@@ -1308,6 +1360,8 @@ function renderGSets(chars) {
     el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
     el.onchange = async () => { await post({ sid: el.dataset.sid, tag: el.value }); load(); };
   });
+  $("#view").querySelectorAll("input.eqcolor").forEach((el) => el.onchange = async () => { await post({ sid: el.dataset.sid, color: el.value }); el.blur(); load(); });
+  $("#view").querySelectorAll("[data-colreset]").forEach((b) => b.onclick = async () => { await post({ sid: b.dataset.colreset, color: "" }); load(); });
   $("#view").querySelectorAll("[data-open]").forEach((b) => b.onclick = () => { GS_OPEN[b.dataset.open] = !GS_OPEN[b.dataset.open]; render(); });
   $("#view").querySelectorAll("[data-dmg]").forEach((b) => b.onclick = () => { DMG_CHAR = ""; DMG_GEAR = b.dataset.dmg; DMG_MD = ""; TAB = "dmg"; store.set("md_tab", TAB); render(); });
   $("#view").querySelectorAll("[data-del]").forEach((b) => b.onclick = async () => {
@@ -1447,7 +1501,7 @@ function renderDmg(chars, now) {
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || gearMain(r.gear) === DMG_GEAR)).slice(-60).reverse();
   if (usedGear.size) {
     h += `<h2>装備セット</h2><div class="panel list">${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter, undefined, { numeric: true })).map((id) =>
-      `<div class="row"><span class="tag">${G[id].letter}</span><span class="nm">${G[id].name ? `<b>${esc(G[id].name)}</b>　` : ""}${eleTag(G[id].p.armor)}鎧　耐性 ${Object.entries(G[id].p.res || {}).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") || "なし"}　DEF ${G[id].p.def.join("+")}　MDEF ${G[id].p.mdef.join("+")}</span><span class="muted">${fmtN(G[id].n)}回 ・ 最後 ${when(G[id].last)}</span></div>`).join("")}</div>
+      `<div class="row"><span class="tag ${G[id].color ? "stag" : ""}" ${G[id].color ? `style="background:${G[id].color}"` : ""}>${esc(G[id].letter)}</span><span class="nm">${G[id].name ? `<b>${esc(G[id].name)}</b>　` : ""}${eleTag(G[id].p.armor)}鎧　耐性 ${Object.entries(G[id].p.res || {}).map(([e, v]) => `${eleTag(e)}${v}%`).join(" ") || "なし"}　DEF ${G[id].p.def.join("+")}　MDEF ${G[id].p.mdef.join("+")}</span><span class="muted">${fmtN(G[id].n)}回 ・ 最後 ${when(G[id].last)}</span></div>`).join("")}</div>
       <p class="hint">攻撃を受けたときの装備です。上の「装備」で選ぶと、その装備のときの被ダメだけを見られます（装備を比べるとき用）。DEF・MDEFは通信の値。鎧の属性と耐性は、着ている装備・カード・エンチャント・ランダムオプションから出した目安です（セット効果・精錬などの条件つきの効果、スキルや薬・属性付与などの一時的な効果は入りません）。</p>`;
   }
   if (rec.length) {
