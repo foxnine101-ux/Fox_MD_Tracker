@@ -285,10 +285,10 @@ class CharCore(object):
         s = table.get(sid)
         if s is None:
             s = table[sid] = {"items": [self._item_view(i) if "slot" not in i else i for i in sorted(items, key=slot_key)],
-                              "name": "", "tag": next_tag(table, prefix), "first": (src or {}).get("first") or now,
+                              "name": "", "tag": "", "first": (src or {}).get("first") or now,
                               "last": 0, "worn": 0, "chars": {}}
             if src is None:
-                self.log("[キャラ] {} の新しい{}: {}".format(name, "装備セット" if prefix == "m" else "シャドウセット", s["tag"]))
+                self.log("[キャラ] {} の新しい{}(履歴に追加)".format(name, "装備の組み合わせ" if prefix == "m" else "シャドウの組み合わせ"))
         if src is not None:                                 # 前の版から引き継ぐ
             s["name"] = s.get("name") or src.get("name") or ""
             s["first"] = min(s.get("first") or now, src.get("first") or now)
@@ -528,6 +528,49 @@ class CharCore(object):
         if s is not None:
             s["tag"] = (tag or "").strip()[:8] or next_tag(self._table(sid), "s" if sid.startswith("s") else "m")
             self.changed = True
+
+    def register_set(self, sid, take=""):
+        """履歴の1つを装備セットとして登録する(記号を付ける)。take = 別のセットの ID なら、その記号・名前・色を引き継ぐ(上書き。元は履歴に戻る)。"""
+        t = self._table(sid)
+        s = t.get(sid)
+        if s is None:
+            return
+        src = t.get(take) if take and take != sid else None
+        if src is not None and src.get("tag"):
+            s["tag"], s["name"] = src["tag"], src.get("name") or ""
+            if src.get("color"):
+                s["color"] = src["color"]
+            else:
+                s.pop("color", None)
+            src["tag"], src["name"] = "", ""
+            src.pop("color", None)
+        elif not s.get("tag"):
+            s["tag"] = next_tag(t, "s" if str(sid).startswith("s") else "m")
+        self.changed = True
+
+    def unregister_set(self, sid):
+        """装備セットの登録を外す(記号を外すだけ。履歴には残る)。"""
+        s = self._table(sid).get(sid)
+        if s is not None:
+            s["tag"] = ""
+            self.changed = True
+
+    def put_sim_set(self, shadow, items, data):
+        """計算機で作った装備を履歴に入れて ID を返す。items = 画面に出す用(場所・名前・精錬・カードの名前)、data = 計算機が着せ直すための中身。
+        ゲームのアイテム番号は無いので、中身(data)が同じなら同じ ID。"""
+        t = self.shadows if shadow else self.sets
+        sid = ("sx" if shadow else "mx") + hashlib.sha1(json.dumps(data, sort_keys=True).encode("utf-8")).hexdigest()[:10]
+        now = int(time.time())
+        if sid not in t:
+            clean = []
+            for it in (items or [])[:12]:
+                clean.append({"slot": str(it.get("slot") or "")[:20], "wear": int(it.get("wear") or 0), "itemId": None,
+                              "name": str(it.get("name") or "")[:80], "refine": int(it.get("refine") or 0), "grade": int(it.get("grade") or 0),
+                              "cards": [{"id": None, "name": str(c.get("name") or "")[:80]} for c in (it.get("cards") or [])[:6]],
+                              "options": [{"text": str(o.get("text") or "")[:60]} for o in (it.get("options") or [])[:6]]})
+            t[sid] = {"items": clean, "name": "", "tag": "", "first": now, "last": now, "worn": 0, "chars": {}, "sim": data}
+        self.changed = True
+        return sid
 
     def set_color(self, sid, color):
         """記号の色(#rrggbb)。空にすると自動の色に戻す。"""

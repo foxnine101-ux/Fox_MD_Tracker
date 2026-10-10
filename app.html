@@ -449,6 +449,27 @@ function showCtx(x, y, items) {
   m.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + "px";
   m.onclick = (e) => { const b = e.target.closest("button[data-i]"); if (!b) return; hideCtx(); items[+b.dataset.i].act(); };
 }
+// 確認の窓。「次から確認しない」にチェックして進むと、その種類(key)の確認は次から出ない(SETTINGS.noAsk)
+function askOnce(key, text, okLabel = "OK") {
+  if ((SETTINGS.noAsk || {})[key]) return Promise.resolve(true);
+  return new Promise((done) => {
+    const bg = document.createElement("div"); bg.className = "askbg";
+    bg.innerHTML = `<div class="askbox"><div class="asktext">${esc(text).replace(/\n/g, "<br>")}</div>
+      <label class="asknever"><input type="checkbox"> 次から確認しない</label>
+      <div class="askbtns"><button class="ghost" data-a="0">やめる</button><button data-a="1">${esc(okLabel)}</button></div></div>`;
+    document.body.appendChild(bg);
+    const close = (ok) => {
+      if (ok && bg.querySelector("input").checked) { SETTINGS.noAsk = SETTINGS.noAsk || {}; SETTINGS.noAsk[key] = true; saveSettings(); }
+      bg.remove(); document.removeEventListener("keydown", onKey, true); done(ok);
+    };
+    const onKey = (e) => { if (e.key === "Escape") close(false); };
+    document.addEventListener("keydown", onKey, true);
+    bg.onclick = (e) => { if (e.target === bg) close(false); const b = e.target.closest("[data-a]"); if (b) close(b.dataset.a === "1"); };
+    bg.querySelector('[data-a="1"]').focus();
+  });
+}
+const postSet = (body) => fetch("/api/equipset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).catch(() => ({}));
+const setLabel = (st) => (st && st.tag) || "履歴";
 function hideCtx() { const m = $("#ctx"); if (m) m.hidden = true; }
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx")) hideCtx(); }, true);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtx(); });
@@ -838,6 +859,15 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.simc2 details[open]>summary .foldsum{display:none}
+.askbg{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center}
+.askbox{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:16px 18px;max-width:min(460px,90vw);box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.asktext{line-height:1.7}
+.asknever{display:block;margin:12px 0 0;color:var(--muted,#999);font-size:13px}
+.askbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}
+.eqtagb{font:inherit;font-weight:700;min-width:3em;padding:3px 10px;border:1px solid;border-radius:99px;color:#fff;cursor:pointer}
+.eq-box.hist{opacity:.85}
+.gshist{margin:14px 0 6px;font-size:14px}
 .settab.more{border-style:dashed;font-weight:400}
 .xwrap{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}
 .xinfo{font-size:12px}
@@ -1032,7 +1062,7 @@ function tagColor(st) {
   for (const ch of String((st && st.tag) || "")) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
   return TAG_COLORS[h % TAG_COLORS.length];
 }
-const tagChip = (st) => `<span class="tag stag" style="background:${tagColor(st)}">${esc(st.tag)}</span>`;
+const tagChip = (st) => st.tag ? `<span class="tag stag" style="background:${tagColor(st)}">${esc(st.tag)}</span>` : `<span class="tag" title="記号を付けていない装備（履歴）">履歴</span>`;
 // 被ダメの記録の装備は「装備セット+シャドウセット」の ID。絞り込みや記号は装備セット(メイン)でまとめる
 const gearMain = (id) => String(id || "").split("+")[0];
 const gearShadow = (id) => String(id || "").split("+")[1] || "";
@@ -1146,7 +1176,8 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
 }
 // ラトリオの「拡張情報」の表。ラトリオの表示係(CExtraInfoAreaComponentManager)に、計算係の中の見えない枠へ描かせて、できた表を持ち帰る。
 // 表示係は「直前の計算」の値(ラトリオの中の変数)を読むので、必ず engCalc の直後(同じ計算のうち)に呼ぶ
-const ENG_XKINDS = [[5, "魔法特化"], [4, "物理特化"], [6, "属性倍率"], [7, "ダメージ耐性"], [8, "状態異常耐性"], [9, "新状態異常耐性"]];
+const ENG_XKINDS = [[5, "魔法特化"], [4, "物理特化"]];                                                  // 補助情報の枠で選ぶもの
+const ENG_RKINDS = [[7, "ダメージ耐性"], [6, "属性倍率"], [8, "状態異常耐性"], [9, "新状態異常耐性"]];      // 耐性の枠(いつも4つとも出す)
 function engExtra(raw, kinds) {
   const out = {};
   if (!ENG.xinfo || !kinds.length) return out;
@@ -1481,27 +1512,54 @@ function simcEquipHtml(m, shadow) {
   return h + `</table>`;
 }
 // 装備欄の右上に並べる「装備セットのタブ」。通信で読んで登録された装備セット(A, B… / S1…)を押すと、いまのキャラに着せかえる
-// 装備セットは着がえの途中の組み合わせも登録されて増えやすいので、タブに出すのは
-//   名前を付けたもの / 2回以上着たもの / いまゲームで着ているもの / このキャラが着ているもの  を新しい順に SIMC_TABMAX 個まで。残りは「ほか」から検索して選ぶ
-const SIMC_TABMAX = 8;
+// 装備セットのタブに出すのは、手で登録したもの(記号つき)だけ。通信で読んだ組み合わせ(履歴)と、いまゲームで着ている装備は「ゲームの装備から」で選ぶ
 function simcSetList(m, shadow) {
   const EQ = DATA.equip || {}, T = EQ[shadow ? "shadows" : "sets"] || {}, cur = shadow ? m.foxShadow : m.foxSet;
-  const live = new Set(Object.values(EQ.chars || {}).map((e) => (shadow ? e.shadow : e.cur)).filter(Boolean));
-  const all = Object.entries(T).map(([sid, st]) => {
-    const cs = Object.values(st.chars || {}), n = cs.reduce((a, c) => a + (c.n || 0), 0), last = Math.max(st.last || 0, ...cs.map((c) => c.last || 0));
-    return { sid, st, last, main: !!st.name || n >= 2 || live.has(sid) || sid === cur };
-  }).sort((a, b) => b.last - a.last);
-  const tabs = all.filter((x) => x.main).slice(0, SIMC_TABMAX);
-  if (cur && T[cur] && !tabs.some((x) => x.sid === cur)) tabs.push(all.find((x) => x.sid === cur));
-  tabs.sort((a, b) => (a.st.first || 0) - (b.st.first || 0));
-  return { tabs, rest: all.filter((x) => !tabs.includes(x)), cur };
+  const all = Object.entries(T).map(([sid, st]) => ({ sid, st }));
+  return { tabs: all.filter((x) => x.st.tag).sort((a, b) => String(a.st.tag).localeCompare(String(b.st.tag), "ja", { numeric: true })), rest: all.filter((x) => !x.st.tag).sort((a, b) => (b.st.last || 0) - (a.st.last || 0)), cur };
 }
+// 計算機の装備の「中身」(装備セットとして登録するとき・着せ直すときの形。番号はラトリオのもの)
+function simcGearFrag(m, shadow) {
+  if (shadow) {
+    const sh = m.shadowEquip || {}, d = { itemId: {}, refined: {}, rndOpt: {}, card: {} };
+    for (const [r] of SIMC_SHADOW) { d.itemId[r] = (sh.itemId || [])[r] || 0; d.refined[r] = (sh.refined || [])[r] || 0; d.rndOpt[r] = ((sh.rndOpt || [])[r] || []).map((x) => [x[0] || 0, x[1] || 0]); SIMC_SHCARD[r].forEach((cr) => { d.card[cr] = m.card[cr] || 0; }); }
+    return d;
+  }
+  const d = { equip: (m.equip || []).slice(0, 11).map((v) => v || 0), card: {}, weapon: Object.assign({}, m.weapon), defPlus: Object.assign({}, m.defPlus), defTranscendence: Object.assign({}, m.defTranscendence),
+    rnd: Array.from({ length: 11 }, (_, r) => Array.from({ length: 5 }, (_, i) => { const x = ((m.foxRnd || [])[r] || [])[i] || [0, 0]; return [x[0] || 0, x[1] || 0]; })) };
+  Object.values(SIMC_CARD).flat().forEach((cr) => { d.card[cr] = m.card[cr] || 0; });
+  return d;
+}
+function simcApplyFrag(m, d, shadow) {
+  if (shadow) {
+    const sh = m.shadowEquip; sh.itemId = sh.itemId || []; sh.refined = sh.refined || []; sh.rndOpt = sh.rndOpt || [];
+    for (const [r] of SIMC_SHADOW) { sh.itemId[r] = (d.itemId || {})[r] || 0; sh.refined[r] = (d.refined || {})[r] || 0; sh.rndOpt[r] = Array.from({ length: 5 }, (_, i) => { const x = ((d.rndOpt || {})[r] || [])[i] || [0, 0]; return [x[0] || 0, x[1] || 0]; }); }
+  } else {
+    (d.equip || []).forEach((v, r) => { m.equip[r] = v || simcNoneId(r); });
+    Object.assign(m.weapon, d.weapon || {}); Object.assign(m.defPlus, d.defPlus || {}); Object.assign(m.defTranscendence, d.defTranscendence || {});
+    m.foxRnd = JSON.parse(JSON.stringify(d.rnd || engRndBlank()));
+  }
+  Object.entries(d.card || {}).forEach(([cr, v]) => { m.card[+cr] = v || 0; });
+}
+const simcFragSig = (m, shadow) => JSON.stringify(simcGearFrag(m, shadow));
+function simcFragItems(m, shadow) {       // 装備セットタブに出す用の一覧(名前・精錬・カードの名前)
+  const bitOf = Object.fromEntries((shadow ? SIMC_FOXSH : SIMC_FOXBITS).map(([b, r]) => [r, b])), out = [];
+  for (const [r, label] of shadow ? SIMC_SHADOW : SIMC_REGIONS) {
+    const id = simcItemAt(m, r); if (simcIsNone(r, id)) continue;
+    const rf = SIMC_REFINE[r], tr = SIMC_TRANS[r], rnd = shadow ? ((m.shadowEquip.rndOpt || [])[r] || []) : ((m.foxRnd || [])[r] || []), lists = simcRndLists(id);
+    out.push({ slot: label, wear: bitOf[r] || 0, name: simcItemName(id), refine: shadow ? ((m.shadowEquip.refined || [])[r] || 0) : rf ? ((m[rf[0]] || {})[rf[1]] || 0) : 0, grade: tr ? ((m[tr[0]] || {})[tr[1]] || 0) : 0,
+      cards: (shadow ? SIMC_SHCARD[r] : SIMC_CARD[r]).map((cr) => simcCardName(m.card[cr])).filter(Boolean).map((name) => ({ name })),
+      options: rnd.map((x, i) => { if (!x || !x[0]) return null; const k = lists[i] ? simcRndKinds(lists[i]).find((o) => o.v === x[0]) : null; return { text: (k ? k.t : "OP" + x[0]) + x[1] }; }).filter(Boolean) });
+  }
+  return out;
+}
+const simcDirty = (m, shadow) => { const sig = shadow ? m.foxShadowSig : m.foxSetSig; return !!sig && sig !== simcFragSig(m, shadow); };
 function simcSetTabs(m, shadow) {
-  const L = simcSetList(m, shadow);
-  if (!L.tabs.length && !L.rest.length) return `<span class="muted">ゲームで装備を着ると、ここに装備セットが並びます</span>`;
+  const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0;
   return `<span class="muted">${shadow ? "シャドウのセット" : "装備セット"}</span>`
-    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-wear="${esc(sid)}" data-sh="${shadow ? 1 : 0}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと着せかえます）">${esc(st.tag)}</button>`).join("")
-    + (L.rest.length ? `<button class="settab more" data-wearmore="${shadow ? 1 : 0}" title="タブに出していない装備セットから、検索して選びます">ほか ${L.rest.length} ▾</button>` : "");
+    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-wear="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと着せかえ。右クリックで上書き・登録を外す）${sid === L.cur && dirty ? "\n＊ 着せたあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
+    + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しい装備セットとして登録します">＋登録</button>`
+    + `<button class="settab more" data-wearmore="${sh}" title="ゲームでいま着ている装備や、着たことのある組み合わせ（履歴）から選んで着せます">ゲームの装備から ▾</button>`;
 }
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
@@ -1515,18 +1573,49 @@ function simcExtraHtml(r) {
   return `<div class="settabs" style="margin-bottom:6px">${ENG_XKINDS.map(([id, t]) => `<button class="settab${on.includes(id) ? " on" : ""}" data-xk="${id}">${t}</button>`).join("")}</div>`
     + `<div class="xwrap" id="sccx">${simcExtraBody(r)}</div>`;
 }
+const simcAllKinds = () => simcXKinds().concat(ENG_RKINDS.map(([id]) => id));
+const simcResistBody = (r) => ENG_RKINDS.map(([id, t]) => `<div class="xinfo"><div class="xttl">${t}</div>${(r.x || {})[id] || `<span class="muted">-</span>`}</div>`).join("");
+// 耐性の枠をたたんだときに見出しへ出す1行: いちばん高い耐性と、無効にできている状態異常。ラトリオが作った表から読む
+function simcResistSum(r) {
+  const rows = (id) => { const d = document.createElement("div"); d.innerHTML = (r.x || {})[id] || ""; return [...d.querySelectorAll("tr")].filter((tr) => !tr.querySelector("table")).map((tr) => [...tr.cells].map((c) => c.textContent.trim())); };
+  const num = (t) => { const mm = String(t || "").match(/-?[\d.]+/g); return mm ? parseFloat(mm[mm.length - 1]) : NaN; };
+  const top = (list) => { const mx = Math.max(0, ...list.map((x) => x[1])); return mx > 0 ? `${list.filter((x) => x[1] === mx).map((x) => x[0]).join("・")} ${mx}%` : ""; };
+  let sec = ""; const dmg = [];
+  for (const c of rows(7)) { if (c.length === 1) { sec = c[0]; continue; } if (c.length >= 2 && /%$/.test(c[1]) && !/^\(/.test(c[1])) dmg.push([(sec === "ボス" || sec === "特殊" ? "" : sec) + c[0], num(c[1])]); }
+  const ele = rows(6).slice(1).map((c) => [c[0], num(c[1])]);
+  const immune = rows(8).slice(1).filter((c) => num(c[1]) >= 100 || num(c[2]) >= 100).map((c) => c[0])
+    .concat(rows(9).slice(1).filter((c) => num(c[1]) >= 100 || num(c[2]) >= 100).map((c) => c[0]));
+  const a = top(dmg), b = top(ele);
+  return [a ? `ダメージ耐性の最高: ${a}` : "", b ? `属性耐性の最高: ${b}` : "", `状態異常の無効: ${immune.length ? immune.join("・") : "なし"}`].filter(Boolean).join(" ／ ");
+}
 function simcExtraBody(r) {
   const on = simcXKinds();
   if (!on.length) return `<span class="muted">上のボタンで、見たい表を選んでください（いくつでも）。</span>`;
   return ENG_XKINDS.filter(([id]) => on.includes(id)).map(([id, t]) => `<div class="xinfo"><div class="xttl">${t}</div>${(r.x || {})[id] || `<span class="muted">-</span>`}</div>`).join("");
 }
-function simcWearSet(sid, shadow) {
-  const ch = simcCur(), st = ((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[sid];
-  if (!ch || !st) return;
-  const rows = simcWear(ch.model, st.items || [], shadow), old = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report.rows.filter((x) => (x.region >= 14) !== shadow) : [];
-  if (shadow) ch.model.foxShadow = sid; else ch.model.foxSet = sid;
-  SIMC.report = { id: SIMC.cur, rows: old.concat(rows), rnd: (st.items || []).some((i) => (i.options || []).length) };
+function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履歴)の ID、または "now:キャラ名"(いまゲームで着ている装備)
+  const ch = simcCur(), EQ = DATA.equip || {}; if (!ch) return;
+  const m = ch.model, old = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report.rows.filter((x) => (x.region >= 14) !== shadow) : [];
+  let rows = [], link = sid, rnd = false;
+  if (sid.startsWith("now:")) {
+    const e = (EQ.chars || {})[sid.slice(4)]; if (!e) return;
+    const items = (e.now || []).filter((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
+    rows = simcWear(m, items, shadow); link = (shadow ? e.shadow : e.cur) || ""; rnd = items.some((i) => (i.options || []).length);
+  } else {
+    const st = (EQ[shadow ? "shadows" : "sets"] || {})[sid]; if (!st) return;
+    if (st.sim) simcApplyFrag(m, st.sim, shadow);
+    else { rows = simcWear(m, st.items || [], shadow); rnd = (st.items || []).some((i) => (i.options || []).length); }
+  }
+  if (shadow) { m.foxShadow = link; m.foxShadowSig = simcFragSig(m, true); } else { m.foxSet = link; m.foxSetSig = simcFragSig(m, false); }
+  SIMC.report = { id: SIMC.cur, rows: old.concat(rows), rnd };
   SIMC.res = null; simcSave(); render();
+}
+async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
+  const ch = simcCur(); if (!ch) return;
+  const m = ch.model, r = await postSet({ sim: { shadow, items: simcFragItems(m, shadow), data: simcGearFrag(m, shadow) }, take: take || "" });
+  if (!r.sid) { SIMC.msg = "登録できませんでした。"; render(); return; }
+  if (shadow) { m.foxShadow = r.sid; m.foxShadowSig = simcFragSig(m, true); } else { m.foxSet = r.sid; m.foxSetSig = simcFragSig(m, false); }
+  simcSave(); SIMC.msg = take ? "装備セットを上書きしました。" : "装備セットに登録しました。"; await load(); render();
 }
 // ---- Fox のキャラ・装備セットを取り込む(通信で読んだ名前 → ラトリオの候補の名前でつなぐ) ----
 const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
@@ -1620,7 +1709,7 @@ function renderSimChara() {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
     if (!names.includes(F.char)) F.char = names.find((c) => E[c].cur) || names[0];
     const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).sort((a, b) => (a[1].first || 0) - (b[1].first || 0))
-      .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(st.tag)}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
+      .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(setLabel(st))}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
     h += `<div class="panel simbox"><div class="opts"><b>ゲームのキャラから作る</b> <span class="muted">このツールが通信から読んだ、自分のキャラをもとに作ります。</span>
       <label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
       <label>装備セット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
@@ -1641,7 +1730,7 @@ function renderSimChara() {
     h += `<div class="panel empty">計算係（ROラトリオHub）を起動しています…</div>`;
   } else {
     const m = ch.model;
-    if (!SIMC.res) { try { SIMC.res = engCalc(m, simcXKinds()); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
+    if (!SIMC.res) { try { SIMC.res = engCalc(m, simcAllKinds()); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
     const r = SIMC.res || { c: [], core: {}, tot: {} };
     const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
@@ -1655,9 +1744,10 @@ function renderSimChara() {
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
       ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>`)}
+      ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
-      ${simcFold("x", "補助情報", simcExtraHtml(r), ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>`)}</div>
+      ${simcFold("x", "補助情報", simcExtraHtml(r), ` <span class="muted">（ラトリオの「拡張情報」と同じ表。耐性は上の「耐性」の枠にあります）</span>`)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -1693,8 +1783,9 @@ function renderSimChara() {
   if (ch && ENG.ready) {
     // 値を変えたら、その場で計算し直して結果だけ描きかえる(入力中の欄はそのまま)
     const recalc = () => {
-      try { SIMC.res = engCalc(ch.model, simcXKinds()); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
+      try { SIMC.res = engCalc(ch.model, simcAllKinds()); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
       if (g("sccx")) g("sccx").innerHTML = simcExtraBody(SIMC.res);
+      if (g("sccresist")) { g("sccresist").innerHTML = simcResistBody(SIMC.res); g("sccrsum").textContent = simcResistSum(SIMC.res); }
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick();
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
@@ -1705,13 +1796,28 @@ function renderSimChara() {
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
     const two = (el, key) => el.dataset[key].split(":").map(Number);
-    const touched = (region) => { if (region >= 14) m.foxShadow = ""; else m.foxSet = ""; };      // 手で替えたら、「どの装備セットを着ているか」の印を外す
+    const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
     V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
-    V.querySelectorAll("[data-wear]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcWearSet(el.dataset.wear, el.dataset.sh === "1"); });
+    const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
+    const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」で置きかえます。\nいまの${part(shadow)}は、登録していなければ消えます。`, "置きかえる")) simcWearSet(sid, shadow); };
+    V.querySelectorAll("[data-wear]").forEach((el) => {
+      const sid = el.dataset.wear, shadow = el.dataset.sh === "1", tag = el.textContent.replace("＊", "");
+      el.onclick = (e) => { e.preventDefault(); wearAsk(sid, shadow, tag); };
+      el.oncontextmenu = (e) => {
+        e.preventDefault();
+        showCtx(e.clientX, e.clientY, [{ cap: `「${tag}」` },
+          { label: `いまの計算機の${part(shadow)}で上書き`, act: async () => { if (await askOnce("over", `「${tag}」を、いまの計算機の${part(shadow)}で上書きします。\nいまの「${tag}」の中身は履歴に戻ります。`, "上書きする")) simcRegister(shadow, sid); } },
+          { label: "登録を外す", act: async () => { if (await askOnce("unreg", `「${tag}」の登録を外します。\n装備の中身は履歴に残るので、あとでまた登録できます。`, "登録を外す")) { await postSet({ sid, unregister: 1 }); await load(); render(); } } }]);
+      };
+    });
+    V.querySelectorAll("[data-simreg]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcRegister(el.dataset.simreg === "1", ""); });
     V.querySelectorAll("[data-wearmore]").forEach((el) => el.onclick = (e) => {
       e.preventDefault();
-      const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow);
-      pickOpen(el, L.rest.map(({ sid, st }) => ({ v: sid, t: `${st.tag}: ${st.name || st.auto || ""}`, k: Object.keys(st.chars || {}).map(cn).join(" ") })), null, (sid) => simcWearSet(sid, shadow));
+      const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow), E = (DATA.equip || {}).chars || {};
+      const now = Object.entries(E).filter(([, c]) => (c.now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023))).sort((a, b) => (b[1].updated || 0) - (a[1].updated || 0))
+        .map(([c]) => ({ v: "now:" + c, t: `いま着ている装備: ${cn(c)}`, k: c, label: cn(c) + " のいまの装備" }));
+      const hist = L.rest.filter((x) => !x.st.sim).map(({ sid, st }) => ({ v: sid, t: `履歴: ${st.name || st.auto || ""}（${Object.keys(st.chars || {}).map(cn).join("、")}）`, k: "", label: st.name || st.auto || "履歴" }));
+      pickOpen(el, now.concat(hist), null, (sid, o) => wearAsk(sid, shadow, o.label));
     });
     V.querySelectorAll("[data-xk]").forEach((el) => el.onclick = () => { const id = +el.dataset.xk, on = simcXKinds(), i = on.indexOf(id); if (i >= 0) on.splice(i, 1); else on.push(id); store.set("md_simx", JSON.stringify(on)); SIMC.res = null; render(); });
     V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOpts(m.status.jobId, region), simcItemAt(m, region), (v) => { simcSetItem(m, region, v); touched(region); changed(); }); });
@@ -1864,12 +1970,12 @@ function renderSimDmg(chars) {
   h += `</div><div class="panel simbox"><div class="opts"><b>2. 受けたときの装備</b>
       <label><select id="simbase">${baseOpts.length
         ? selOpt(baseOpts.map(([id, mx]) => [id, `${(S[gearMain(id)] || {}).tag || "?"}${shadowTagOf(id) ? "・" + shadowTagOf(id) : ""}: ${equipSetName(id)}（このときの最大 ${fmtN(mx)}）`]), SIM.base)
-        : selOpt(Object.entries(S).map(([id, st]) => [id + (baseSh && gearMain(SIM.base) === id ? "+" + baseSh : ""), `${st.tag}: ${st.name || st.auto}`]), SIM.base)}</select></label>
+        : selOpt(Object.entries(S).map(([id, st]) => [id + (baseSh && gearMain(SIM.base) === id ? "+" + baseSh : ""), `${setLabel(st)}: ${st.name || st.auto}`]), SIM.base)}</select></label>
       ${!SIM.manual && !baseOpts.length ? `<span class="muted">この攻撃を受けたときの装備の記録が無いので、着ていた装備を選んでください</span>` : ""}</div>
     ${buffRow("B", SIM.buffB, "そのときの補助")}</div>
     <div class="panel simbox"><div class="opts"><b>3. 比べる装備セット</b>
       ${Object.entries(S).filter(([id]) => id !== baseMain).sort((a, b) => (a[1].first || 0) - (b[1].first || 0)).map(([id, st]) => `<label class="simset"><input type="checkbox" data-simset="${esc(id)}" ${SIM.sets.has(id) ? "checked" : ""}>${tagChip(st)} ${esc(st.name || st.auto)}</label>`).join("") || `<span class="muted">ほかの装備セットがまだありません</span>`}</div>
-      <div class="opts"><label>シャドウ <select id="simsh">${selOpt([["", "受けたときと同じ"]].concat(Object.entries(SH).map(([id, st]) => [id, `${st.tag}: ${st.name || st.auto}`])), SIM.shadow)}</select></label>
+      <div class="opts"><label>シャドウ <select id="simsh">${selOpt([["", "受けたときと同じ"]].concat(Object.entries(SH).map(([id, st]) => [id, `${setLabel(st)}: ${st.name || st.auto}`])), SIM.shadow)}</select></label>
       <label>最大HP <input type="number" id="simhp" min="0" value="${SIM.hp || ""}" placeholder="${hpOf(baseMain) || "自動"}"></label><span class="muted">（空欄 = その装備を着ていたときの最大HP）</span></div>
     ${buffRow("T", SIM.buffT, "比べる側の補助")}</div>`;
   // 結果
@@ -1992,7 +2098,7 @@ function ratFillBar(chars) {
   if (!names.length) return `<span class="muted">キャラにログインすると、ここからキャラと装備セットを計算機に入れられます。</span>`;
   if (!names.includes(CALC.char)) CALC.char = names.find((c) => E[c].cur) || names[0];
   const opt = (T, cur, here) => `<option value="">いま着ている装備</option>` + Object.entries(T || {}).sort((a, b) => (a[1].first || 0) - (b[1].first || 0))
-    .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(st.tag)}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
+    .map(([sid, st]) => `<option value="${esc(sid)}" ${sid === cur ? "selected" : ""}>${esc(setLabel(st))}: ${esc(st.name || st.auto)}${sid === here ? "（着用中）" : ""}</option>`).join("");
   return `<label>キャラ <select id="ratc">${names.map((c) => `<option value="${esc(c)}" ${c === CALC.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
     <label>装備セット <select id="rats">${opt(EQ.sets, CALC.set, E[CALC.char].cur)}</select></label>
     <label>シャドウ <select id="ratsh">${opt(EQ.shadows, CALC.shadow, E[CALC.char].shadow)}</select></label>
@@ -2180,7 +2286,7 @@ function skillsHtml(sk) {
 }
 function charSetsHtml(c) {
   const EQ = DATA.equip || {};
-  const pick = (T) => Object.entries(T || {}).filter(([, st]) => (st.chars || {})[c])
+  const pick = (T) => Object.entries(T || {}).filter(([, st]) => st.tag && (st.chars || {})[c])
     .sort((a, b) => ((b[1].chars[c].n || 0) - (a[1].chars[c].n || 0)) || ((b[1].chars[c].last || 0) - (a[1].chars[c].last || 0))).slice(0, 8);
   const L = pick(EQ.sets).concat(pick(EQ.shadows));
   if (!L.length) return "";
@@ -2239,15 +2345,19 @@ function renderGSets(chars) {
   const inWorld = (st) => GS_ALL || Object.keys(st.chars || {}).some(inServer);
   const dmgN = (sid) => Object.entries(DS).filter(([id]) => gearMain(id) === sid || gearShadow(id) === sid).reduce((n, [, v]) => n + (v.n || 0), 0);
   const section = (T, title, isShadow) => {
-    const L = Object.entries(T).filter(([, st]) => inWorld(st)).sort((a, b) => (a[1].first || 0) - (b[1].first || 0));   // 初めて見た順(記号を変えても動かない)
-    let x = `<h2>${title}（${L.length}）</h2>`;
+    const L = Object.entries(T).filter(([, st]) => st.tag || inWorld(st)).sort((a, b) => (!!b[1].tag - !!a[1].tag) || (a[1].tag ? String(a[1].tag).localeCompare(String(b[1].tag), "ja", { numeric: true }) : (b[1].last || 0) - (a[1].last || 0)));   // 登録したもの(記号の順) → 履歴(新しい順)
+    const nReg = L.filter(([, st]) => st.tag).length;
+    let x = `<h2>${title}（登録 ${nReg}・履歴 ${L.length - nReg}）</h2>`, hist = false;
     if (!L.length) return x + `<div class="panel empty">まだありません。${isShadow ? "シャドウ装備6か所" : "兜・鎧・武器・盾・肩・靴・アクセサリー2つ"}が全部うまると記録されます。</div>`;
     for (const [sid, st] of L) {
       const cs = Object.entries(st.chars || {}).sort((a, b) => (b[1].last || 0) - (a[1].last || 0));
       const n = dmgN(sid), open = GS_OPEN[sid];
-      x += `<div class="panel eq-box" data-gsid="${esc(sid)}"><div class="eq-h">
-          <input class="eqtag" data-sid="${esc(sid)}" value="${esc(st.tag || "")}" title="記号（被ダメなどに出ます）" style="background:${tagColor(st)};border-color:${tagColor(st)};color:#fff">
-          <input type="color" class="eqcolor" data-sid="${esc(sid)}" value="${tagColor(st)}" title="記号の色を変える">${st.color ? `<button class="ghost" data-colreset="${esc(sid)}" title="自動の色に戻す">色を戻す</button>` : ""}
+      if (!st.tag && !hist) { hist = true; x += `<h3 class="gshist">履歴 <span class="muted" style="font-weight:400">（着たことのある組み合わせ。残したいものだけ「登録」してください）</span></h3>`; }
+      x += `<div class="panel eq-box${st.tag ? "" : " hist"}" data-gsid="${esc(sid)}"><div class="eq-h">
+          ${st.tag ? `<button class="eqtagb" data-unreg="${esc(sid)}" title="押すと登録を外します（履歴に戻ります）。右クリックで記号を変えられます" style="background:${tagColor(st)};border-color:${tagColor(st)}">${esc(st.tag)}</button>
+          <input type="color" class="eqcolor" data-sid="${esc(sid)}" value="${tagColor(st)}" title="記号の色を変える">${st.color ? `<button class="ghost" data-colreset="${esc(sid)}" title="自動の色に戻す">色を戻す</button>` : ""}`
+          : `<button class="ghost" data-reg="${esc(sid)}" data-sh="${isShadow ? 1 : 0}" title="この装備を装備セットとして登録します（記号が付きます）">登録</button>`}
+          ${st.sim ? `<span class="tag" title="計算機で作った装備">計算機</span>` : ""}
           <input class="eqname" data-sid="${esc(sid)}" value="${esc(st.name || "")}" placeholder="${esc(st.auto || "")}">
           <span class="muted">${st.worn || 0}回着た・最後 ${st.last ? when(st.last) : "-"}${n ? `・被ダメ ${fmtN(n)}回` : ""}</span>
           <span class="eq-btns">${n && !isShadow ? `<button class="ghost" data-dmg="${esc(sid)}">被ダメを見る</button>` : ""}
@@ -2261,7 +2371,7 @@ function renderGSets(chars) {
   let h = nowGearHtml(chars || []);
   h += `<div class="opts"><label><input type="checkbox" id="gsall" ${GS_ALL ? "checked" : ""}> ほかのワールドのキャラが使ったセットも出す</label></div>`;
   h += section(EQ.sets || {}, "装備セット", false) + section(EQ.shadows || {}, "シャドウセット", true);
-  h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。左の記号（A, B… / S1, S2…）と色、名前は自由に変えられます（色は自動で分かれます。色の四角を押すと変えられます）（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
+  h += `<p class="hint">装備セットは、兜・鎧・武器・盾・肩・靴・アクセサリー2つのメイン10か所が全部うまったときの組み合わせ、シャドウセットはシャドウ装備6か所の組み合わせです（衣装は数えません）。精錬・★・カード・エンチャント・ランダムオプションまで同じなら、キャラが違っても同じセットです。着た組み合わせはまず「履歴」に入り、「登録」を押したものだけに記号（A, B… / S1, S2…）が付きます。記号を押すと登録を外せます（右クリックで記号を変更）。色と名前は自由に変えられます（色は自動で分かれます。色の四角を押すと変えられます）（名前が空なら「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」のような 武器 / 鎧 / 肩 の自動の名前）。「中身」で、装備とキャラごとの着ていたときのステータスが見られます。被ダメタブの「装備」で、装備セットごとの被ダメを見られます。</p>`;
   $("#view").innerHTML = h;
   $("#gsall").onchange = (ev) => { GS_ALL = ev.target.checked; render(); };
   if ($("#eqc")) $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
@@ -2272,9 +2382,18 @@ function renderGSets(chars) {
     el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
     el.onchange = async () => { await post({ sid: el.dataset.sid, name: el.value }); load(); };
   });
-  $("#view").querySelectorAll("input.eqtag").forEach((el) => {
-    el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
-    el.onchange = async () => { await post({ sid: el.dataset.sid, tag: el.value }); load(); };
+  $("#view").querySelectorAll("[data-unreg]").forEach((el) => {
+    const sid = el.dataset.unreg, tag = el.textContent;
+    el.onclick = async () => { if (await askOnce("unreg", `「${tag}」の登録を外します。\n装備の中身は履歴に残るので、あとでまた登録できます。`, "登録を外す")) { await post({ sid, unregister: 1 }); load(); } };
+    el.oncontextmenu = (ev) => { ev.preventDefault(); showCtx(ev.clientX, ev.clientY, [{ cap: `「${tag}」` }, { label: "記号を変える", act: async () => { const v = prompt("新しい記号（8文字まで）", tag); if (v && v.trim()) { await post({ sid, tag: v.trim() }); load(); } } }, { label: "登録を外す", act: () => el.onclick() }]); };
+  });
+  $("#view").querySelectorAll("[data-reg]").forEach((el) => el.onclick = (ev) => {
+    const sid = el.dataset.reg, T = (DATA.equip || {})[el.dataset.sh === "1" ? "shadows" : "sets"] || {};
+    const reg = Object.entries(T).filter(([, st]) => st.tag).sort((a, b) => (a[1].first || 0) - (b[1].first || 0));
+    const r = el.getBoundingClientRect();
+    showCtx(r.left, r.bottom + 4, [{ label: "新しい記号で登録", act: async () => { await post({ sid, register: 1 }); load(); } }]
+      .concat(reg.length ? ["-", { cap: "登録ずみのセットを、この装備で上書き" }] : [])
+      .concat(reg.map(([tid, st]) => ({ label: `${st.tag}: ${st.name || st.auto || ""} を上書き`, act: async () => { if (await askOnce("over", `「${st.tag}」を、この装備で上書きします。\nいまの「${st.tag}」の中身は履歴に戻ります。`, "上書きする")) { await post({ sid, register: 1, take: tid }); load(); } } }))));
   });
   $("#view").querySelectorAll("input.eqcolor").forEach((el) => el.onchange = async () => { await post({ sid: el.dataset.sid, color: el.value }); el.blur(); load(); });
   $("#view").querySelectorAll("[data-colreset]").forEach((b) => b.onclick = async () => { await post({ sid: b.dataset.colreset, color: "" }); load(); });
