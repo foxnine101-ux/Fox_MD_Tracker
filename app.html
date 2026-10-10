@@ -404,7 +404,7 @@ let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出�
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, .simbox input, .simbox select")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -820,6 +820,20 @@ td.dm-max{font-weight:700}
 .sk-list{display:flex;flex-wrap:wrap;gap:5px 6px;margin-top:4px}
 .sk{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--chip);white-space:nowrap}
 .sk b{margin-left:4px}
+.simnav{display:flex;gap:6px;margin-bottom:10px}
+.simnav button{padding:5px 14px;border:1px solid var(--line);background:var(--panel);color:var(--muted);border-radius:8px}
+.simnav button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.simc{display:grid;grid-template-columns:minmax(300px,380px) 1fr;gap:10px;align-items:start}
+@media (max-width:820px){.simc{grid-template-columns:1fr}}
+.simc .panel{padding:10px 14px}
+.simc h3{margin:0 0 6px;font-size:14px}
+.simc table{width:100%;border-collapse:collapse;font-size:13px}
+.simc td,.simc th{padding:3px 6px;border-bottom:1px solid var(--line);text-align:left;position:static;min-width:0;max-width:none;background:none;white-space:nowrap}
+.simc td.v{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
+.simc input[type=number]{width:5em;font:inherit;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink)}
+.simc input[type=text],.simc select{font:inherit;padding:2px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);max-width:100%}
+.simc .bon{color:var(--muted);font-size:12px;margin-left:4px}
+.simc .good{color:var(--ok);font-weight:700}.simc .warn{color:var(--soon);font-weight:700}
 .simbox{padding:10px 14px;margin-bottom:10px}
 .simbox .opts{margin:0 0 6px}
 .simbox label{white-space:nowrap}
@@ -1028,6 +1042,206 @@ function statusHtmlEq(st) {
     <div class="eq-st">${cell("Atk", two("ATK", "ATK2"))}${cell("Matk", d.MATKmin !== undefined ? `${d.MATKmin} + ${d.MATKmax}` : "-")}${cell("Def", two("DEF", "DEF2"))}${cell("Mdef", two("MDEF", "MDEF2"))}${cell("Hit", d.HIT ?? "-")}${cell("Flee", two("FLEE", "FLEE2"))}${cell("Critical", d.CRIT ?? "-")}</div>
     ${d["P.ATK"] !== undefined || d.RES !== undefined ? `<div class="eq-st">${["P.ATK", "S.MATK", "RES", "MRES", "H.PLUS", "C.RATE"].map((k) => cell(k, d[k] ?? "-")).join("")}</div>` : ""}`;
 }
+// ---------- 計算機: キャラ・装備のシミュレーター(改良版ラトリオ) ----------
+// 計算は、裏に隠した ROラトリオHub のページ(計算係)の「画面なしの計算の入口」を直接呼ぶ:
+//   _ratorioReg.calcCoreFromModel(model) … model = キャラの設定(職業・Lv・ステータス・装備・支援…をまとめたデータ)
+// 入力欄を外から操作するわけではないので、1回 約0.1秒で返る。計算の中身とデータベースは本家そのまま
+// (本家が更新されたら「ラトリオを更新」で取り込むだけ)。キャラはこの PC に保存する(計算機のキャラ.json)
+let SIMV = store.get("md_simv") || "chara";
+function simNav() {
+  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラ・装備</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメの検証</button></div>`;
+}
+function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) => b.onclick = () => { SIMV = b.dataset.simv; store.set("md_simv", SIMV); render(); }); }
+function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : renderSimChara(); }
+
+const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
+function engInit(query) {                 // 計算係(隠したラトリオ)を用意する。query を渡すと、その保存データを読み込んだ状態で開き直す
+  if (ENG.loading) return ENG.loading;
+  if (ENG.ready && !query) return Promise.resolve();
+  ENG.ready = false; ENG.err = "";
+  ENG.loading = (async () => {
+    if (ENG.frame) ENG.frame.remove();
+    const f = ENG.frame = document.createElement("iframe");
+    f.style.cssText = "position:fixed;left:-4000px;top:0;width:1400px;height:900px;visibility:hidden";
+    f.setAttribute("aria-hidden", "true");
+    f.src = "/ratorio/ro4/m/calcx.html" + (query ? "?" + query : "");
+    document.body.appendChild(f);
+    for (let i = 0; i < 120; i++) {
+      await sleep(250);
+      const w = f.contentWindow, reg = w && w._ratorioReg, job = f.contentDocument && f.contentDocument.querySelector("#OBJID_SELECT_JOB");
+      if (reg && reg.calcCoreFromModel && reg.extractModelFromDom && job && job.options.length > 5 && (!query || +job.value > 0 || i > 40)) { ENG.reg = reg; break; }
+    }
+    if (!ENG.reg) throw new Error("計算係(ラトリオ)を起動できませんでした");
+    await sleep(query ? 1200 : 300);
+    const w = f.contentWindow;
+    ENG.state = await w.eval('import("/ratorio/engine/runtime/roro-state.js")');
+    // 支援・アイテムの欄は「欄を開いている」印(n_Skill1/4/7/8SW)が立っているときだけ、model から計算に流し込まれる。
+    // 計算の間だけ印を立てる(engCalc)。たたんだ欄の値は skillstate.js の配列に入っている(engFullModel で読む)
+    ENG.sw = await Promise.all(["BuffJobSpecificSelf.js:setN_Skill1SW:n_Skill1SW", "BuffGuildAndGospel.js:setN_Skill4SW:n_Skill4SW", "BuffItemAndFood.js:setN_Skill7SW:n_Skill7SW", "BuffOtherCategory.js:setN_Skill8SW:n_Skill8SW"]
+      .map(async (x) => { const [f, set, get] = x.split(":"), m = await w.eval(`import("/ratorio/engine/ui/${f}")`); return { m, set, get }; }));
+    ENG.skill = await w.eval('import("/ratorio/engine/skill/skillstate.js")');
+    ENG.hm = await w.eval('import("/ratorio/engine/chara/hmjob.js")');
+    ENG.items = (await w.eval('import("/ratorio/engine/equip/item.dat.js")')).ItemObjNew;
+    ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
+    ENG.ready = true;
+  })().catch((e) => { ENG.err = e.message; }).finally(() => { ENG.loading = null; });
+  return ENG.loading;
+}
+function engCalc(model) {                 // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計}
+  const before = ENG.sw.map((x) => x.m[x.get]);
+  ENG.sw.forEach((x) => x.m[x.set](true));              // 計算の間だけ「欄を開いている」ことにする → model の支援・アイテムが必ず使われる
+  let r;
+  try { r = ENG.reg.calcCoreFromModel(JSON.parse(JSON.stringify(model))); }
+  finally { ENG.sw.forEach((x, i) => x.m[x.set](before[i])); }
+  const st = ENG.state, tot = {};
+  for (const k of ["STR", "AGI", "VIT", "INT", "DEX", "LUK"]) tot[k] = st["n_A_" + k];
+  const bonus = ENG.hm.g_bonusStatus || [];
+  ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { tot[k] = ((model.pureStatus || [])[6 + i] || 0) + (bonus[6 + i] || 0); });   // 特性ステータスは 素点 + 補正
+  return { c: r.charaData, core: r.coreOutput || {}, tot };
+}
+function engFullModel() {                // いまの計算係の状態を model に取り出す。たたんだ欄(支援・アイテム)の値も、配列から直接読んで入れる
+  const model = JSON.parse(JSON.stringify(ENG.reg.extractModelFromDom())), sk = ENG.skill;
+  const copy = (arr, len) => Array.from({ length: len }, (_, i) => { const v = arr[i]; return v === undefined || v === null ? 0 : (v === true ? true : v === false ? false : v); });
+  model.passiveSkill = Array.from(sk.n_A_PassSkill || []).map((v) => v ?? 0);
+  model.buff4 = copy(sk.n_A_PassSkill4 || [], 36);
+  model.buff7 = copy(sk.n_A_PassSkill7 || [], 53);
+  model.buff8 = copy(sk.n_A_PassSkill8 || [], 28);
+  return model;
+}
+async function engTemplate(jobId) {       // その職業のまっさらな model(装備なし)。職業を変えたときの下ごしらえはラトリオに任せる
+  const d = ENG.frame.contentDocument, sel = d.querySelector("#OBJID_SELECT_JOB");
+  sel.value = String(jobId); sel.dispatchEvent(new Event("change", { bubbles: true }));
+  await sleep(700);
+  return engFullModel();
+}
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null };
+const simcCur = () => (SIMC.chars || {})[SIMC.cur];
+async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
+function simcSave() {                     // 少しまとめてから保存
+  clearTimeout(SIMC.saveT);
+  SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model }) }); }, 600);
+}
+function simcSelect(id) { SIMC.cur = id; store.set("md_simchar", id); SIMC.res = null; }
+async function simcNew(jobId, name) {
+  SIMC.busy = "キャラを作っています…"; render();
+  await engInit();
+  const model = await engTemplate(jobId);
+  Object.assign(model.status, { baseLv: 200, jobLv: 60, str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1 });
+  const id = "c" + Date.now().toString(36);
+  SIMC.chars[id] = { name: name || "新しいキャラ", model };
+  simcSelect(id); simcSave(); SIMC.busy = ""; render();
+}
+async function simcImportUrl(text) {
+  const q = String(text).trim().replace(/^.*\?/, "");
+  if (!/^[A-Za-z0-9_\-=%.]{20,}$/.test(q)) { SIMC.msg = "ラトリオの保存URL（…calcx.html?〇〇）を貼り付けてください。"; render(); return; }
+  SIMC.busy = "保存URL を読み込んでいます…"; SIMC.msg = ""; render();
+  await engInit(q);
+  if (ENG.ready) {
+    const model = engFullModel();
+    const job = (ENG.jobs.find(([v]) => String(v) === String(model.status.jobId)) || [0, "キャラ"])[1];
+    const id = "c" + Date.now().toString(36);
+    SIMC.chars[id] = { name: `${job} Lv${model.status.baseLv}（URLから）`, model };
+    simcSelect(id); simcSave();
+  }
+  SIMC.busy = ""; render();
+}
+// 結果の表(ラトリオのステータス欄に近い並び)
+function simcResultHtml(m, r) {
+  const c = r.c, n = (v, f = 0) => v === null || v === undefined || Number.isNaN(v) ? "-" : Number(v).toLocaleString("ja-JP", { maximumFractionDigits: f });
+  const castP = (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), aspd = c[37];
+  const row = (l, v, note = "") => `<tr><td>${l}</td><td class="v">${v}</td><td class="muted">${note}</td></tr>`;
+  return `<table>
+    ${row("最大HP", n(c[23]))}${row("最大SP", n(c[24]))}
+    ${row("ATK", `${n(c[25])} + ${n(c[26])}`)}${row("MATK", `${n(c[27])} + ${n(c[28])}`)}
+    ${row("DEF", `${n(c[29])} + ${n(c[30])}`)}${row("MDEF", `${n(c[31])} + ${n(c[32])}`)}
+    ${row("HIT", n(c[33]))}${row("FLEE", n(c[34]))}${row("完全回避", n(c[36], 1))}${row("クリティカル", n(c[35], 1))}
+    ${row("ASPD", `<span class="${aspd >= 193 ? "good" : ""}">${n(aspd, 1)}</span>`, aspd >= 193 ? "193 に届いています" : aspd ? `193 まであと ${n(193 - aspd, 1)}` : "")}
+    ${row("詠唱の値（DEX×2+INT）", `<span class="${castP >= 530 ? "good" : ""}">${n(castP)}</span>`, castP >= 530 ? "変動詠唱なし（530 以上）" : `変動詠唱なしまで あと ${n(530 - castP)}`)}
+    ${row("変動詠唱の短縮", n(r.core.n_CastCutForDisp) + "%")}${row("固定詠唱の短縮", n(c[41]) + "%")}
+    ${row("スキルディレイの短縮", n(r.core.delayDownForDisp) + "%")}
+    ${row("HP回復 / SP回復", `${n(c[38])} / ${n(c[39])}`)}</table>`;
+}
+const SIMC_REGIONS = [[0, "右手"], [1, "左手(武器)"], [2, "兜上段"], [3, "兜中段"], [4, "兜下段"], [5, "盾"], [6, "鎧"], [7, "肩にかける物"], [8, "靴"], [9, "アクセサリー(1)"], [10, "アクセサリー(2)"]];
+const SIMC_SHADOW = [[14, "シャドウ武器"], [15, "シャドウ盾"], [19, "シャドウ鎧"], [21, "シャドウ靴"], [22, "シャドウアクセ(右)"], [23, "シャドウアクセ(左)"]];
+const SIMC_REFINE = { 0: ["weapon", "atkPlus"], 2: ["defPlus", "head"], 5: ["defPlus", "shield"], 6: ["defPlus", "body"], 7: ["defPlus", "shoulder"], 8: ["defPlus", "shoes"] };
+function simcEquipHtml(m) {
+  const nameOf = (id) => { const it = id && ENG.items && ENG.items[id]; return it ? it[8] : ""; };
+  const line = (label, id, refine) => { const nm = nameOf(id); return nm && !/装備なし|^（なし）$|^なし$/.test(nm) ? `<tr><td class="muted">${label}</td><td>${refine ? `+${refine} ` : ""}${esc(nm)}</td></tr>` : `<tr><td class="muted">${label}</td><td class="muted">-</td></tr>`; };
+  let h = `<table>` + SIMC_REGIONS.map(([i, l]) => { const rf = SIMC_REFINE[i]; return line(l, (m.equip || [])[i], rf ? (m[rf[0]] || {})[rf[1]] : 0); }).join("");
+  const sh = m.shadowEquip || {};
+  h += SIMC_SHADOW.map(([i, l]) => line(l, (sh.itemId || [])[i], (sh.refined || [])[i])).join("") + `</table>`;
+  return h;
+}
+function renderSimChara() {
+  if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">キャラ・装備のシミュレーターは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
+  if (!RAT) { $("#view").innerHTML = simNav() + `<div class="panel empty">確認中…</div>`; bindSimNav(); ratStatus().then(render); return; }
+  if (!RAT.installed) { $("#view").innerHTML = simNav() + `<div class="panel empty">このシミュレーターは、ROラトリオHub のデータと計算を使います。<br>先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
+  if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
+  const ch = simcCur(), ids = Object.keys(SIMC.chars);
+  let h = simNav() + `<div class="panel simbox"><div class="opts">
+      <label>キャラ <select id="sccsel">${ids.length ? ids.map((id) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${esc(SIMC.chars[id].name)}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
+      ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>` : ""}
+      <button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>新しく作る</button>
+      <button class="ghost" id="sccurl">保存URLから読み込む</button>
+      ${ch ? `<button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
+      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…") : esc(SIMC.msg)}</span></div></div>`;
+  if (!ch) {
+    h += `<div class="panel empty">「新しく作る」で職業を選んで1から作るか、「保存URLから読み込む」でラトリオの保存URL を読み込めます。<br>作ったキャラは、この PC に保存されます。</div>`;
+  } else if (!ENG.ready) {
+    h += `<div class="panel empty">計算係（ROラトリオHub）を起動しています…</div>`;
+  } else {
+    const m = ch.model;
+    if (!SIMC.res) { try { SIMC.res = engCalc(m); } catch (e) { SIMC.res = null; SIMC.msg = "計算できませんでした: " + e.message; } }
+    const r = SIMC.res || { c: [], core: {}, tot: {} };
+    const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
+    const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
+    const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
+    h += `<div class="simc"><div><div class="panel"><h3>基本ステータス</h3><table>
+          <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
+          <tr><td>BaseLv / JobLv</td><td><input type="number" min="1" max="300" data-st="baseLv" value="${m.status.baseLv ?? 1}"> / <input type="number" min="1" max="100" data-st="jobLv" value="${m.status.jobLv ?? 1}"></td></tr>
+          ${stat("STR", "str")}${stat("AGI", "agi")}${stat("VIT", "vit")}${stat("INT", "int")}${stat("DEX", "dex")}${stat("LUK", "luk")}</table></div>
+        <div class="panel" style="margin-top:10px"><h3>特性ステータス</h3><table>
+          ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table></div></div>
+      <div><div class="panel"><h3>ステータス（計算結果）</h3><div id="sccres">${simcResultHtml(m, r)}</div></div>
+        <div class="panel" style="margin-top:10px"><h3>装備 <span class="muted" style="font-weight:400">（いまは見るだけ。プルダウンでの編集は次の版で）</span></h3>${simcEquipHtml(m)}</div></div></div>
+      <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
+  }
+  $("#view").innerHTML = h;
+  bindSimNav();
+  const g = (id) => $("#" + id);
+  if (g("sccsel")) g("sccsel").onchange = (e) => { simcSelect(e.target.value); render(); };
+  if (g("sccname")) g("sccname").onchange = (e) => { ch.name = e.target.value.trim() || "キャラ"; simcSave(); e.target.blur(); render(); };
+  if (g("sccnew")) g("sccnew").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, [{ cap: "職業を選ぶ" }].concat(ENG.jobs.slice().reverse().slice(0, 40).map(([v, t]) => ({ label: t, act: () => simcNew(v, t) })))); };
+  if (g("sccurl")) g("sccurl").onclick = () => { const v = prompt("ラトリオの保存URL を貼り付けてください（https://…/calcx.html?〇〇）"); if (v) simcImportUrl(v); };
+  if (g("sccdup")) g("sccdup").onclick = () => { const id = "c" + Date.now().toString(36); SIMC.chars[id] = { name: ch.name + " のコピー", model: JSON.parse(JSON.stringify(ch.model)) }; simcSelect(id); simcSave(); render(); };
+  if (g("sccdel")) g("sccdel").onclick = async (e) => {
+    if (e.target.dataset.ok !== "1") { e.target.dataset.ok = "1"; e.target.textContent = "本当に消す？"; return; }
+    await fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, delete: 1 }) });
+    delete SIMC.chars[SIMC.cur]; simcSelect(Object.keys(SIMC.chars)[0] || ""); render();
+  };
+  if (ch && ENG.ready) {
+    // 値を変えたら、その場で計算し直して結果だけ描きかえる(入力中の欄はそのまま)
+    const recalc = () => {
+      try { SIMC.res = engCalc(ch.model); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
+      g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res);
+      const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
+      ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
+      $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });
+      simcSave();
+    };
+    $("#view").querySelectorAll("[data-st]").forEach((el) => el.oninput = () => { const v = Math.max(1, Math.round(+el.value || 1)); ch.model.status[el.dataset.st] = v; recalc(); });
+    $("#view").querySelectorAll("[data-pure]").forEach((el) => el.oninput = () => { ch.model.pureStatus[+el.dataset.pure] = Math.max(0, Math.round(+el.value || 0)); recalc(); });
+    if (g("sccjob")) g("sccjob").onchange = async (e) => {
+      // 職業を変える: その職業のまっさらな model を作り、Lv とステータスだけ引き継ぐ(装備・スキルは職業ごとに違うので引き継がない)
+      SIMC.busy = "職業を変えています…"; render();
+      const old = ch.model.status, model = await engTemplate(e.target.value);
+      Object.assign(model.status, { baseLv: old.baseLv, jobLv: old.jobLv, str: old.str, agi: old.agi, vit: old.vit, int: old.int, dex: old.dex, luk: old.luk });
+      ch.model = model; SIMC.res = null; SIMC.busy = ""; simcSave(); render();
+    };
+  }
+}
+
 // ---------- 計算機: 被ダメの検証 ----------
 // 「あのときの攻撃は、この装備なら耐えられたか」。実際に受けたダメージと、そのときの装備から逆算する:
 //   軽減前のダメージ = (受けたダメージ + 引かれる分) ÷ そのときの軽減   →   別の装備の軽減をかけ直す
@@ -1081,11 +1295,11 @@ function simStages(atk, prof, st, buff) {
   if (buff.extra) out.push(["そのほかの軽減", pct(buff.extra), `${buff.extra}%`]);
   return { list: out, mult: out.reduce((a, x) => a * x[1], 1), sub };
 }
-function renderSim(chars) {
+function renderSimDmg(chars) {
   const EQ = DATA.equip || {}, E = EQ.chars || {}, S = EQ.sets || {}, SH = EQ.shadows || {};
   const names = chars.filter((c) => E[c] || Object.keys((DATA.chars[c] || {}).dmg || {}).length);
   if (!names.length || !Object.keys(S).length) {
-    $("#view").innerHTML = `<div class="panel empty">被ダメの検証には、装備セットの記録が要ります。<br>メイン装備10か所をつけてログインすると装備セットが記録され、ここで「あの攻撃は別の装備なら耐えられたか」を試せます。</div>`;
+    $("#view").innerHTML = simNav() + `<div class="panel empty">被ダメの検証には、装備セットの記録が要ります。<br>メイン装備10か所をつけてログインすると装備セットが記録され、ここで「あの攻撃は別の装備なら耐えられたか」を試せます。</div>`;
     return;
   }
   if (!names.includes(SIM.char)) SIM.char = names.find((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length) || names[0];
@@ -1130,7 +1344,7 @@ function renderSim(chars) {
       <label>ダメージ減少スキル <select data-buff="${id}.cut">${selOpt(SIM_CUTS, b.cut)}</select></label>
       <label>そのほかの軽減 <input type="number" min="0" max="100" data-buff="${id}.extra" value="${b.extra || ""}" placeholder="0"> %</label></div>`;
   const setLabel = (id, sh) => `${S[id] ? tagChip(S[id]) : ""}${sh && SH[sh] ? tagChip(SH[sh]) : ""}`;
-  let h = `<div class="panel simbox"><div class="opts"><b>1. 攻撃を選ぶ</b>
+  let h = simNav() + `<div class="panel simbox"><div class="opts"><b>1. 攻撃を選ぶ</b>
       <label>キャラ <select id="simc">${selOpt(names.map((x) => [x, cn(x)]), c)}</select></label>
       <label><input type="checkbox" id="simman" ${SIM.manual ? "checked" : ""} ${mds.length ? "" : "disabled"}> 手で入れる</label></div>`;
   if (SIM.manual) {
@@ -1169,6 +1383,7 @@ function renderSim(chars) {
     </tbody></table></div>
     <p class="hint">受けたダメージ（${fmtN(baseDmg)}）と、そのときの装備の軽減から、軽減前のダメージ（約 ${fmtN(Math.round(raw))}）を逆算して、ほかの装備の軽減をかけ直しています。表の「×0.250」などは、その段階で残る割合です。耐性のデータは ROラトリオHub（jRO 準拠）から。<b>目安です</b>：セット効果・ランダムオプションの一部・条件つきの効果（精錬以外）・支援や料理は入っていません。DEF/MDEF・RES/MRES・最大HP は、その装備を最後に着ていたときの値です。判定は1回の攻撃（1ヒットぶんの合計）で見ています。属性耐性は上限95%で計算します。</p>`;
   $("#view").innerHTML = h;
+  bindSimNav();
   const on = (id, fn) => { const el = $("#" + id); if (el) el.onchange = (e) => { fn(e.target); render(); }; };
   on("simc", (t) => { SIM.char = t.value; SIM.sets = null; SIM.base = ""; SIM.key = ""; SIM.md = ""; });
   on("simman", (t) => { SIM.manual = t.checked; SIM.base = ""; });

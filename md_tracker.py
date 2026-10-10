@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.19.0"
+VERSION = "2.20.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -40,6 +40,7 @@ CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
+SIM_CHARS_FILE = os.path.join(HERE, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
 ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
 SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
 DMG_RAW_FILE = os.path.join(HERE, "被ダメ_確認用データ.json")   # 通信そのもの(形を確かめる用)
@@ -372,6 +373,8 @@ def start_live_server(core, lock, cfg):
                     return self._send(404, "not found", "text/plain")
                 with open(hit[0], "rb") as f:
                     return self._send(200, f.read(), hit[1])
+            if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
+                return self._send(200, json.dumps(load_sim_chars(), ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/ratorio":
                 st = RATORIO.check() if "check=1" in self.path else RATORIO.status()
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
@@ -420,6 +423,24 @@ def start_live_server(core, lock, cfg):
                         else:
                             CHARS.rename_set(str(b.get("char") or ""), str(b["sid"]), str(b.get("name") or ""))
                         save_chars()
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
+            if self.path.split("?")[0] == "/api/simchars" and self._local_only():
+                # 計算機のキャラを保存・削除: {id, name, model} / {id, delete: 1}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 400000)).decode("utf-8"))
+                    cid = str(b["id"])[:40]
+                    with lock:
+                        chars = load_sim_chars()
+                        if b.get("delete"):
+                            chars.pop(cid, None)
+                        else:
+                            if not isinstance(b.get("model"), dict):
+                                raise ValueError
+                            chars[cid] = {"name": str(b.get("name") or "")[:40], "model": b["model"], "updated": int(time.time())}
+                        _write_json(SIM_CHARS_FILE, chars)
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
@@ -654,6 +675,16 @@ def load_skill_fix():
     except Exception as e:
         print("[被ダメ] スキル名の手直しが読めませんでした:", e)
     return names, attrs
+
+
+def load_sim_chars():
+    """計算機のキャラ.json → {ID: {name, model, updated}}"""
+    try:
+        with open(SIM_CHARS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def load_item_fix():

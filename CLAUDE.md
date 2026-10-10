@@ -71,6 +71,15 @@
     → 書き出すときだけ、入力欄に model の内容を入れてから呼ぶ
   - charaData の添字(ASPD = 37、MaxHP = 5、MaxSP = 6 など)は `CHARA_DATA_INDEX_*` を見る。specData は装備効果の集計(451項目)
 - 本家の更新: フォークを更新 →「ラトリオを更新」で取り込むだけ(入口の名前と model の形が変わったときだけ Fox 側を直す)
+- **第1段階(v2.20.0)まで作った**: app.html の `ENG`(計算係。`engInit` / `engCalc` / `engTemplate` / `engFullModel`)と `SIMC`・`renderSimChara`(計算機タブの「キャラ・装備」)。
+  キャラは `計算機のキャラ.json`(`/api/simchars`。{ID: {name, model}})。新規(職業を選ぶ → ラトリオの画面で職業を変えて model を取り出す)・保存URL の読み込み・複製・削除、
+  職業/Lv/ステータス/特性の入力 → その場で再計算。装備は表示だけ
+- **落とし穴(隠れた状態)**: 支援・アイテムの欄(パッシブ A1・ギルド等 A4・アイテム/食品 A7・その他 A8)は、「欄を開いている」印 `n_Skill1/4/7/8SW` が立っているときだけ、
+  model から取り出し・流し込みされる。印が無いと計算係に前のキャラの値が残り、結果がずれる(AGI120 で ASPD 193 のはずが 191.9 になった)。
+  → `engCalc` は計算の間だけ `setN_Skill*SW(true)`、`engFullModel` はたたんだ欄の値を `engine/skill/skillstate.js` の `n_A_PassSkill/4/7/8` から直接読む
+- ステータスの合計は計算のあとの `roro-state.js` の `n_A_STR`…(基本6つ)。特性は `n_A_WIS` などが当てにならないので、素点 `pureStatus[6..11]` + `hmjob.js` の `g_bonusStatus[6..11]`
+- 残り: 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
+  4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
 
 ## 計算機(被ダメの検証。app.html の `renderSim`)
 - 記録から逆算: 軽減前 = (受けたダメージ + 引かれる分) ÷ 受けたときの軽減 → 別の装備セットの軽減をかけ直す
@@ -92,7 +101,7 @@
 
 ## 利用者のファイル(exe と同じフォルダ。git には入れない)
 - 利用者のローカルの置き場所: `C:\Users\fuso1\OneDrive\Desktop\Fox_MD_Tracker`(実測データはここ。読むだけ。`設定.json` は送信キーがあるので開かない)
-`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
+`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `計算機のキャラ.json` `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
 
 ## テストのしかた
 - `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`
