@@ -413,10 +413,13 @@ function render() {
     for (const G of groups) if (G.kind === kind) for (const c of chars) { const e = endOf(c, G); if (e !== null && e <= now) n++; }
     return n;
   };
-  $("#tabs").innerHTML = TABS.map(([k, l]) => {
+  const tord = SETTINGS.tabOrder || [], tabs = TABS.slice().sort((x, y) => ((tord.indexOf(x[0]) + 1) || 99) - ((tord.indexOf(y[0]) + 1) || 99));     // 並びは自分で変えられる(つかんで左右に動かす)
+  $("#tabs").innerHTML = tabs.map(([k, l]) => {
     const n = ["weekly", "daily"].includes(k) ? countOk(k) : 0;
-    return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}">${l}${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
+    return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}" title="つかんで左右に動かすと、並びを変えられます"><span class="grip tgrip">${l}</span>${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
   }).join("");
+  makeSortable($("#tabs"), "button[data-tab]", tabs.map((t) => t[0]), (arr) => { SETTINGS.tabOrder = arr; saveSettings(); render(); }, "x",
+    (row) => { if (TAB !== row.dataset.tab) { TAB = row.dataset.tab; store.set("md_tab", TAB); render(); } });      // 動かさずに離した = ふつうのクリック
   $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
   renderServerTabs();
   $("#gear").classList.toggle("on", GEAR_TABS.some(([k]) => k === TAB));
@@ -859,6 +862,18 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.tgrip{opacity:1;color:inherit;padding:0;cursor:pointer}
+.fgrip{opacity:.4;padding:0 2px;font-size:12px;letter-spacing:-2px}
+summary:hover .fgrip{opacity:1}
+.simc2 details>summary:has(.fgrip)::before{margin-left:0}
+button.drop-left,[data-ord].drop-left{box-shadow:inset 3px 0 0 var(--accent)}
+button.drop-right,[data-ord].drop-right{box-shadow:inset -3px 0 0 var(--accent)}
+[data-ord].drop-above{box-shadow:0 -3px 0 var(--accent)}
+[data-ord].drop-below{box-shadow:0 3px 0 var(--accent)}
+[data-ord].dragging,#tabs button.dragging{opacity:.5}
+details.slotc{border-color:var(--slotc)}
+.slotc .pk,.slotc .eqt select{border-color:var(--slotc)}
+.slotc.dirty .pk,.slotc.dirty .eqt select{border-style:dashed}
 .xrow{display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;width:100%}
 .xwho{font-weight:400;font-size:12px;color:var(--muted,#999);margin-left:4px}
 .settab:disabled{opacity:.45;cursor:default}
@@ -1696,7 +1711,7 @@ function simcSetTabs(m, shadow) {         // 装備スロット: 記号を押す
   const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0, nc = nowChar(), E = (DATA.equip || {}).chars || {};
   const hasNow = nc && (E[nc].now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
   return `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
-    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、反映・上書きなどを選べます）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
+    + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備に切りかえます。右クリックで、上書き・名前の変更など）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
     + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しいスロットに保存します">＋新しいスロットに保存</button>`
     + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `いまログインしている「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインすると使えます"}">いま着ている装備を反映</button>`
     + `<button class="settab more" data-wearmore="${sh}" title="これまでに着たことのある組み合わせ（履歴）から選んで、計算機に入れます">保存した装備から ▾</button>`;
@@ -2395,7 +2410,7 @@ function renderSimChara() {
     const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
     const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
-    h += `<div class="simc simc2">
+    h += `<div class="simc simc2" id="sccmain">
       <div class="simrow2">${simcFold("base", "基本ステータス", `<table>
           <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
           <tr><td>BaseLv / JobLv</td><td><input type="number" min="1" max="300" data-st="baseLv" value="${m.status.baseLv ?? 1}"> / <input type="number" min="1" max="100" data-st="jobLv" value="${m.status.jobLv ?? 1}"></td></tr>
@@ -2429,6 +2444,22 @@ function renderSimChara() {
     g("scpgo").onclick = simcImportPicked;
   }
   $("#view").querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+  if (g("sccmain") && ch) {
+    // 枠の並びは自分で変えられる(見出しの ⋮⋮ をつかんで上下に動かす)。基本ステータスと特性ステータスは、横並びのまま1つとして動く
+    const main = g("sccmain"), keyOf = (el) => (el.classList.contains("simrow2") ? "stats" : el.dataset.fold), ord = SETTINGS.simOrder || [];
+    const kids = [...main.children].map((el, i) => ({ el, i, k: keyOf(el) })).sort((x, y) => (((ord.indexOf(x.k) + 1) || 99) - ((ord.indexOf(y.k) + 1) || 99)) || x.i - y.i);
+    kids.forEach(({ el, k }) => {
+      el.dataset.ord = k; main.appendChild(el);
+      const sm = el.querySelector("summary");
+      if (sm) { sm.insertAdjacentHTML("afterbegin", `<span class="grip fgrip" title="つかんで上下に動かすと、枠の並びを変えられます">⋮⋮</span>`); sm.firstElementChild.onclick = (e) => e.preventDefault(); }
+    });
+    makeSortable(main, ":scope > [data-ord]", kids.map((x) => x.k), (arr) => { SETTINGS.simOrder = arr; saveSettings(); render(); }, "y");
+    // いま表示している装備が、どの装備スロットのものか: そのスロットの色を、枠と各ボックスの縁に出す(手で変えたあとは点線)
+    for (const [fold, shadow] of [["eq", false], ["sh", true]]) {
+      const el = main.querySelector(`details[data-fold="${fold}"]`), sid = shadow ? ch.model.foxShadow : ch.model.foxSet, st = ((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[sid];
+      if (el && st && st.tag) { el.classList.add("slotc"); el.classList.toggle("dirty", simcDirty(ch.model, shadow)); el.style.setProperty("--slotc", tagColor(st)); }
+    }
+  }
   if (g("sccnewslot")) g("sccnewslot").onclick = async () => {
     const v = prompt("新しいスロットの名前", "新しいスロット"); if (!v || !v.trim()) return;
     SIMC.busy = "新しいスロットを作っています…"; render();
@@ -2558,7 +2589,7 @@ function renderSimChara() {
     V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); });
     { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
-    const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」で置きかえます。\nいまの${part(shadow)}は、登録していなければ消えます。`, "置きかえる")) simcWearSet(sid, shadow); };
+    const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
     V.querySelectorAll("[data-slot]").forEach((el) => {
       const sid = el.dataset.slot, shadow = el.dataset.sh === "1", tag = el.textContent.replace("＊", ""), st = ((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[sid] || {};
       const menu = (x, y) => showCtx(x, y, [{ cap: `スロット「${tag}」 ${st.name || st.auto || ""}` },
@@ -2568,7 +2599,14 @@ function renderSimChara() {
         { label: "名前を変える", act: async () => { const v = prompt(`スロット「${tag}」の名前（空にすると自動の名前）`, st.name || ""); if (v !== null) { await postSet({ sid, name: v.trim() }); await load(); render(); } } },
         { label: "記号を変える", act: async () => { const v = prompt("新しい記号（8文字まで）", tag); if (v && v.trim()) { await postSet({ sid, tag: v.trim() }); await load(); render(); } } },
         { label: "登録を外す（履歴に戻す）", act: async () => { if (await askOnce("unreg", `スロット「${tag}」の登録を外します。\n装備の中身は履歴に残るので、あとでまた登録できます。`, "登録を外す")) { await postSet({ sid, unregister: 1 }); await load(); render(); } } }]);
-      el.onclick = (e) => { e.preventDefault(); const r = el.getBoundingClientRect(); menu(r.left, r.bottom + 4); };
+      // 押したら、そのスロットの装備に切りかえる。消えるもの(スロットに保存していない変更・どのスロットにも入れていない装備)があるときだけ確かめる
+      el.onclick = (e) => {
+        e.preventDefault();
+        const cur = shadow ? m.foxShadow : m.foxSet, dirty = simcDirty(m, shadow), linked = !!(((DATA.equip || {})[shadow ? "shadows" : "sets"] || {})[cur] || {}).tag;
+        const some = (shadow ? SIMC_SHADOW : SIMC_REGIONS).some(([r]) => !simcIsNone(r, simcItemAt(m, r)));
+        if (sid === cur && !dirty) return;
+        if (dirty || (!linked && some)) wearAsk(sid, shadow, tag); else simcWearSet(sid, shadow);
+      };
       el.oncontextmenu = (e) => { e.preventDefault(); menu(e.clientX, e.clientY); };
     });
     V.querySelectorAll("[data-simreg]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcRegister(el.dataset.simreg === "1", ""); });
