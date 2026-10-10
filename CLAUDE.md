@@ -110,7 +110,16 @@
     着ているセットは `model.foxSet / foxShadow`、着せたときの中身の印 `foxSetSig / foxShadowSig` と違えばタブに ＊(`simcDirty`)
   - 確認の窓は `askOnce(種類, 文, ボタン名)`(「次から確認しない」→ `SETTINGS.noAsk[種類]`。種類: wear / over / unreg)
   - 耐性の枠: `ENG_RKINDS`(7 ダメージ耐性・6 属性倍率・8 状態異常・9 新状態異常)。たたんだときの1行は `simcResistSum`(ラトリオの表の HTML を読んで、最高の耐性と 100% 以上の状態異常を出す)
-- 第3段階への利用者の注文: 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
+- **第3段階(v2.23.0)= 支援・アイテム・スキル**:
+  - 一覧は `engSchema(jobId)`(職業ごとに1回・`ENG.cache`): 計算係の職業をその職業にして、固有自己支援 A1(`A_skillN` → `passiveSkill`)・A4(`A4_SkillN` → `buff4`)・A7(`buff7`)・A8(`buff8`)の欄を
+    チェック(`OBJID_CHECK_A?_SKILL(_)SW`)+ `Click_*SW()` で開かせて入力欄を読む。他職の支援と状態異常は `CConfBase.targetArray[0〜4]`(`confIchizi/Nizi/Sanzi/Yozi/Debuff`)を
+    `BuildUpSelectArea(objRoot, true)` で開いて `confDataObj`(名前)と `OBJID_CONTROL_CONF_<番号>_ID_<添字>` を読む。習得スキルは `OBJID_SKILL_COLUMN_EXTRACT_CHECKBOX` を押して `OBJID_SELECT_LEARNED_SKILL_LEVEL_<添字>` → `learnedSkill`。読み終わったら全部たたむ
+  - 値: チェックは A系 = true/false、conf系 = 1/0(`simcBuffSet`)。選択肢が150を超えるもの(ステータス+ など)は数値入力にする
+  - 目的別のしぼり込みは自動: `simcTagKick` が1つずつオンにして計算し、変わった結果で a(ASPD)/c(詠唱・ディレイ)/f(火力)/d(耐久)/s(ステータス)を付ける。
+    ASPD が 193 に張りつくと差が出ないので AGI・DEX を 1 にした写しで調べる。結果は `md_simtags:<ラトリオの日付>:<職業>` に覚える(ブラウザ側)
+  - 計算係の今の職業は `ENG.state.n_A_JOB`(`#OBJID_SELECT_JOB` の value は当てにならない)
+  - まだ無いもの: 性能カスタマイズ(`confCustom*`)・時限効果(`timeItemConf`)・オートスペル、よく使う組み合わせの保存
+- 第3段階への利用者の注文(済): 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
   4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
 
