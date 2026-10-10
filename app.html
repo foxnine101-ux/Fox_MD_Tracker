@@ -55,6 +55,7 @@
   td.char { cursor: pointer; }
   td.char .ch-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 16px; line-height: 1.2; }
   .stag { color: #fff !important; font-weight: 700; }
+  .jobchip { display: inline-block; font-size: 10px; font-weight: 700; line-height: 1.5; padding: 0 5px; border-radius: 4px; color: #fff; margin-left: 4px; vertical-align: 1px; }
   .tabs .count { font-size: 12px; opacity: .85; margin-left: 4px; }
   .tablewrap { overflow-x: auto; }
   table { border-collapse: separate; border-spacing: 0; font-size: 14px; width: 100%; }
@@ -268,6 +269,7 @@ function renderServerTabs() {
 
 // ---------- 複数選択(Ctrl/Shift + クリック) ----------
 const SEL = { chars: new Set(), mds: new Set() };
+let SEL_GUARD = 0;        // なぞり終わり・並び替え終わりの時刻(その直後のクリックでは選択を解除しない)
 const multiKey = (e) => e.ctrlKey || e.metaKey || e.shiftKey;
 function hideChars(keys) {
   const s = new Set(SETTINGS.hiddenChars || []);
@@ -362,7 +364,7 @@ function makeSortable(box, rowSel, names, onDone = saveCharOrder, axis = "y", on
         document.removeEventListener("pointercancel", onUp);
         clear(); row.classList.remove("dragging");
         document.body.classList.remove("is-dragging");
-        DRAGGING = false;
+        DRAGGING = false; SEL_GUARD = Date.now();
         if (!moved) { if (onTap) onTap(row); return; }       // 動かさずに離した = クリック
         if (to === from) return;
         const arr = names.slice(); const [x] = arr.splice(from, 1); arr.splice(to, 0, x);
@@ -490,6 +492,31 @@ function hiddenMenu(hidden) {
     ...(hidden.length > 1 ? ["-", { label: "全部表示に戻す", act: () => { for (const G of hidden) delete (SETTINGS.md[G.name] || {}).kind; saveSettings(); render(); } }] : [])];
 }
 
+// 職業の略称と色(衣装のイメージ)。略称は EM・AM・DK など、よく使われる書き方。表に無い職業は、名前の頭2文字と灰色
+const JOB_ABBR = {
+  // 4次職
+  "ドラゴンナイト": ["DK", "#c92a2a"], "インペリアルガード": ["IG", "#c99a06"], "アークメイジ": ["AM", "#7048e8"], "エレメンタルマスター": ["EM", "#0c8599"],
+  "ウィンドホーク": ["WH", "#1c7ed6"], "トルバドゥール": ["TB", "#e8590c"], "トルヴェール": ["TV", "#f06595"], "カーディナル": ["CD", "#d6336c"],
+  "インクイジター": ["IQ", "#364fc7"], "シャドウクロス": ["SX", "#862e9c"], "アビスチェイサー": ["ABC", "#087f5b"], "マイスター": ["MT", "#d9480f"], "バイオロ": ["BO", "#5c940d"],
+  // 3次職
+  "ルーンナイト": ["RK", "#c92a2a"], "ロイヤルガード": ["RG", "#c99a06"], "ウォーロック": ["WL", "#7048e8"], "ソーサラー": ["SO", "#0c8599"],
+  "レンジャー": ["RA", "#1c7ed6"], "ミンストレル": ["MI", "#e8590c"], "ワンダラー": ["WA", "#f06595"], "アークビショップ": ["AB", "#d6336c"],
+  "修羅": ["修羅", "#364fc7"], "ギロチンクロス": ["GX", "#862e9c"], "シャドウチェイサー": ["SC", "#087f5b"], "メカニック": ["MC", "#d9480f"], "ジェネティック": ["GN", "#5c940d"],
+  // 特殊職
+  "天帝": ["天帝", "#f08c00"], "星帝": ["星帝", "#f08c00"], "ソウルアセティック": ["SA", "#5f3dc4"], "ソウルリーパー": ["SR", "#5f3dc4"],
+  "蜃気楼": ["蜃", "#1864ab"], "影狼": ["影狼", "#1864ab"], "不知火": ["不", "#e64980"], "朧": ["朧", "#e64980"],
+  "ナイトウォッチ": ["NW", "#495057"], "リベリオン": ["RB", "#495057"], "ハイパーノービス": ["HN", "#a0662b"], "拡張スーパーノービス": ["SN", "#a0662b"], "スーパーノービス": ["SN", "#a0662b"],
+  "スピリットハンドラー": ["SH", "#37b24d"], "サモナー": ["SM", "#37b24d"], "アリテア": ["AL", "#1098ad"], "カルノス": ["KN", "#1098ad"], "ドルイド": ["DR", "#1098ad"],
+};
+function jobChip(job) {
+  if (!job || /^職業\d+$/.test(job)) return "";
+  const [ab, col] = JOB_ABBR[job] || [job.slice(0, 2), "#868e96"];
+  return `<span class="jobchip" style="background:${col}" title="${esc(job)}">${esc(ab)}</span>`;
+}
+function charJob(c) {            // そのキャラの職業名(わかるとき)
+  const info = DATA.chars[c] || {}, st = ((((DATA.equip || {}).chars || {})[c]) || {}).status || {};
+  return (st.jobName && !/^職業/.test(st.jobName) ? st.jobName : info.jobName) || st.jobName || "";
+}
 function charLvText(c) {        // 「230/65」(Base/Job)。わからない方は「-」
   const info = DATA.chars[c] || {}, st = ((((DATA.equip || {}).chars || {})[c]) || {}).status || {};
   const lv = st.lv ?? info.lv, jlv = st.jobLv ?? info.jobLv;
@@ -525,7 +552,7 @@ function renderGrid(groups, chars, now) {
   cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}（クリック・なぞって選択。右クリックでメニュー）"><span class="grip mx-ico" title="つかんで左右に動かすと並び替え。クリックで選択">${iconImg(G.name)}</span><span class="mx-name">${esc(G.label)}</span></th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
-    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}<span class="ch-sub">${esc(charLvText(c))}</span></td>`;
+    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}<span class="ch-sub">${esc(charLvText(c))}${jobChip(charJob(c))}</span></td>`;
     cols.forEach((G, i) => {
       const e = endOf(c, G), ci = `data-ci="${i}"`;
       if (e === null) h += `<td class="cell none" ${ci}>ー</td>`;
@@ -543,7 +570,7 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの見出しをクリックするか、押したまま横になぞると、MDを選べます（もう一度で解除。Esc で全部解除）。選んで右クリックすると、まとめて隠す・分類を移すことができます。MDのアイコンは、つかんで左右に動かすと並び替え、クリックで選択です。耐性は、MDを右クリック →「耐性を見る」（耐性のカードをクリックするとここに戻ります）。マスをクリックすると、まだCT中のキャラがグレーになります（グレーの所やほかをクリックすると解除）。キャラ名をクリックするとキャラ詳細へ。キャラ名の左の ⋮⋮ をつかんで上下に動かすと並び替え、右クリックで隠す、Ctrl（または Shift）＋クリックで複数選択です。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの見出しをクリックするか、押したまま横になぞると、MDを選べます（もう一度で解除。見出し以外の所をクリックするか Esc で全部解除）。選んで右クリックすると、まとめて隠す・分類を移すことができます。MDのアイコンは、つかんで左右に動かすと並び替え、クリックで選択です。耐性は、MDを右クリック →「耐性を見る」（耐性のカードをクリックするとここに戻ります）。マスをクリックすると、まだCT中のキャラがグレーになります（グレーの所やほかをクリックすると解除）。キャラ名をクリックするとキャラ詳細へ。キャラ名の左の ⋮⋮ をつかんで上下に動かすと並び替え、右クリックで隠す、Ctrl（または Shift）＋クリックで複数選択です。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
   const toggleMd = (n, on) => { (on ?? !SEL.mds.has(n)) ? SEL.mds.add(n) : SEL.mds.delete(n); };
@@ -605,7 +632,7 @@ function renderGrid(groups, chars, now) {
       const onMove = (m) => { const x = document.elementFromPoint(m.clientX, m.clientY)?.closest?.("thead th[data-g]"); if (x && SEL.mds.has(x.dataset.g) !== on) paint(x); };
       const onUp = () => {
         document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); document.removeEventListener("pointercancel", onUp);
-        DRAGGING = false; if (MX_LOCK) MX_LOCK = ""; render();
+        DRAGGING = false; SEL_GUARD = Date.now(); if (MX_LOCK) MX_LOCK = ""; render();
       };
       document.addEventListener("pointermove", onMove); document.addEventListener("pointerup", onUp); document.addEventListener("pointercancel", onUp);
     };
@@ -829,7 +856,10 @@ td.rzgo:hover{outline:2px solid rgba(59,91,219,.35);outline-offset:-2px}
 let RZ = { entries: resistEntries(RESIST_DEFAULT), err: "", t: 0, src: "", q: "", focus: "" };
 let MX_FOCUS = "", MX_LOCK = "", GRID_CLICK = null;
 // ページのどこをクリックしても受け取る(表の外のクリックで固定を解除するため)
-document.addEventListener("click", (ev) => { if (ev.target.isConnected && GRID_CLICK && ["weekly", "daily", "other"].includes(TAB) && !ev.target.closest("#tabs")) GRID_CLICK(ev); });
+document.addEventListener("click", (ev) => {
+  if (SEL.mds.size && Date.now() - SEL_GUARD > 300 && ["weekly", "daily", "other"].includes(TAB) && ev.target.isConnected && !ev.target.closest("thead th[data-g], #ctx")) { SEL.mds.clear(); render(); }   // MD の選択は、見出し以外をクリックで解除
+  if (ev.target.isConnected && GRID_CLICK && ["weekly", "daily", "other"].includes(TAB) && !ev.target.closest("#tabs")) GRID_CLICK(ev);
+});
 // 耐性のカード → そのMDがあるマトリクス(週次/デイリー/その他)の列へ戻る
 function goMatrix(rzName) {
   const E = RZ.entries.find((x) => x.name === rzName);
@@ -1284,7 +1314,7 @@ function renderChars(chars) {
     const lv = st.lv ?? info.lv, jlv = st.jobLv ?? info.jobLv, job = (st.jobName && !/^職業/.test(st.jobName) ? st.jobName : info.jobName) || st.jobName || "";
     const open = c === CH_OPEN;
     h += `<div class="panel ch-row"><div class="ch-h" data-ch="${esc(c)}"><span class="ch-name">${esc(cn(c))}</span>
-        <span class="ch-lv">Base <b>${lv ?? "-"}</b> / Job <b>${jlv ?? "-"}</b></span><span>${esc(job)}</span>
+        <span class="ch-lv">Base <b>${lv ?? "-"}</b> / Job <b>${jlv ?? "-"}</b></span><span>${jobChip(job)} ${esc(job)}</span>
         ${d.MaxHP !== undefined ? `<span class="muted">HP ${fmtN(d.MaxHP)}　SP ${fmtN(d.MaxSP)}</span>` : ""}
         <span style="flex:1"></span><span class="muted">${e && Object.keys(e.skills || {}).length ? `スキル ${Object.keys(e.skills).length}` : ""}　最終確認 ${info.seen ? when(info.seen) : "-"}　${open ? "▾" : "▸"}</span></div>
       ${open ? `<div class="ch-body">${e ? statusHtmlEq({ ...st, lv, jobLv: jlv, jobName: job }) + skillsHtml(e.skills) + charSetsHtml(c) : `<div class="muted" style="padding-top:8px">まだステータスを読めていません。このキャラでログインすると出ます。</div>`}</div>` : ""}</div>`;
