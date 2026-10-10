@@ -267,6 +267,24 @@ class DmgCore(object):
         for old in olds:
             self._rename_who(old, shown_name(old))
 
+    def rename_char(self, old, new):
+        """キャラの名前を付けかえる(サーバーを分ける前の記録を「名前@サーバー」へ引き継ぐ用)。"""
+        for d in (self.stats, self.gstats, self.ails, self.acts):
+            if old not in d:
+                continue
+            if new not in d:
+                d[new] = d.pop(old)
+            else:                                        # 両方あれば、新しい方に無い場所だけ足す
+                for where, v in d.pop(old).items():
+                    d[new].setdefault(where, v)
+        for r in self.recent:
+            if r.get("char") == old:
+                r["char"] = new
+        for s in self.sets.values():
+            if s.get("char") == old:
+                s["char"] = new
+        self.changed = True
+
     def raw_snapshot(self):
         return {"note": "被ダメの通信の確認用。形が合っているか確かめるときに使います(自動で上書きされます)",
                 "skill_names": len(self.skills), "fix": self.fix, "raw": self.raw}

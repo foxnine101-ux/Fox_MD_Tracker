@@ -168,6 +168,9 @@ class MDCore(object):
         self.log = log
         self.chars = {}         # 名前 -> {"quests": {qid: {...}}, "seen": 時刻, "gid": ...}
         self.gid_name = {}      # キャラ選択画面で見たGID -> 名前
+        self.qual = None        # (接続, 名前) -> 記録に使う名前(「名前@サーバー」)。md_tracker が入れる
+        self.on_rename = None   # (古い名前, 新しい名前): 古い記録を引き継いだとき(ほかの記録も付けかえる用)
+        self._claimed = set()   # 引き継ぎを確かめた名前
         self.selected = None    # 直前にキャラ選択で選んだキャラ名 (時刻, 名前)
         self.aid_name = {}      # AID -> いまそのAIDで遊んでいるキャラ名
         self.account_aids = set()  # キャラ選択サーバーが最初に送ってくる「自分のアカウントID」
@@ -272,6 +275,7 @@ class MDCore(object):
         if not found:
             return
         gid, name = found
+        name = self._q(key, name)
         if gid is not None and self.gid_name.get(gid) != name:
             self.gid_name[gid] = name
         w = self.wait_gid.get(side)
@@ -293,8 +297,42 @@ class MDCore(object):
         """その接続で遊んでいるキャラ名(わからなければ None)。"""
         c = self.conn.get(key)
         if c and c.get("name"):
-            return c["name"]
-        return self.currents.get(self._side(key))
+            return self._claim(c["name"])
+        return self._claim(self.currents.get(self._side(key)))
+
+    def _q(self, key, name):
+        """記録に使う名前(サーバーごとに分ける「名前@サーバー」)。"""
+        return self.qual(key, name) if self.qual and name else name
+
+    def _claim(self, name):
+        """「名前@サーバー」を初めて使うとき、サーバーを分ける前の「名前」だけの記録があれば引き継ぐ。"""
+        if not name or name in self._claimed:
+            return name
+        self._claimed.add(name)
+        plain = name.rsplit("@", 1)[0] if "@" in name else None
+        if plain and plain in self.chars and name not in self.chars:
+            self.rename_char(plain, name)
+            self.log("[サーバー] {} の記録を {} として引き継ぎました".format(plain, name))
+            if self.on_rename:
+                self.on_rename(plain, name)
+        return name
+
+    def rename_char(self, old, new):
+        """キャラの記録の名前を付けかえる(MDのCT・キャラの情報・入場履歴)。"""
+        if old in self.chars and new not in self.chars:
+            self.chars[new] = self.chars.pop(old)
+        if old in self.char_info:
+            info = self.char_info.pop(old)
+            info.update(self.char_info.get(new) or {})
+            self.char_info[new] = info
+        for h in self.history:
+            if h.get("char") == old:
+                h["char"] = new
+        for d in (self.gid_name, self.aid_name, self.currents):
+            for k, v in list(d.items()):
+                if v == old:
+                    d[k] = new
+        self.changed = True
 
     def snapshot(self):
         return {
@@ -375,7 +413,9 @@ class MDCore(object):
                 (gid,) = struct.unpack_from("<I", e, 0)
                 name = cstr(e[108:132])
                 if 0 < gid < 0x7FFFFFFF and good_name(name):
+                    name = self._q(key, name)
                     self.gid_name[gid] = name
+                    self._claim(name)          # キャラ選択画面に出たキャラは全員このサーバー → 前の記録を引き継ぐ
                     # 1人175byte: 職@84 BaseLv@92 (jROの実データで確認)
                     job, lv = struct.unpack_from("<HH", e, 84)[0], struct.unpack_from("<H", e, 92)[0]
                     info = self.char_info.setdefault(name, {})
@@ -420,6 +460,7 @@ class MDCore(object):
             if mine:
                 name = cstr(pkt[6:30])
                 if good_name(name):
+                    name = self._q(key, name)
                     c["aid"] = aid
                     self.currents[self._side(key)] = name
                     if aid in self.account_aids and self.char_info.get(name, {}).get("account") != aid:
@@ -536,7 +577,6 @@ class MDCore(object):
         import itertools
         name = rep["name"]
         lv = self.char_info.get(name, {}).get("lv")
-        unit = nyar_exp_for(lv)
         sure, unsure, seen = [], [], set()
         for qid in rep["dels"]:
             t = self.title(qid)
@@ -621,6 +661,7 @@ class MDCore(object):
                 self.changed = True
 
     def _set_name(self, key, c, name):
+        name = self._claim(name)
         if c.get("name") != name:
             self.log("[MD] この接続のキャラ: {} (AID {})".format(name, c.get("aid")))
         c["name"] = name

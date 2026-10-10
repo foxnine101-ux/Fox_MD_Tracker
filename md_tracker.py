@@ -29,7 +29,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.11.0"
+VERSION = "2.12.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -158,6 +158,14 @@ def load_servers():
             SERVERS.set_ignore(json.load(f).get("ignoreServers"))
     except (OSError, ValueError, AttributeError):
         pass
+
+
+def on_char_rename(old, new):
+    """サーバーを分ける前の「名前」だけの記録を「名前@サーバー」へ引き継いだ(装備・被ダメも付けかえる)。"""
+    if CHARS is not None:
+        CHARS.rename_char(old, new)
+    if DMG is not None:
+        DMG.rename_char(old, new)
 
 
 def save_servers():
@@ -710,7 +718,7 @@ def pick_iface():
 
 def ensure_scapy():
     try:
-        import scapy  # noqa
+        __import__("scapy")   # 入っているか試すだけ
         return True
     except ImportError:
         if getattr(sys, "frozen", False):
@@ -719,7 +727,7 @@ def ensure_scapy():
         import subprocess
         subprocess.call([sys.executable, "-m", "pip", "install", "--user", "scapy"])
         try:
-            import scapy  # noqa
+            __import__("scapy")   # 入っているか試すだけ
             return True
         except ImportError:
             return False
@@ -767,6 +775,8 @@ def main():
     load_state(core)
     load_accounts(core)
     load_servers()
+    core.qual = SERVERS.qualify               # キャラは「名前@サーバー」で記録する(サーバーごとに分ける)
+    core.on_rename = on_char_rename
     apply_nyar_fix(core)
     if char_core is not None:
         CHARS = char_core.CharCore(md=core, log=print)

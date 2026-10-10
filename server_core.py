@@ -32,11 +32,20 @@ class Servers(object):
 
     # ---------- 保存 ----------
     def snapshot(self):
-        return {"known": self.known}
+        return {"known": self.known, "addr": self.addr, "last": self.last}
 
     def restore(self, d):
         if d:
             self.known = d.get("known") or {}
+            self.addr = d.get("addr") or {}
+            self.last = d.get("last")
+
+    def qualify(self, key, name):
+        """記録に使うキャラ名: 「名前@サーバー」。サーバーがわからなければ名前のまま。"""
+        srv = self.conn.get(key)
+        if srv is None and key not in self.conn:
+            srv = self.new_conn(key)
+        return "{}@{}".format(name, srv) if srv and name else name
 
     def set_ignore(self, ips):
         new = set(str(x) for x in ips or [])
@@ -81,7 +90,10 @@ class Servers(object):
             return
         ip = ".".join(str(b) for b in pkt[22:26])
         (port,) = struct.unpack_from("<H", pkt, 26)
-        self.addr["{}:{}".format(ip, port)] = srv
+        a = "{}:{}".format(ip, port)
+        if self.addr.get(a) != srv:
+            self.addr[a] = srv
+            self.changed = True
 
     def ignored(self, key):
         srv = self.conn.get(key)

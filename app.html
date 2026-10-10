@@ -34,6 +34,10 @@
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .tabs button { background: var(--panel); color: var(--muted); border: 1px solid var(--line); padding: 7px 14px; }
   .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .srvtabs { display: flex; flex-wrap: wrap; gap: 4px; align-self: center; }
+  .srvtabs button { font-size: 12px; padding: 3px 11px; border-radius: 99px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); }
+  .srvtabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  td.char.sel, th.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--chip); }
   .tabs .count { font-size: 12px; opacity: .85; margin-left: 4px; }
   .tablewrap { overflow-x: auto; }
   table { border-collapse: separate; border-spacing: 0; font-size: 14px; width: 100%; }
@@ -118,6 +122,7 @@
     <header>
       <h1>Fox_MD_Tracker</h1>
       <span class="sub" id="upd"></span>
+      <span class="srvtabs" id="srvtabs"></span>
       <span style="flex:1"></span>
       <button class="ghost" id="reload">更新</button>
       <button class="ghost" id="logout">ログアウト</button>
@@ -199,14 +204,87 @@ function buildGroups() {
   return [...groups.values()];
 }
 
+// ---------- サーバー(ワールド) ----------
+// キャラは「名前@サーバー(キャラ選択サーバーのIP)」で記録している。画面では @ から後ろを外して出す。
+// @ の無いキャラは、サーバーを分ける前の記録(キャラ選択画面まで進むと、そのサーバーに振り分けられる)
+const SRV_RE = /@(\d+\.\d+\.\d+\.\d+)$/;
+const cn = (k) => String(k ?? "").replace(SRV_RE, "");
+const srvOf = (k) => (String(k ?? "").match(SRV_RE) || [])[1] || "";
+let SERVER = store.get("md_server") || "";
+function serverList() {        // 記録にあるサーバー(IPの順。"" = 未確認は最後)
+  const L = [...new Set(Object.keys(DATA.chars || {}).map(srvOf))];
+  return L.filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).concat(L.includes("") ? [""] : []);
+}
+function curServer() {
+  const L = serverList();
+  if (L.includes(SERVER)) return SERVER;
+  // 選んでいないときは、いちばん最近遊んだキャラのサーバー
+  let best = L[0] ?? "", t = -1;
+  for (const [k, v] of Object.entries(DATA.chars || {})) if ((v.seen || 0) > t) { t = v.seen || 0; best = srvOf(k); }
+  return best;
+}
+const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
+const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
+const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
+function renderServerTabs() {
+  const L = serverList(), cur = curServer();
+  const box = $("#srvtabs");
+  box.innerHTML = L.length > 1 ? L.map((ip) => {
+    const names = Object.keys(DATA.chars || {}).filter((k) => srvOf(k) === ip).map(cn);
+    const tip = ip ? `${ip}\n${names.join("、")}\n（右クリックで名前を付けられます）` : `サーバーを分ける前の記録\n${names.join("、")}\n（そのキャラでキャラ選択画面まで進むと、遊んでいるサーバーに振り分けられます）`;
+    return `<button data-wtab="${esc(ip)}" class="${ip === cur ? "on" : ""}" title="${esc(tip)}">${esc(serverLabel(ip))}</button>`;
+  }).join("") : "";
+  box.onclick = (e) => { const b = e.target.closest("button[data-wtab]"); if (!b) return; SERVER = b.dataset.wtab; store.set("md_server", SERVER); SEL.chars.clear(); render(); };
+  box.oncontextmenu = (e) => {
+    const b = e.target.closest("button[data-wtab]"); if (!b || !b.dataset.wtab) return;
+    e.preventDefault();
+    const ip = b.dataset.wtab;
+    showCtx(e.clientX, e.clientY, [{ cap: `${serverLabel(ip)}（${ip}）` }, { label: "名前を付ける…", act: () => {
+      const v = prompt(`このサーバーの名前（例: Breidablik）。空にすると「${"サーバー" + (serverList().filter(Boolean).indexOf(ip) + 1)}」`, (SETTINGS.serverNames || {})[ip] || "");
+      if (v === null) return;
+      SETTINGS.serverNames = SETTINGS.serverNames || {};
+      if (v.trim()) SETTINGS.serverNames[ip] = v.trim(); else delete SETTINGS.serverNames[ip];
+      saveSettings(); render();
+    } }]);
+  };
+}
+
+// ---------- 複数選択(Ctrl/Shift + クリック) ----------
+const SEL = { chars: new Set(), mds: new Set() };
+const multiKey = (e) => e.ctrlKey || e.metaKey || e.shiftKey;
+function hideChars(keys) {
+  const s = new Set(SETTINGS.hiddenChars || []);
+  keys.forEach((k) => s.add(k));
+  SETTINGS.hiddenChars = [...s]; SEL.chars.clear(); saveSettings(); render();
+}
+function showChars(keys) {
+  const s = new Set(SETTINGS.hiddenChars || []);
+  keys.forEach((k) => { s.delete(k); s.delete(cn(k)); });
+  SETTINGS.hiddenChars = [...s]; saveSettings(); render();
+}
+function charMenu(c) {
+  const many = SEL.chars.size > 1 && SEL.chars.has(c);
+  const keys = many ? [...SEL.chars] : [c];
+  const items = [{ cap: many ? `選んだ${keys.length}人（${keys.map(cn).join("、")}）` : cn(c) }];
+  items.push({ label: many ? `選んだ${keys.length}人を隠す` : "このキャラを隠す", act: () => hideChars(keys) });
+  if (SEL.chars.size) items.push("-", { label: "選択を解除", act: () => { SEL.chars.clear(); render(); } });
+  return items;
+}
+function hiddenCharMenu(keys) {
+  return [{ cap: "隠したキャラ（クリックで表示に戻す）" }, ...keys.map((k) => ({ label: cn(k), act: () => showChars([k]) })),
+    ...(keys.length > 1 ? ["-", { label: "全部表示に戻す", act: () => showChars(keys) }] : [])];
+}
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && (SEL.chars.size || SEL.mds.size)) { SEL.chars.clear(); SEL.mds.clear(); render(); } });
+
 function charNames() {
   const all = Object.keys(DATA.chars || {});
   const hidden = new Set(SETTINGS.hiddenChars || []);
   const order = SETTINGS.charOrder || [];
-  return all.filter((n) => !hidden.has(n))
-    .sort((a, b) => (idx(order, a) - idx(order, b)) || a.localeCompare(b, "ja"));
+  return all.filter((n) => !isHiddenChar(n, hidden) && inServer(n))
+    .sort((a, b) => (charIdx(order, a) - charIdx(order, b)) || cn(a).localeCompare(cn(b), "ja"));
 }
 const idx = (arr, v) => { const i = arr.indexOf(v); return i < 0 ? 1e9 : i; };
+const charIdx = (arr, k) => Math.min(idx(arr, k), idx(arr, cn(k)));    // 並び順も前の版の「名前」だけの印が効く
 
 // ---------- キャラの並び替え ----------
 // shown(画面に出ている並び)を新しい順にしたとき、隠しているキャラなども含めた全体の並びを作って保存する
@@ -316,6 +394,7 @@ function render() {
     return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}">${l}${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
   }).join("");
   $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
+  renderServerTabs();
   $("#view").onclick = null;
   if (TAB === "history") return renderHistory();
   if (TAB === "nyar") return renderNyar(groups, chars, now);
@@ -350,13 +429,32 @@ function setMd(name, patch) {
   md[name] = v; saveSettings(); render();
 }
 const KIND_L = { weekly: "週次", daily: "デイリー", other: "その他" };
-function mdMenu(G, canGo) {
+function setMdMany(names, patch) {
+  const md = SETTINGS.md = SETTINGS.md || {};
+  for (const n of names) {
+    const v = { ...(md[n] || {}), ...patch };
+    for (const k of Object.keys(v)) if (v[k] === undefined) delete v[k];
+    md[n] = v;
+  }
+  SEL.mds.clear(); saveSettings(); render();
+}
+function mdMenu(G, canGo, cols) {
+  if (SEL.mds.size > 1 && SEL.mds.has(G.name)) {
+    const names = [...SEL.mds];
+    const labels = names.map((n) => ((cols || []).find((x) => x.name === n) || { label: n }).label);
+    const items = [{ cap: `選んだ${names.length}個のMD（${labels.join("、")}）` }];
+    for (const k of ["weekly", "daily", "other"]) if (k !== G.kind) items.push({ label: `まとめて${KIND_L[k]}に移す`, act: () => setMdMany(names, { kind: k }) });
+    items.push({ label: `選んだ${names.length}個のMDを隠す`, act: () => setMdMany(names, { kind: "hide" }) });
+    items.push("-", { label: "選択を解除", act: () => { SEL.mds.clear(); render(); } });
+    return items;
+  }
   const items = [{ cap: G.label }];
   if (canGo) items.push({ label: "耐性を見る", act: () => goResist(G.name) });
   items.push({ label: "表示名を変える…", act: () => { const v = prompt(`「${G.name}」の表示名（空にすると元の名前）`, G.label === G.name ? "" : G.label); if (v !== null) setMd(G.name, { label: v.trim() || undefined }); } });
   items.push("-");
   for (const k of ["weekly", "daily", "other"]) if (k !== G.kind) items.push({ label: `${KIND_L[k]}に移す`, act: () => setMd(G.name, { kind: k }) });
   items.push({ label: "このMDを隠す", act: () => setMd(G.name, { kind: "hide" }) });
+  if (SEL.mds.size) items.push("-", { label: "選択を解除", act: () => { SEL.mds.clear(); render(); } });
   return items;
 }
 function hiddenMenu(hidden) {
@@ -366,15 +464,20 @@ function hiddenMenu(hidden) {
 
 function renderGrid(groups, chars, now) {
   const hidden = buildGroups().filter((G) => G.kind === "hide").sort((a, b) => a.label.localeCompare(b.label, "ja"));
-  const hiddenBtn = hidden.length ? ` <button class="ghost" id="mdhidden">隠したMD（${hidden.length}）</button>` : "";
+  const hcs = Object.keys(DATA.chars || {}).filter((k) => inServer(k) && isHiddenChar(k, new Set(SETTINGS.hiddenChars || [])));
+  const hiddenBtn = (hidden.length ? ` <button class="ghost" id="mdhidden">隠したMD（${hidden.length}）</button>` : "")
+    + (hcs.length ? ` <button class="ghost" id="charhidden">隠したキャラ（${hcs.length}）</button>` : "");
   groups.sort((a, b) => (a.order - b.order) || a.label.localeCompare(b.label, "ja"));
   if (!chars.length) {
-    $("#view").innerHTML = `<div class="panel empty">まだキャラの記録がありません。<br>PCでツールを動かしたままROにログインすると、ここに出ます。</div>`;
+    $("#view").innerHTML = `<div class="panel empty">まだキャラの記録がありません。<br>PCでツールを動かしたままROにログインすると、ここに出ます。${hiddenBtn}</div>`;
+    if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
+    if (hcs.length) $("#charhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenCharMenu(hcs)); };
     return;
   }
   if (!groups.length) {
     $("#view").innerHTML = `<div class="panel empty">この分類のMDはまだありません。<br>「設定」で分類を変えられます。${hiddenBtn}</div>`;
     if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
+    if (hcs.length) $("#charhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenCharMenu(hcs)); };
     return;
   }
   let cols = groups;
@@ -386,11 +489,11 @@ function renderGrid(groups, chars, now) {
   const canGo = new Map(cols.map((G) => [G.name, G.role === "md" || !!resistFind(RZ.entries, G.name)]));
   if (MX_FOCUS && !cols.some((G) => G.name === MX_FOCUS)) cols = groups;   // 戻ってきた列が隠れていたら全部出す
   // 見出し: アイコン(クリックでグレー表示を固定) + MD名(クリックで耐性へ)
-  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックで固定（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
+  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックで固定（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
     + (canGo.get(G.name) ? `<span class="mx-name rzgo" data-go="${esc(G.name)}" title="クリックで耐性を見る">${esc(G.label)}</span>` : `<span class="mx-name">${esc(G.label)}</span>`) + `</th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
-    h += `<tr data-char="${esc(c)}"><td class="char" title="${esc(c)}（左の ⋮⋮ をつかんで上下に動かすと並び替え）"><span class="grip">⋮⋮</span>${esc(c)}</td>`;
+    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}</td>`;
     cols.forEach((G, i) => {
       const e = endOf(c, G), ci = `data-ci="${i}"`;
       if (e === null) h += `<td class="cell none" ${ci}>ー</td>`;
@@ -408,7 +511,7 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが出ます。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが、キャラ名を右クリックすると隠すメニューが出ます。Ctrl（または Shift）を押しながらキャラ名・MD名をクリックすると複数選べて、右クリックでまとめて隠す・移すことができます（Esc で選択を解除）。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
   makeSortable($("#view").querySelector("thead tr"), "th[data-g]", cols.map((G) => G.name),
@@ -457,12 +560,30 @@ function renderGrid(groups, chars, now) {
     }
   }
   // MD名の右クリック → メニュー
-  $("#view").querySelectorAll("thead th[data-g]").forEach((th) => th.oncontextmenu = (e) => {
-    e.preventDefault();
-    const G = cols.find((x) => x.name === th.dataset.g);
-    if (G) showCtx(e.clientX, e.clientY, mdMenu(G, canGo.get(G.name)));
+  $("#view").querySelectorAll("thead th[data-g]").forEach((th) => {
+    th.oncontextmenu = (e) => {
+      e.preventDefault();
+      const G = cols.find((x) => x.name === th.dataset.g);
+      if (G) showCtx(e.clientX, e.clientY, mdMenu(G, canGo.get(G.name), cols));
+    };
+    // Ctrl/Shift+クリックで複数選択(ほかのクリックの動きより先に受け取る)
+    th.addEventListener("click", (e) => {
+      if (!multiKey(e)) return;
+      e.preventDefault(); e.stopPropagation();
+      const n = th.dataset.g; SEL.mds.has(n) ? SEL.mds.delete(n) : SEL.mds.add(n); render();
+    }, true);
+  });
+  $("#view").querySelectorAll("tbody tr[data-char] td.char").forEach((td) => {
+    const c = td.parentElement.dataset.char;
+    td.oncontextmenu = (e) => { e.preventDefault(); showCtx(e.clientX, e.clientY, charMenu(c)); };
+    td.addEventListener("click", (e) => {
+      if (!multiKey(e)) return;
+      e.preventDefault(); e.stopPropagation();
+      SEL.chars.has(c) ? SEL.chars.delete(c) : SEL.chars.add(c); render();
+    }, true);
   });
   if (hidden.length) $("#mdhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenMenu(hidden)); };
+  if (hcs.length) $("#charhidden").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, hiddenCharMenu(hcs)); };
   $("#onlyok").onchange = (ev) => { ONLY_OK = ev.target.checked; store.set("md_onlyok", ONLY_OK ? "1" : "0"); render(); };
 }
 
@@ -691,14 +812,14 @@ function renderResist(chars, now) {
   const at = chars.map((c) => [c, (DATA.chars[c] || {}).at]).filter(([, a]) => a && now - a.t < 6 * 3600).sort((a, b) => b[1].t - a[1].t);
   const ago = (t) => { const s = now - t; return s < 60 ? "いま" : s < 3600 ? `${Math.floor(s / 60)}分前` : `${Math.floor(s / 3600)}時間前`; };
   let h = `<div class="opts"><span>いまMDにいるキャラの必要耐性を自動で出します（ツールがMDの出入りを送ってきたとき更新・20秒ごとに確認）。内容は「MD耐性一覧」シートを編集すると反映されます。</span></div>`;
-  if (at.length) h += `<div class="rz-where">` + at.map(([c, a]) => `<span class="rz-chip ${a.map.includes("@") ? "md" : ""}">${esc(c)}：${esc(a.map.includes("@") ? (a.md || a.map) : a.map)} <span class="muted">${ago(a.t)}</span></span>`).join("") + `</div>`;
+  if (at.length) h += `<div class="rz-where">` + at.map(([c, a]) => `<span class="rz-chip ${a.map.includes("@") ? "md" : ""}">${esc(cn(c))}：${esc(a.map.includes("@") ? (a.md || a.map) : a.map)} <span class="muted">${ago(a.t)}</span></span>`).join("") + `</div>`;
   const inMd = at.filter(([, a]) => a.map.includes("@"));
   const shown = new Set();
   for (const [c, a] of inMd) {
     const E = resistMatch(RZ.entries, a.map, a.md);
     if (E && shown.has(E.name)) continue;
     if (E) { shown.add(E.name); h += resistCard(E, { hot: true, extra: `<span class="muted">← ${esc(inMd.filter(([, b]) => resistMatch(RZ.entries, b.map, b.md) === E).map(([n]) => n).join("・"))}</span>` }); }
-    else h += `<div class="rz-out"><b>${esc(c)}</b> がいるMD（${esc(a.md || a.map)}）はシートに見つかりませんでした。シートの「判定キー」に <b>${esc(a.map.replace(/^.*@/, ""))}</b>${a.md ? ` か <b>${esc(a.md)}</b>` : ""} を書き足してね。</div>`;
+    else h += `<div class="rz-out"><b>${esc(cn(c))}</b> がいるMD（${esc(a.md || a.map)}）はシートに見つかりませんでした。シートの「判定キー」に <b>${esc(a.map.replace(/^.*@/, ""))}</b>${a.md ? ` か <b>${esc(a.md)}</b>` : ""} を書き足してね。</div>`;
   }
   if (!inMd.length) h += `<div class="rz-out">${at.length ? "いまMDにいるキャラはいません。" : "まだ場所の記録がありません（Fox_MD_Trackerを起動したままMDに入ると出ます）。"}</div>`;
   if (RZ.err) h += `<div class="err" style="margin-bottom:10px">${esc(RZ.err)}</div>`;
@@ -793,14 +914,14 @@ function statusHtmlEq(st) {
 }
 function renderEquip(chars) {
   const E = DATA.equip || {};
-  const names = chars.filter((c) => E[c]).concat(Object.keys(E).filter((c) => !chars.includes(c) && !(SETTINGS.hiddenChars || []).includes(c)));
+  const names = chars.filter((c) => E[c]).concat(Object.keys(E).filter((c) => !chars.includes(c) && inServer(c) && !isHiddenChar(c, new Set(SETTINGS.hiddenChars || []))));
   if (!names.length) {
     $("#view").innerHTML = `<div class="panel empty">まだ装備の記録がありません。<br>Fox_MD_Tracker を起動したままキャラにログインすると、装備とステータスがここに出ます。</div>`;
     return;
   }
   if (!E[EQ_CHAR]) EQ_CHAR = names.find((c) => E[c].cur) || names[0];
   const e = E[EQ_CHAR], G = gearSets();
-  let h = `<div class="opts"><label>キャラ <select id="eqc">${names.map((c) => `<option ${c === EQ_CHAR ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div>`;
+  let h = `<div class="opts"><label>キャラ <select id="eqc">${names.map((c) => `<option value="${esc(c)}" ${c === EQ_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label></div>`;
   // いまの装備
   const cur = e.cur && e.sets[e.cur];
   h += `<h2>いまの装備</h2><div class="panel eq-box">`
@@ -898,7 +1019,7 @@ function dmgTable(W, showChars, limit) {
   for (const [k, v] of rows) {
     const [who, skill] = k.split("|");
     const [kd, el, tip] = rowKind(skill, v);
-    h += `<tr><td class="l">${esc(who)}${mobTag(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
+    h += `<tr><td class="l">${esc(who)}${mobTag(who)}</td><td class="l ${skill === "通常攻撃" ? "muted" : ""}">${esc(skill)}</td><td class="l">${kindTag(kd, tip)}</td><td class="l">${eleTag(el)}</td><td>${fmtN(v[0])}</td><td class="dm-max">${fmtN(v[2])}</td><td>${fmtN(Math.round(v[1] / v[0]))}</td><td>${fmtN(v[1])}</td>${showChars ? `<td class="l muted">${esc([...v[5]].map(cn).join("・"))}</td>` : ""}<td class="muted">${v[3] ? when(v[3]) : ""}</td></tr>`;
   }
   return h + `</tbody></table>`;
 }
@@ -937,10 +1058,10 @@ function renderDmg(chars, now) {
   const merged = dmgMerge(DMG_CHAR ? [DMG_CHAR] : withDmg, DMG_GEAR);
   const mds = Object.entries(merged).map(([w, W]) => [w, W, Math.max(...Object.values(W).map((v) => v[3]))]).sort((a, b) => b[2] - a[2]);
   if (DMG_MD && !merged[DMG_MD]) DMG_MD = "";
-  let h = `<div class="opts"><label>キャラ <select id="dmc"><option value="">すべて</option>${withDmg.map((c) => `<option ${c === DMG_CHAR ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+  let h = `<div class="opts"><label>キャラ <select id="dmc"><option value="">すべて</option>${withDmg.map((c) => `<option value="${esc(c)}" ${c === DMG_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
     ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter)).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(G[id].name ? G[id].name + "（" + gearText(G[id].p) + "）" : gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
-    ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(DMG_CHAR) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
+    ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(cn(DMG_CHAR)) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
     $("#view").innerHTML = h + skillFixHtml(); bindDmg(); return;
@@ -958,7 +1079,7 @@ function renderDmg(chars, now) {
   }
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(r.char)}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
@@ -1081,7 +1202,7 @@ function renderEvents(chars, now) {
       <span class="evmeta">${rows.length}クエスト・${cs.length}キャラ</span></summary>`;
     if (/ニャル様/.test(E.name)) h += `<p class="hint" style="margin:6px 12px">回数や報告の状況は「ニャル様」タブのほうが見やすいよ。</p>`;
     h += `<div class="tablewrap"><table><thead><tr><th class="char evq">クエスト</th><th>種類</th>`;
-    for (const c of cs) h += `<th title="${esc(c)}">${esc(c)}</th>`;
+    for (const c of cs) h += `<th title="${esc(cn(c))}">${esc(cn(c))}</th>`;
     h += `</tr></thead><tbody>`;
     for (const R of rows) {
       const short = R.title.startsWith(E.name) && R.title.length > E.name.length + 1 ? R.title.slice(E.name.length).replace(/^[\s　：:]+/, "") : R.title;
@@ -1183,7 +1304,7 @@ function renderNyar(groups, chars, now) {
   h += `<h2>キャラ別（1回あたりの Base経験値が多い順）</h2><div class="panel tablewrap"><table><thead><tr>
     <th class="char">キャラ</th><th>BaseLv</th><th>1回あたり</th><th>今週の報告</th><th>残りを全部使うと</th></tr></thead><tbody>`;
   for (const r of rows) {
-    h += `<tr><td class="char">${esc(r.c)}</td><td>${r.lv || "?"}</td>
+    h += `<tr><td class="char">${esc(cn(r.c))}</td><td>${r.lv || "?"}</td>
       <td>${r.e ? oku(r.e) : '<span class="muted">対象外(220未満)</span>'}</td>
       <td>${r.u}回${C[r.c].nyar && C[r.c].nyar.week === ws && C[r.c].nyar.official ? ' <span class="tag on" title="ニャル様の会話で確認">公式</span>' : ""}</td><td>${r.e ? "+" + oku(r.e * r.left) : "-"}</td></tr>`;
   }
@@ -1195,7 +1316,7 @@ function renderNyar(groups, chars, now) {
   const gByName = new Map(groups.map((G) => [norm(G.name), G]));
   const titles = DATA.titles || {};
   h += `<h2>対象ダンジョン（今週の状況）</h2><div class="panel tablewrap"><table><thead><tr><th class="l">ダンジョン</th><th>最大</th>`;
-  for (const c of showChars) h += `<th>${esc(c)}</th>`;
+  for (const c of showChars) h += `<th>${esc(cn(c))}</th>`;
   h += `<th class="l">内容</th></tr></thead><tbody>`;
   for (const [md, max, note] of NYAR.missions) {
     const key = norm(md);
@@ -1242,10 +1363,10 @@ function renderNyar(groups, chars, now) {
 }
 
 function renderHistory() {
-  const hs = [...(DATA.history || [])].reverse().slice(0, 150);
+  const hs = [...(DATA.history || [])].reverse().filter((x) => inServer(x.char)).slice(0, 150);
   if (!hs.length) { $("#view").innerHTML = `<div class="panel empty">まだ入場の記録がありません。</div>`; return; }
   let h = `<div class="panel tablewrap"><table class="hist"><thead><tr><th class="char">キャラ</th><th>日時</th><th>MD（内部名）</th><th>マップ</th></tr></thead><tbody>`;
-  for (const x of hs) h += `<tr><td class="char">${esc(x.char)}</td><td>${when(x.t)}</td><td>${esc(x.md || "")}</td><td class="muted">${esc(x.map)}</td></tr>`;
+  for (const x of hs) h += `<tr><td class="char">${esc(cn(x.char))}</td><td>${when(x.t)}</td><td>${esc(x.md || "")}</td><td class="muted">${esc(x.map)}</td></tr>`;
   $("#view").innerHTML = h + `</tbody></table></div>`;
 }
 
@@ -1275,16 +1396,16 @@ function renderSettings(groups) {
       <button class="ghost" data-sort="seen">最近ログインした順</button>
       <span class="muted">（⋮⋮ をつかんで上下に動かしても変えられます）</span></div>
     <div class="panel list" id="charlist">`;
-  const all = Object.keys(DATA.chars || {});
+  const all = Object.keys(DATA.chars || {}).filter(inServer);
   const order = SETTINGS.charOrder || [];
-  all.sort((a, b) => (idx(order, a) - idx(order, b)) || a.localeCompare(b, "ja"));
+  all.sort((a, b) => (charIdx(order, a) - charIdx(order, b)) || cn(a).localeCompare(cn(b), "ja"));
   const hidden = new Set(SETTINGS.hiddenChars || []);
   all.forEach((c, i) => {
     const seen = DATA.chars[c].seen;
-    h += `<div class="row" data-char="${esc(c)}"><span class="nm"><span class="grip" title="つかんで上下に動かすと並び替え">⋮⋮</span>${esc(c)} <span class="muted">最終確認 ${seen ? when(seen) : "-"}</span></span>
+    h += `<div class="row" data-char="${esc(c)}"><span class="nm"><span class="grip" title="つかんで上下に動かすと並び替え">⋮⋮</span>${esc(cn(c))} <span class="muted">最終確認 ${seen ? when(seen) : "-"}</span></span>
       <button class="ghost" data-up="${i}" ${i ? "" : "disabled"}>↑</button>
       <button class="ghost" data-down="${i}" ${i < all.length - 1 ? "" : "disabled"}>↓</button>
-      <label class="muted"><input type="checkbox" data-hide="${esc(c)}" ${hidden.has(c) ? "checked" : ""}> 隠す</label>
+      <label class="muted"><input type="checkbox" data-hide="${esc(c)}" ${isHiddenChar(c, hidden) ? "checked" : ""}> 隠す</label>
       <button class="ghost" data-del="${esc(c)}">記録を消す</button></div>`;
   });
   h += `</div>`;
@@ -1292,8 +1413,8 @@ function renderSettings(groups) {
   const SV = DATA.servers || [];
   if (typeof LOCAL !== "undefined" && LOCAL && SV.length) {
     const ign = new Set(SETTINGS.ignoreServers || []);
-    h += `<h2>サーバー</h2><div class="panel list">${SV.map((v, i) => `<div class="row"><span class="nm"><b>サーバー${i + 1}</b> <span class="muted">${esc(v.ip)}</span><br>
-      <span class="muted">${v.chars.length ? "遊んだキャラ: " + esc(v.chars.join("、")) : "キャラはまだわかりません"} ・ 最後 ${v.last ? when(v.last) : "-"}</span></span>
+    h += `<h2>サーバー</h2><div class="panel list">${SV.map((v) => `<div class="row"><span class="nm"><b>${esc(serverLabel(v.ip))}</b> <span class="muted">${esc(v.ip)}</span><br>
+      <span class="muted">${v.chars.length ? "遊んだキャラ: " + esc(v.chars.map(cn).join("、")) : "キャラはまだわかりません"} ・ 最後 ${v.last ? when(v.last) : "-"}</span></span>
       <label class="muted"><input type="checkbox" data-srv="${esc(v.ip)}" ${ign.has(v.ip) ? "checked" : ""}> 記録しない</label></div>`).join("")}</div>
       <p class="hint">キャラ選択のときにつないだサーバーごとに分けています。露店用のサーバーなど「記録しない」にしたサーバーは、そこで遊んでいる間の通信を読み飛ばします（MDのクールタイム・被ダメ・装備などに入りません）。すでに入った記録は消えないので、いらなければ上のキャラの「記録を消す」で消してください。</p>`;
   }
@@ -1349,7 +1470,7 @@ function renderSettings(groups) {
   });
   document.querySelectorAll("[data-hide]").forEach((el) => el.onchange = () => {
     const s = new Set(SETTINGS.hiddenChars || []);
-    el.checked ? s.add(el.dataset.hide) : s.delete(el.dataset.hide);
+    el.checked ? s.add(el.dataset.hide) : (s.delete(el.dataset.hide), s.delete(cn(el.dataset.hide)));
     SETTINGS.hiddenChars = [...s]; saveSettings();
   });
   document.querySelectorAll("[data-del]").forEach((el) => el.onclick = async () => {

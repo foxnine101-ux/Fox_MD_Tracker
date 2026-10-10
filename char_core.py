@@ -180,6 +180,18 @@ class CharCore(object):
         if data:
             self.chars = data.get("chars", {})
 
+    def rename_char(self, old, new):
+        """キャラの名前を付けかえる(サーバーを分ける前の記録を「名前@サーバー」へ引き継ぐ用)。"""
+        if old not in self.chars:
+            return
+        if new not in self.chars:
+            self.chars[new] = self.chars.pop(old)
+        else:                                            # 両方あれば、装備セットだけ引き継ぐ
+            o = self.chars.pop(old)
+            for sid, st in (o.get("sets") or {}).items():
+                self.chars[new].setdefault("sets", {}).setdefault(sid, st)
+        self.changed = True
+
     def gear_profile(self, name):
         """被ダメ用: いまの装備のまとめ。{"armor": 鎧の属性, "res": {属性: %}, "def": [..], "mdef": [..]}"""
         ch = self.chars.get(name)
@@ -439,7 +451,7 @@ class CharCore(object):
         idx, itid = struct.unpack_from("<HI", e, 0)
         loc, wear = struct.unpack_from("<II", e, 7)
         cards = struct.unpack_from("<4I", e, 15)
-        ocnt = e[39]
+        # e[39] はランダムOPの数(使わない。5件ぶん全部見て、番号が0のものは飛ばす)
         opts = []
         for k in range(5):
             oi, ov = struct.unpack_from("<HH", e, 40 + k * 5)
