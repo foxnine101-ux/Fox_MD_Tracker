@@ -34,9 +34,8 @@
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .tabs button { background: var(--panel); color: var(--muted); border: 1px solid var(--line); padding: 7px 14px; }
   .tabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
-  .srvtabs { display: flex; flex-wrap: wrap; gap: 4px; align-self: center; }
-  .srvtabs button { font-size: 12px; padding: 3px 11px; border-radius: 99px; background: var(--chip); color: var(--muted); border: 1px solid var(--line); }
-  .srvtabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .srvtabs { align-self: center; }
+  .srvtabs select { font-size: 13px; padding: 3px 8px; border-radius: 8px; }
   td.char.sel, th.sel { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--chip); }
   .tabs .count { font-size: 12px; opacity: .85; margin-left: 4px; }
   .tablewrap { overflow-x: auto; }
@@ -210,18 +209,21 @@ function buildGroups() {
 const SRV_RE = /@(\d+\.\d+\.\d+\.\d+)$/;
 const cn = (k) => String(k ?? "").replace(SRV_RE, "");
 const srvOf = (k) => (String(k ?? "").match(SRV_RE) || [])[1] || "";
-let SERVER = store.get("md_server") || "";
+let SERVER = "";            // プルダウンで選んだワールド(""= いちばん最近ログインしたワールド)。開き直すと最新に戻る
+let LATEST_SEEN = "";       // 前に見た「最新ログインのワールド」(変わったら、選んでいたワールドから最新に切りかえる)
 function serverList() {        // 記録にあるサーバー(IPの順。"" = 未確認は最後)
   const L = [...new Set(Object.keys(DATA.chars || {}).map(srvOf))];
   return L.filter(Boolean).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).concat(L.includes("") ? [""] : []);
 }
-function curServer() {
-  const L = serverList();
-  if (L.includes(SERVER)) return SERVER;
-  // 選んでいないときは、いちばん最近遊んだキャラのサーバー
-  let best = L[0] ?? "", t = -1;
+function latestServer() {      // いちばん最近ログインしたキャラのワールド
+  let best = serverList()[0] ?? "", t = -1;
   for (const [k, v] of Object.entries(DATA.chars || {})) if ((v.seen || 0) > t) { t = v.seen || 0; best = srvOf(k); }
   return best;
+}
+function curServer() {
+  const L = serverList(), latest = latestServer();
+  if (latest !== LATEST_SEEN) { LATEST_SEEN = latest; SERVER = ""; }     // 別のワールドにログインした → 最新に切りかえ
+  return SERVER && L.includes(SERVER) ? SERVER : latest;
 }
 // タブの名前: 自分で付けた名前 → ログインのときに届いたワールド名(この PC で見ているとき) → サーバー1, 2…
 const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).name || "";
@@ -229,26 +231,16 @@ const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
 function renderServerTabs() {
-  const L = serverList(), cur = curServer();
+  // 見出しのワールドのプルダウン。ふだんは最新ログインのワールド、選ぶとほかのワールドも見られる
+  const L = serverList(), cur = curServer(), latest = latestServer();
   const box = $("#srvtabs");
-  box.innerHTML = L.length > 1 ? L.map((ip) => {
-    const names = Object.keys(DATA.chars || {}).filter((k) => srvOf(k) === ip).map(cn);
-    const tip = ip ? `${ip}\n${names.join("、")}\n（右クリックで名前を付けられます）` : `サーバーを分ける前の記録\n${names.join("、")}\n（そのキャラでキャラ選択画面まで進むと、遊んでいるサーバーに振り分けられます）`;
-    return `<button data-wtab="${esc(ip)}" class="${ip === cur ? "on" : ""}" title="${esc(tip)}">${esc(serverLabel(ip))}</button>`;
-  }).join("") : "";
-  box.onclick = (e) => { const b = e.target.closest("button[data-wtab]"); if (!b) return; SERVER = b.dataset.wtab; store.set("md_server", SERVER); SEL.chars.clear(); render(); };
-  box.oncontextmenu = (e) => {
-    const b = e.target.closest("button[data-wtab]"); if (!b || !b.dataset.wtab) return;
-    e.preventDefault();
-    const ip = b.dataset.wtab;
-    showCtx(e.clientX, e.clientY, [{ cap: `${serverLabel(ip)}（${ip}）` }, { label: "名前を付ける…", act: () => {
-      const v = prompt(`このサーバーの名前（例: Breidablik）。空にすると「${worldName(ip) || "サーバー" + (serverList().filter(Boolean).indexOf(ip) + 1)}」`, (SETTINGS.serverNames || {})[ip] || "");
-      if (v === null) return;
-      SETTINGS.serverNames = SETTINGS.serverNames || {};
-      if (v.trim()) SETTINGS.serverNames[ip] = v.trim(); else delete SETTINGS.serverNames[ip];
-      saveSettings(); render();
-    } }]);
-  };
+  const h = L.length > 1 ? `<select id="srvsel" title="表示するワールド（ふだんは、いちばん最近ログインしたワールド）">${L.map((ip) => {
+    const n = Object.keys(DATA.chars || {}).filter((k) => srvOf(k) === ip).length;
+    return `<option value="${esc(ip)}" ${ip === cur ? "selected" : ""}>${esc(serverLabel(ip))}${ip === latest ? "（最新ログイン）" : ""}　${n}キャラ</option>`;
+  }).join("")}</select>` : "";
+  if (box.dataset.h !== h) { box.innerHTML = h; box.dataset.h = h; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
+  const sel = $("#srvsel");
+  if (sel) sel.onchange = () => { SERVER = sel.value === latest ? "" : sel.value; SEL.chars.clear(); render(); };
 }
 
 // ---------- 複数選択(Ctrl/Shift + クリック) ----------
@@ -381,7 +373,7 @@ const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.srvname")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -1411,10 +1403,11 @@ function renderSettings(groups) {
   const SV = DATA.servers || [];
   if (typeof LOCAL !== "undefined" && LOCAL && SV.length) {
     const ign = new Set(SETTINGS.ignoreServers || []);
-    h += `<h2>サーバー</h2><div class="panel list">${SV.map((v) => `<div class="row"><span class="nm"><b>${esc(serverLabel(v.ip))}</b> <span class="muted">${esc(v.ip)}</span><br>
+    h += `<h2>サーバー</h2><div class="panel list">${SV.map((v) => `<div class="row"><span class="nm"><b>${esc(serverLabel(v.ip))}</b> <span class="muted">${esc(v.ip)}</span>
+      <input class="lbl srvname" data-srvname="${esc(v.ip)}" style="width:140px;margin-left:6px" placeholder="${esc(worldName(v.ip) || "表示名")}" value="${esc((SETTINGS.serverNames || {})[v.ip] || "")}" title="表示名（空欄 = ログインのときに届いたワールド名）"><br>
       <span class="muted">${v.chars.length ? "遊んだキャラ: " + esc(v.chars.map(cn).join("、")) : "キャラはまだわかりません"} ・ 最後 ${v.last ? when(v.last) : "-"}</span></span>
       <label class="muted"><input type="checkbox" data-srv="${esc(v.ip)}" ${ign.has(v.ip) ? "checked" : ""}> 記録しない</label></div>`).join("")}</div>
-      <p class="hint">キャラ選択のときにつないだサーバーごとに分けています。露店用のサーバーなど「記録しない」にしたサーバーは、そこで遊んでいる間の通信を読み飛ばします（MDのクールタイム・被ダメ・装備などに入りません）。すでに入った記録は消えないので、いらなければ上のキャラの「記録を消す」で消してください。</p>`;
+      <p class="hint">キャラ選択のときにつないだサーバー（ワールド）ごとに分けています。名前は、ログインのときに届いたワールド名を使います（入力欄に書くと、その名前に変えられます）。露店用のサーバーなど「記録しない」にしたサーバーは、そこで遊んでいる間の通信を読み飛ばします（MDのクールタイム・被ダメ・装備などに入りません）。すでに入った記録は消えないので、いらなければ上のキャラの「記録を消す」で消してください。</p>`;
   }
   h += `<h2>耐性シート</h2><div class="panel list"><div class="row"><span class="nm">GoogleスプレッドシートのURL（空欄 = 最初に作った「MD耐性一覧」）</span>
     <input class="lbl" id="rzsheet" style="flex:1;min-width:240px" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(SETTINGS.resistSheet || "")}"></div></div>`;
@@ -1461,6 +1454,15 @@ function renderSettings(groups) {
   document.querySelectorAll("[data-sort]").forEach((el) => el.onclick = () => saveCharOrder(all.slice().sort(SORTS[el.dataset.sort])));
   document.querySelectorAll("[data-up]").forEach((el) => el.onclick = () => move(+el.dataset.up, -1));
   document.querySelectorAll("[data-down]").forEach((el) => el.onclick = () => move(+el.dataset.down, 1));
+  document.querySelectorAll("input[data-srvname]").forEach((el) => {
+    el.onchange = () => {
+      SETTINGS.serverNames = SETTINGS.serverNames || {};
+      const v = el.value.trim();
+      if (v) SETTINGS.serverNames[el.dataset.srvname] = v; else delete SETTINGS.serverNames[el.dataset.srvname];
+      saveSettings(); render();
+    };
+    el.onkeydown = (ev) => { if (ev.key === "Enter") el.blur(); };
+  });
   document.querySelectorAll("[data-srv]").forEach((el) => el.onchange = () => {
     const s = new Set(SETTINGS.ignoreServers || []);
     el.checked ? s.add(el.dataset.srv) : s.delete(el.dataset.srv);
