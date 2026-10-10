@@ -862,6 +862,8 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.slotmake{margin-top:8px}
+.slotmake button{font-size:14px;padding:6px 14px;font-weight:700}
 .tgrip{opacity:1;color:inherit;padding:0;cursor:pointer}
 .fgrip{opacity:.4;padding:0 2px;font-size:12px;letter-spacing:-2px}
 summary:hover .fgrip{opacity:1}
@@ -1178,7 +1180,7 @@ function statusHtmlEq(st) {
 // (本家が更新されたら「ラトリオを更新」で取り込むだけ)。キャラはこの PC に保存する(計算機のキャラ.json)
 let SIMV = store.get("md_simv") || "chara";
 function simNav() {
-  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラ・装備</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメの検証</button></div>`;
+  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button></div>`;
 }
 function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) => b.onclick = () => { SIMV = b.dataset.simv; store.set("md_simv", SIMV); render(); }); }
 function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : renderSimChara(); }
@@ -1779,9 +1781,7 @@ function simcPresetBar(m) {
 // 被ダメタブの「検証」: その攻撃を選んだ状態で、計算機の「被ダメの検証」の枠を開く
 function simcGoDmg(char, md, src, skill) {
   Object.assign(SIM, { char, md, key: src + "|" + skill, manual: false, base: "", eleOv: "" });
-  const st = simcFoldState(); st.dmg = true; store.set("md_simfold", JSON.stringify(st));
-  TAB = "sim"; store.set("md_tab", TAB); SIMV = "chara"; store.set("md_simv", SIMV); render();
-  setTimeout(() => { const el = $("#view").querySelector('details[data-fold="dmg"]'); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 300);
+  TAB = "sim"; store.set("md_tab", TAB); SIMV = "dmg"; store.set("md_simv", SIMV); render();     // 被ダメシミュ(サブタブ)を、その攻撃を選んだ状態で開く
 }
 document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-simgo]"); if (b) { try { simcGoDmg(...JSON.parse(b.dataset.simgo)); } catch (err) { console.warn(err); } } });
 function simcSchemaKick(m) {
@@ -1972,7 +1972,7 @@ function simcCmpIds(m) { const ok = new Set(simcSetList(m, false).tabs.map((x) =
 function simcCmpChips(m) {
   const tabs = simcSetList(m, false).tabs; if (!tabs.length) return "";
   const on = simcCmpIds(m);
-  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備を着た場合を横に並べます。一度に2つまで）">${esc(st.tag)}</button>`).join("")}</span>`;
+  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、いまの装備と、このスロットの装備を着た場合を、横に並べます）">${esc(st.tag)}</button>`).join("")}</span>`;
 }
 const simcCmpSig = (m) => simcCmpIds(m).join(",") + "|" + simcAllKinds().join(",") + "|" + JSON.stringify(m);
 function simcCmpKick(m) {
@@ -2356,13 +2356,13 @@ function renderSimChara() {
       <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
         <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
-        <button class="ghost" id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオから作る」で中身を入れられます">新しいスロットを作成</button>
-        <button class="ghost" id="sccnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">現在のキャラを反映</button>
         <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
         <button class="ghost" id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットを、最後に保存したときの内容に戻します">元に戻す</button>
-        <button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="このキャラを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button><button class="ghost" id="sccdel">消す</button>` : ""}
-      ${ch ? "" : `<button class="ghost" id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオから作る」で中身を入れられます">新しいスロットを作成</button>`}
+        <button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
+      <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオ」で中身を入れられます">＋ 新しいスロットを作成</button>
+        ${ch ? `<button id="sccnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">⟳ 現在のキャラを反映${nowChar() ? `（${esc(cn(nowChar()))}）` : ""}</button>` : ""}
+        ${nowChar() ? "" : `<span class="muted">「現在のキャラを反映」は、ゲームにログインすると使えます。</span>`}</div>
       ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「元に戻す」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「元に戻す」で戻せます。"}</div>` : ""}</div>`;
   {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
@@ -2379,8 +2379,9 @@ function renderSimChara() {
     }
     const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
-        <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button></div>`;
-    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "保存したキャラから作る", game, ` <span class="muted">（このツールが覚えている、ゲームのキャラ）</span>`, false)}${simcFold("mkrat", "ラトリオから作る", rat, ` <span class="muted">（1から作る・保存URL・セーブファイル）</span>`, false)}</div>`;
+        <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
+        ${ch ? `<button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="いまのスロットを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button>` : ""}</div>`;
+    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "保存したキャラから作る", game, ` <span class="muted">（このツールが覚えている、ゲームのキャラ）</span>`, false)}${simcFold("mkrat", "ラトリオ", rat, ` <span class="muted">（1から作る・保存URL やセーブファイルを読み込む・保存URL を書き出す）</span>`, false)}</div>`;
   }
   if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
     h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
@@ -2400,7 +2401,7 @@ function renderSimChara() {
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
-    h += `<div class="panel empty">上の「新しいスロットを作成」を押すか、「保存したキャラから作る」「ラトリオから作る」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">上の「新しいスロットを作成」を押すか、「保存したキャラから作る」「ラトリオ」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
     h += `<div class="panel empty">${ENG.err ? "計算係（ROラトリオHub）を起動できませんでした。上の「もう一度試す」を押してください。" : "計算係（ROラトリオHub）を起動しています…<br>初回は、ラトリオの部品を全部読み込むので1分ほどかかることがあります。2回目からは速くなります。"}</div>`;
   } else {
@@ -2422,7 +2423,6 @@ function renderSimChara() {
       ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（ASPD 193・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
       ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
-      ${simcFold("dmg", "被ダメの検証", `<div id="sccdmg">${simcDmgHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccdsum">${esc(simcDmgSum(m, r))}</span>${simcCmpChips(m)}`, false)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
@@ -2528,7 +2528,7 @@ function renderSimChara() {
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
     // 装備セットを並べて比べる
-    V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else { SIMC.cmp.push(sid); while (SIMC.cmp.length > 2) SIMC.cmp.shift(); } render(); });      // 比べるのは一度に2つまで(3つ目を選ぶと、いちばん古いものを外す)
+    V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else SIMC.cmp = [sid]; render(); });      // 並べるのは「いまの装備」+ 1つ(別のを選ぶと入れかわる)
     simcCmpFill(m); simcCmpKick(m);
     // ステ振りの相談
     if (g("soa")) {
@@ -2705,7 +2705,7 @@ function renderSimDmg(chars) {
   const EQ = DATA.equip || {}, E = EQ.chars || {}, S = EQ.sets || {}, SH = EQ.shadows || {};
   const names = chars.filter((c) => E[c] || Object.keys((DATA.chars[c] || {}).dmg || {}).length);
   if (!names.length || !Object.keys(S).length) {
-    $("#view").innerHTML = simNav() + `<div class="panel empty">被ダメの検証には、装備セットの記録が要ります。<br>メイン装備10か所をつけてログインすると装備セットが記録され、ここで「あの攻撃は別の装備なら耐えられたか」を試せます。</div>`;
+    $("#view").innerHTML = simNav() + `<div class="panel empty">被ダメシミュには、装備セットの記録が要ります。<br>メイン装備10か所をつけてログインすると装備セットが記録され、ここで「あの攻撃は別の装備なら耐えられたか」を試せます。</div>`;
     return;
   }
   if (!names.includes(SIM.char)) SIM.char = names.find((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length) || names[0];
@@ -3349,7 +3349,7 @@ function renderDmg(chars, now) {
   }
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th><th></th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td><td>${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost simgo" data-simgo="${esc(JSON.stringify([r.char, r.md, r.src, r.skill]))}" title="この攻撃を、計算機のキャラ（いまシミュレートしている装備・支援）で受けたらどうなるかを見ます">検証</button>` : ""}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td><td>${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost simgo" data-simgo="${esc(JSON.stringify([r.char, r.md, r.src, r.skill]))}" title="この攻撃を選んだ状態で、計算機の「被ダメシミュ」を開きます（別の装備なら耐えられたか）">検証</button>` : ""}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
