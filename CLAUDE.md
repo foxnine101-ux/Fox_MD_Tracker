@@ -18,7 +18,7 @@
 | `live.html` | 耐性リアルタイム(開発版だけ) |
 | `edition.py` | `DEV = True/False`。ビルドが書きかえて 公開版/開発版 を作る |
 | `skill_names.json` | スキル番号→名前(ラトリオ) |
-| `skill_info.json` | スキル番号→[種類,属性,射程,印]。`tools/make_skill_info.py`(rAthena skill_db + `JRO_FIX`) |
+| `skill_info.json` | スキル番号→[種類,属性,射程,印]。`tools/make_skill_info.py`(rAthena skill_db + `JRO_FIX`)で作ったあと、`tools/apply_ratorio_skill.py <ラトリオ> --write` でラトリオ(jRO 準拠)のスキル定義(engine/skill/**/*.js の type / range / element)を上書きする。ラトリオにあるのはプレイヤーのスキルだけ(モンスター専用の「M〇〇」は rAthena のまま)。Fox の「固定」(X)は残す(ラトリオに固定の区分が無い) |
 | `gear_info.json` | アイテム→鎧属性/武器属性/属性耐性/精錬条件つき耐性(`rr`)。`tools/make_gear_info_ratorio.py <ラトリオ> <rAthena版>`(ラトリオ=jRO 準拠が土台、無いものだけ `tools/make_gear_info.py` の rAthena 版で補う。ラトリオの誤りは `JRO_FIX`)。item.dat.js / card.dat.js の行は「[1,…],」(古い)と「ItemObjNew[5461] = […];」(新しく足された分)の2種類ある(両方読む。片方だけだと新しい装備・エンチャントが抜ける) |
 | `mob_info.json` | モンスターの名前→Lv/HP/種族/サイズ/属性/ボス。`tools/make_mob_info.py <ラトリオ>`(ラトリオに番号が無いので名前でつなぐ。同じ名前の強さ違いは "185/250" のように / でつなぐ)。被ダメの相手の札(`dmg_mobs`) |
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
@@ -54,6 +54,10 @@
   → 利用者の `被ダメ_確認用データ.json`(`raw` の `st_XXXX` など)で確かめる
 
 ## ルールとしてわかっていること
+- **データの優先順位: 実測(JRO_FIX など) > ラトリオ(jRO 準拠) > rAthena**。rAthena を使うのは、ラトリオに情報が無い所だけ(2026-10-10 に精査):
+  - 装備の耐性: ラトリオに載っていないアイテムだけ(212件。うち177件は jRO のアイテム一覧に番号が無い)
+  - スキル: モンスター専用の技・「固定」の区分・ラトリオが属性を決めていない技
+  - ランダムオプションの番号→名前(option_names.json)・状態異常のアイコン番号・通信の形: ラトリオはゲームの番号を持っていないので rAthena のまま
 - 物理の近接/遠距離は当たったときの距離(3セルより遠いと遠距離)。罠・射程3以下などは技で決まる
 - モンスターの通常攻撃と「武器」属性の技は無属性。717 = マックスペイン(反射)、736 Mサイキックウェーブは jRO では念
 - 装備セット: 衣装(C頭上/中/下・C肩)をのぞくメイン10か所が全部うまったら。シャドウ6か所はシャドウセットとして別に(人によってシャドウだけキャラ別のため)。中身が同じならキャラが違っても同じセット
