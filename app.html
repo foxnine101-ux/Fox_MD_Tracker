@@ -491,7 +491,7 @@ function renderGrid(groups, chars, now) {
   const canGo = new Map(cols.map((G) => [G.name, G.role === "md" || !!resistFind(RZ.entries, G.name)]));
   if (MX_FOCUS && !cols.some((G) => G.name === MX_FOCUS)) cols = groups;   // 戻ってきた列が隠れていたら全部出す
   // 見出し: アイコン(クリックでグレー表示を固定) + MD名(クリックで耐性へ)
-  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックで固定（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
+  cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}"><span class="grip mx-grip" title="つかんで左右に動かすと、MDの並びを変えられます">⋮⋮</span><span class="mx-ico" title="クリックすると、まだCT中のキャラをグレーに（もう一度・ほかをクリックで解除）">${iconImg(G.name)}</span>`
     + (canGo.get(G.name) ? `<span class="mx-name rzgo" data-go="${esc(G.name)}" title="クリックで耐性を見る">${esc(G.label)}</span>` : `<span class="mx-name">${esc(G.label)}</span>`) + `</th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
@@ -513,12 +513,12 @@ function renderGrid(groups, chars, now) {
     h += `<td>${ok}/${chars.length}</td>`;
   }
   h += `</tr></tfoot></table></div>`;
-  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンにマウスを乗せると、まだCT中のキャラがグレーに。アイコンかマスをクリックするとその状態で固定、グレーの所やほかをクリックすると解除。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが、キャラ名を右クリックすると隠すメニューが出ます。Ctrl（または Shift）を押しながらキャラ名・MD名をクリックすると複数選べて、右クリックでまとめて隠す・移すことができます（Esc で選択を解除）。</p>`;
+  h += `<p class="hint">CTは「〇〇入場時間制限」などのクエストの期限から自動で出しています（ログイン・マップ移動のたびに最新になります）。MDの名前をクリックすると、そのMDの耐性に移動します（耐性のカードをクリックするとここに戻ります）。アイコンかマスをクリックすると、まだCT中のキャラがグレーになります（グレーの所やほかをクリックすると解除）。キャラ名の左の ⋮⋮ をつかんで上下に動かすとキャラの並びを、MD名の上の ⋮⋮ をつかんで左右に動かすとMDの並びを変えられます。MD名を右クリックすると、隠す・分類を移す・表示名を変えるメニューが、キャラ名を右クリックすると隠すメニューが出ます。Ctrl（または Shift）を押しながらキャラ名・MD名をクリックすると複数選べて、右クリックでまとめて隠す・移すことができます（Esc で選択を解除）。</p>`;
   $("#view").innerHTML = h;
   makeSortable($("#view").querySelector("tbody"), "tr[data-char]", chars);
   makeSortable($("#view").querySelector("thead tr"), "th[data-g]", cols.map((G) => G.name),
     (arr) => saveMdOrder(arr, groups.map((G) => G.name)), "x");
-  // 列を選ぶ → まだCT中(数字)のキャラをグレーに。マウスを乗せると下見、アイコンやマスのクリックで固定
+  // 列を選ぶ → まだCT中(数字)のキャラをグレーに。アイコンやマスのクリックで固定(マウスを乗せたときの下見は複数選択の邪魔なのでやめた)
   const rows = [...$("#view").querySelectorAll("tbody tr")];
   const waitRows = cols.map((G) => new Set(chars.map((c, r) => { const e = endOf(c, G); return e !== null && e > now ? r : -1; }).filter((r) => r >= 0)));
   const ths = [...$("#view").querySelectorAll("thead th[data-ci]")];
@@ -535,10 +535,6 @@ function renderGrid(groups, chars, now) {
     rows.forEach((tr, r) => { if (waitRows[i].has(r)) tr.classList.add("mx-dim"); });
   };
   const lockedIdx = () => ths.findIndex((th) => th.dataset.g === MX_LOCK);
-  ths.forEach((th, i) => {
-    th.onmouseenter = () => { if (!MX_LOCK) show(i, false); };
-    th.onmouseleave = () => { if (!MX_LOCK) clearHl(); };
-  });
   GRID_CLICK = (ev) => {
     const name = ev.target.closest(".mx-name[data-go]");
     if (name) { MX_LOCK = ""; return goResist(name.dataset.go); }
