@@ -859,6 +859,11 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.simc table.multi{width:auto}
+.simc table.multi th{font-weight:400;color:var(--muted,#999);font-size:12px;padding:3px 10px 3px 6px}
+.simc table.multi td{padding:3px 10px 3px 6px}
+.multisum{margin-top:8px;line-height:1.8}
+.warn{color:#e3a008}
 .unl{display:inline-block;margin-left:3px;padding:0 5px;border-radius:99px;background:#b8860b;color:#fff;font-size:11px;font-weight:700;cursor:help}
 .simlink{margin:2px 2px 0 0}
 .bfbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px}
@@ -1306,15 +1311,40 @@ async function engTemplate(jobId) {       // その職業のまっさらな mode
   engRndReset(null);
   return engFullModel();
 }
+async function engSettle(max = 4000) {   // ラトリオの中の後片づけ(時間差で動く初期化など)が終わって、取り出した中身が変わらなくなるまで待つ
+  let prev = "", t0 = Date.now();
+  for (;;) { await sleep(300); const cur = JSON.stringify(engFullModel()); if (cur === prev || Date.now() - t0 > max) return; prev = cur; }
+}
+// model → ラトリオ互換の保存データ(URL の ? より後ろ)。ラトリオの「保存データを組み立てる部品」(savedata-collect.js)を画面なしで使う:
+//   engCalc で model をラトリオの中の変数へ流し込む → extractSaveModelFromState() が変数から保存用の形を作る
+//   → 画面の入力欄から読む項目(職業・Lv・ステータス・武器の属性・カード)だけ model の値で上書き → buildSaveDataUnits() → 文字にして圧縮
+// 書き出したものを読み込み直すと、元と同じ model に戻ることを確認ずみ
+async function engExportData(model) {
+  const w = ENG.frame.contentWindow, imp = (p) => w.eval(`import("/ratorio/engine/${p}")`);
+  const X = ENG.x.save = ENG.x.save || { col: await imp("savedata/savedata-collect.js"), z: await imp("savedata/zstd-codec.js"), cv: (await imp("savedata/CSaveDataConverter.js")).CSaveDataConverter, kJob: (await imp("const/EnumConstDataKind.js")).CONST_DATA_KIND_JOB };
+  engCalc(model);
+  const sm = X.col.extractSaveModelFromState(), st = model.status;
+  Object.assign(sm, { jobId: +st.jobId, autoAdjustBaseLv: false, baseLv: st.baseLv, jobLv: st.jobLv, statStr: st.str, statAgi: st.agi, statVit: st.vit, statInt: st.int, statDex: st.dex, statLuk: st.luk,
+    armsElement: (model.weapon || {}).zokusei || 0, speedPot: st.speedPot || 0 });
+  ["Pow", "Sta", "Wis", "Spl", "Con", "Crt"].forEach((k, i) => { sm["stat" + k] = (model.pureStatus || [])[6 + i] || 0; });
+  sm.passiveSkillSelfCount = ENG.reg.g_constDataManager.GetDataObject(X.kJob, +st.jobId).GetPassiveSkillIdArray().length;
+  sm.equip.itemRegions.forEach((r) => { r.cardIds = SIMC_CARD[r.eqpRgnId].map((c) => model.card[c] || 0); r.cardCategoryIds = null; });
+  sm.equip.shadowRegions.forEach((r) => { r.cardIds = SIMC_SHCARD[r.eqpRgnId].map((c) => model.card[c] || 0); });
+  let text = "", off = 0;
+  for (const u of X.col.buildSaveDataUnits(sm)) { u.doCompaction(); if (u.isEmptyUnit()) continue; [text, off] = u.encodeToURL(text, off); }
+  const bytes = ENG.reg.CSaveController.stringToByteArray(JSON.stringify({ base: X.cv.CompressDataTextMIG(text), chart: null }));
+  return "dx" + X.z.uint8ArrayToBase64(X.z.zstdCompressSync(bytes));
+}
 async function engLoadData(q) {          // ラトリオの保存データ(URL の ? より後ろ)を計算係に読み込ませて、model を取り出す。開き直さないので速い
   await engInit();
   if (!ENG.ready) throw new Error(ENG.err || "計算係を起動できませんでした");
   engRndReset(null);                       // 前の計算のランダムオプションが残らないように
+  if (!ENG.settled) { await engSettle(); ENG.settled = true; }      // 起動した直後は、ラトリオの初期化がまだ動いていることがある(読み込んだ中身を消される)
   ENG.reg.CSaveController.loadFromURL(q);
-  await sleep(300);
+  await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 function simcSave() {                     // 少しまとめてから保存
@@ -1729,6 +1759,62 @@ async function simcTagKick(m) {
   const el = $("#sccbprog"); if (el) el.textContent = "";
   if (SIMC.bf.purpose) render();
 }
+// ---- 装備セットごとの確認: 登録した装備セットを1つずつ着せて、ASPD・詠唱を並べる。「全部のセットで 193 / 無詠唱」に要る値も出す ----
+// ステータス・シャドウ装備・支援はいまのまま。AGI・DEX の必要な値は、片方だけ動かした場合(1セットにつき 20回ほど計算するので、裏で少しずつ)
+const simcMultiSig = (m) => JSON.stringify(m) + "|" + simcSetList(m, false).tabs.map((x) => x.sid).join(",");
+async function simcMinStat(base, k, alive) {
+  const cur = base.status[k] || 1, top = Math.max(SIMC_STMAX, cur);
+  const at = async (v) => { await sleep(0); if (!alive()) throw new Error("changed"); const mm = JSON.parse(JSON.stringify(base)); mm.status[k] = v; return engCalc(mm).c[37] >= SIMC_ASPD; };
+  if (!(await at(top))) return null;
+  let lo = 1, hi = top;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
+  return lo;
+}
+function simcMultiKick(m) {
+  const sig = simcMultiSig(m);
+  if ((SIMC.multi && SIMC.multi.sig === sig) || SIMC.multiBusy === sig) return;
+  SIMC.multiBusy = sig;
+  const alive = () => { const c = simcCur(); return !!c && SIMC.multiBusy === sig && simcMultiSig(c.model) === sig; };
+  (async () => {
+    const rows = [], list = [{ label: "いまの装備", cur: true }].concat(simcSetList(m, false).tabs.map(({ sid, st }) => ({ label: st.tag, sid, st })));
+    try {
+      for (const e of list) {
+        const mm = JSON.parse(JSON.stringify(m)); let miss = 0;
+        if (e.st) { if (e.st.sim) simcApplyFrag(mm, e.st.sim, false); else miss = simcWear(mm, e.st.items || [], false).length; }
+        await sleep(0); if (!alive()) return;
+        const r = engCalc(mm);
+        rows.push({ label: e.label, st: e.st, cur: !!e.cur, miss, aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23],
+          agi: await simcMinStat(mm, "agi", alive), dex: await simcMinStat(mm, "dex", alive) });
+        const el = $("#sccmulti"); if (el) el.innerHTML = simcMultiTable(m, rows, list.length);
+      }
+      SIMC.multi = { sig, rows };
+    } catch (err) { if (err.message !== "changed") console.warn("multi", err); }
+    finally { if (SIMC.multiBusy === sig) SIMC.multiBusy = ""; }
+    const el = $("#sccmulti"); if (el && SIMC.multi && SIMC.multi.sig === sig) el.innerHTML = simcMultiTable(m, rows, rows.length);
+  })();
+}
+function simcMultiTable(m, rows, total) {
+  const n = simcNum, st = m.status;
+  const need = (v, cur) => v === null || v === undefined ? `<span class="warn">届かない</span>` : v <= cur ? `<span class="good">${v}</span> <span class="muted">（${v - cur || "±0"}）</span>` : `<b>${v}</b> <span class="muted">（+${v - cur}）</span>`;
+  let h = `<table class="multi"><tr><th>セット</th><th>ASPD</th><th>193 に要る AGI</th><th>193 に要る DEX</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th></tr>`
+    + rows.map((x) => `<tr><td>${x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span> <span class="muted">${esc(x.st.name || x.st.auto || "")}</span>` : esc(x.label)}${x.miss ? ` <span class="warn" title="名前が合わなくて入らなかった装備・カードがあります">（${x.miss}個入らず）</span>` : ""}</td>
+      <td class="v"><span class="${x.aspd >= SIMC_ASPD ? "good" : ""}">${n(x.aspd, 1)}</span></td><td>${need(x.agi, st.agi)}</td><td>${need(x.dex, st.dex)}</td>
+      <td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td><td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td></tr>`).join("") + `</table>`;
+  if (rows.length < total) return h + `<div class="muted">計算中… ${rows.length} / ${total}</div>`;
+  const all = (k) => (rows.some((x) => x[k] === null || x[k] === undefined) ? null : Math.max(...rows.map((x) => x[k])));
+  const agi = all("agi"), dex = all("dex"), minCast = Math.min(...rows.map((x) => x.castP));
+  h += `<div class="multisum"><b>全部のセットで ASPD 193</b>: ${agi === null ? "AGI だけでは届かないセットがあります" : `AGI ${st.agi}→<b>${agi}</b>（${agi > st.agi ? "+" : agi < st.agi ? "−" : "±"}${Math.abs(agi - st.agi)}）`} <span class="muted">または</span> ${dex === null ? "DEX だけでは届かないセットがあります" : `DEX ${st.dex}→<b>${dex}</b>（${dex > st.dex ? "+" : dex < st.dex ? "−" : "±"}${Math.abs(dex - st.dex)}）`}<br>
+    <b>全部のセットで変動詠唱なし</b>（詠唱の値 530 以上）: ${minCast >= 530 ? `<span class="good">届いています</span>。削れるのは DEX ${Math.floor((minCast - 530) / 2)} または INT ${minCast - 530}` : `DEX +${Math.ceil((530 - minCast) / 2)} または INT +${530 - minCast}`}
+    <span class="muted">（いちばん低いセットで ${n(minCast)}）</span></div>`;
+  return h;
+}
+function simcMultiHtml(m) {
+  const tabs = simcSetList(m, false).tabs;
+  if (!tabs.length) return `<div class="muted">装備セットを登録すると、セットごとの ASPD・詠唱を並べて見られます（装備欄の右上の「＋登録」）。</div>`;
+  const ok = SIMC.multi && SIMC.multi.sig === simcMultiSig(m);
+  return `<div id="sccmulti">${ok ? simcMultiTable(m, SIMC.multi.rows, SIMC.multi.rows.length) : `<div class="muted">計算中…</div>`}</div>
+    <div class="muted" style="font-size:12px;margin-top:4px">登録した装備セットを1つずつ着せた場合です。ステータス・シャドウ装備・支援は、いまのままで計算しています。AGI・DEX は、片方だけ動かした場合の値です。</div>`;
+}
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
 function simcFold(key, title, body, head = "", openDefault = true) {
@@ -1866,8 +1952,12 @@ function renderSimChara() {
       <button class="ghost" id="sccurl">保存URLから読み込む</button>
       ${Object.keys((DATA.equip || {}).chars || {}).length ? `<button class="ghost" id="sccfox" title="このツールがゲームの通信から読んだ、自分のキャラ（職業・Lv・ステータス・装備）をもとに作ります">ゲームのキャラから作る</button>` : ""}
       <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
-      ${ch ? `<button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
+      ${ch ? `<button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="このキャラを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button><button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…") : esc(SIMC.msg)}</span></div></div>`;
+  if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
+    h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
+      <div class="opts"><input type="text" id="sccexpurl" readonly value="${esc(SIMC.exp.url)}" style="flex:1;min-width:16em"><button id="sccexpcopy">コピー</button><button class="ghost" id="sccexpclose">閉じる</button></div></div>`;
+  }
   if (SIMC.pick) {
     const on = SIMC.pick.slots.filter((x) => x.on).length;
     h += `<div class="panel simbox"><div><b>セーブファイルの中身（${SIMC.pick.slots.length} 件）</b> <span class="muted">読み込むものにチェックを入れてください。1件につき数秒かかります。</span></div>
@@ -1913,6 +2003,7 @@ function renderSimChara() {
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
       ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>`)}
+      ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
@@ -1944,6 +2035,15 @@ function renderSimChara() {
   }
   if (g("sfrclose")) g("sfrclose").onclick = () => { SIMC.report = null; render(); };
   simcNeedKick();
+  const copyText = async (t) => { try { await navigator.clipboard.writeText(t); return true; } catch (e) { const el = g("sccexpurl"); if (el) { el.focus(); el.select(); try { return document.execCommand("copy"); } catch (e2) { } } return false; } };
+  if (g("sccexp")) g("sccexp").onclick = async () => {
+    try { const d = await engExportData(ch.model); SIMC.exp = { id: SIMC.cur, url: "https://roratorio-hub.github.io/ratorio/ro4/m/calcx.html?" + d, copied: false }; SIMC.msg = ""; }
+    catch (e) { SIMC.msg = "書き出せませんでした: " + e.message; }
+    render(); if (SIMC.exp && SIMC.exp.id === SIMC.cur) { SIMC.exp.copied = await copyText(SIMC.exp.url); render(); }
+  };
+  if (g("sccexpcopy")) g("sccexpcopy").onclick = async () => { SIMC.exp.copied = await copyText(SIMC.exp.url); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
+  if (g("sccexpclose")) g("sccexpclose").onclick = () => { SIMC.exp = null; render(); };
+  if (g("sccexpurl")) g("sccexpurl").onfocus = (e) => e.target.select();
   if (g("sccdup")) g("sccdup").onclick = () => { const id = "c" + Date.now().toString(36); SIMC.chars[id] = { name: ch.name + " のコピー", model: JSON.parse(JSON.stringify(ch.model)) }; simcSelect(id); simcSave(); render(); };
   if (g("sccdel")) g("sccdel").onclick = async (e) => {
     if (e.target.dataset.ok !== "1") { e.target.dataset.ok = "1"; e.target.textContent = "本当に消す？"; return; }
@@ -1957,6 +2057,7 @@ function renderSimChara() {
       if (g("sccx")) g("sccx").innerHTML = simcExtraBody(SIMC.res);
       if (g("sccresist")) { g("sccresist").innerHTML = simcResistBody(SIMC.res); g("sccrsum").textContent = simcResistSum(SIMC.res); }
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick();
+      { const mf = $("#view").querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(ch.model); }
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
       $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });
@@ -2007,7 +2108,8 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); });
+    { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」で置きかえます。\nいまの${part(shadow)}は、登録していなければ消えます。`, "置きかえる")) simcWearSet(sid, shadow); };
     V.querySelectorAll("[data-wear]").forEach((el) => {

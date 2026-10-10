@@ -126,6 +126,15 @@
   - 画面: 装備セットタブで `simUnlinked(st)` の名前がボタンで並ぶ → `pickOpen(…, 最初の検索語)`。結びつけたら `SETTINGS.ratLinks[番号] = 名前` も書く(ゲームの装備 → 計算機 の向きと共用)
   - id2name.json は ratorio の `ro4/m/items_part*.json` から作った表(アプリに同梱)。新しいアイテムが足りなくなったら作り直す
 - **よく使うオンオフの組み合わせ**: `SETTINGS.simPresets = [{name, job, on: {"欄:添字": 値}}]`(表示の設定.json に入る)。`simcPresetApply(m, p, これだけにするか)`。習得スキルは入れない。自分のスキルは同じ職業のときだけ当てる
+- **第4段階(v2.25.0)= 保存URL の書き出しと、装備セットごとの確認**:
+  - 書き出しは `engExportData(model)`。画面の入力欄へ流し込む必要は無かった: `engCalc` で model がラトリオの変数に入る → `savedata-collect.js` の `extractSaveModelFromState()` が変数から保存用の形を作る
+    → 入力欄から読む項目(職業・Lv・ステータス・特性・武器の属性・速度ポーション・カード `cardIds`、`passiveSkillSelfCount`)だけ model の値で上書き(`cardCategoryIds` は null)
+    → `buildSaveDataUnits()` → 各ユニットの `doCompaction()`・`encodeToURL(text, bitOffset)` → `CSaveDataConverter.CompressDataTextMIG` → `{base, chart: null}` を zstd + base64 → 先頭に `dx`。
+    書き出し → 読み込みで元と同じ model に戻ることを 3職業で確認(支援のチェックは true/false と 1/0 の違いだけ)
+  - **落とし穴**: 計算係を起動した直後は、ラトリオの初期化が時間差でまだ動いていて、読み込んだスキルなどを消すことがある → `engSettle()`(取り出した中身が2回続けて同じになるまで待つ)を、最初の読み込みの前と、毎回の読み込みのあとに入れた
+  - 装備セットごとの確認: `simcMultiKick`(枠を開いているときだけ・裏で少しずつ)。いまの装備 + 登録した装備セットを1つずつ写しに着せて計算し、`simcMinStat` で 193 に要る AGI/DEX を二分探索。
+    結果は `SIMC.multi = {sig, rows}`(sig = model + タブの ID)。表は `simcMultiTable`
+- 残り: 5 ダメージ・被ダメとの連携(被ダメの記録から、そのときのキャラ・装備・敵・技を計算機に入れる)。ほかに 性能カスタマイズ・時限効果・オートスペル、二刀流の左手、シャドウのエンチャント、Fox のランダムオプション → ラトリオの番号
 - 第3段階への利用者の注文(済): 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
   4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
