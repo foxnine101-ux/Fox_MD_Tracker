@@ -47,7 +47,8 @@ JRO_FIX = {
              "rr": [[6, 1, "無", 1]]},
 }
 
-ROW_RE = re.compile(r"^\s*(\[\d+,.*\])\s*,?\s*$")
+# 行の書き方は2種類: 「[1,2,…],」(古い) と 「ItemObjNew[5461] = [5461,…];」(新しく足された分)
+ROW_RE = re.compile(r"^\s*(?:[A-Za-z_]\w*\[\d+\]\s*=\s*)?(\[\d+,.*\])\s*[,;]?\s*$")
 BIGINT_RE = re.compile(r"(?<=[,\[])(-?\d+)n(?=[,\]])")
 EMPTY_RE = re.compile(r"([,\[])\s*,")
 

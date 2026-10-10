@@ -19,7 +19,7 @@
 | `edition.py` | `DEV = True/False`。ビルドが書きかえて 公開版/開発版 を作る |
 | `skill_names.json` | スキル番号→名前(ラトリオ) |
 | `skill_info.json` | スキル番号→[種類,属性,射程,印]。`tools/make_skill_info.py`(rAthena skill_db + `JRO_FIX`) |
-| `gear_info.json` | アイテム→鎧属性/武器属性/属性耐性/精錬条件つき耐性(`rr`)。`tools/make_gear_info_ratorio.py <ラトリオ> <rAthena版>`(ラトリオ=jRO 準拠が土台、無いものだけ `tools/make_gear_info.py` の rAthena 版で補う。ラトリオの誤りは `JRO_FIX`) |
+| `gear_info.json` | アイテム→鎧属性/武器属性/属性耐性/精錬条件つき耐性(`rr`)。`tools/make_gear_info_ratorio.py <ラトリオ> <rAthena版>`(ラトリオ=jRO 準拠が土台、無いものだけ `tools/make_gear_info.py` の rAthena 版で補う。ラトリオの誤りは `JRO_FIX`)。item.dat.js / card.dat.js の行は「[1,…],」(古い)と「ItemObjNew[5461] = […];」(新しく足された分)の2種類ある(両方読む。片方だけだと新しい装備・エンチャントが抜ける) |
 | `mob_info.json` | モンスターの名前→Lv/HP/種族/サイズ/属性/ボス。`tools/make_mob_info.py <ラトリオ>`(ラトリオに番号が無いので名前でつなぐ。同じ名前の強さ違いは "185/250" のように / でつなぐ)。被ダメの相手の札(`dmg_mobs`) |
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
 | `id2name.json` | アイテムID→日本語名(ラトリオ) |
