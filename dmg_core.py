@@ -54,6 +54,9 @@ OP_ICON = {0x0983: 9, 0x043F: 9, 0x0196: 9}     # 値: オン/オフの位置は
 OP_OPT = 0x0229
 OP_USE = {0x09CB: "<HiIIb", 0x011A: "<HhIIb"}
 OP_CAST = 0x07FB
+# 技の設置物(地面に置く技: ライトニングランド・Mストームガストなど)の出現 [op2][長さ2][設置物ID4][置いた人ID4][x2][y2][種類4]…
+# 設置物の技の当たり(01DE)は、使った人が設置物IDになる → 置いた人の名前で記録する(jRO のリプレイで確認)
+OP_UNIT = 0x09CA
 # アイコン番号(rAthena の EFST_*) → 名前。状態異常・弱体化だけ
 AILMENT_ICON = {
     875: "石化", 880: "石化", 876: "凍結", 877: "スタン", 878: "睡眠", 881: "火傷", 882: "拘束",
@@ -69,7 +72,7 @@ OPT1_NAMES = {1: "石化", 2: "凍結", 3: "スタン", 4: "睡眠", 6: "石化"
 OPT2_NAMES = {0x0001: "毒", 0x0002: "呪い", 0x0004: "沈黙", 0x0008: "混乱", 0x0010: "暗闇", 0x0040: "出血",
               0x0080: "猛毒", 0x0100: "恐怖"}
 CAUSE_SEC = 3           # 状態異常になる前この秒数以内に受けた技を「原因」とみなす
-OPS = ({OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE, OP_OPT, OP_CAST} | set(OP_SPAWN) | set(OP_POS)
+OPS = ({OP_ACT, OP_SKILL, OP_NAME, OP_NAME_ALL, OP_NAME_TITLE, OP_OPT, OP_CAST, OP_UNIT} | set(OP_SPAWN) | set(OP_POS)
        | set(OP_ICON) | set(OP_USE))
 POS_RAW_MAX = 60        # 位置の通信(距離で近接/遠距離を決めるための下調べ用)
 UNKNOWN_NAME = "名前不明"
@@ -196,6 +199,7 @@ class DmgCore(object):
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
         self.names = {}                     # 相手のID -> 名前
+        self.units = {}                     # 技の設置物のID -> 置いた人のID
         self.ring = {}                      # 接続 -> 最近の通信 [(op, 先頭)](名前がわからない相手を調べる用)
         self.stats = {}                     # キャラ -> MD -> "相手|技" -> [回数, 合計, 最大, 最後, ヒット数合計]
         self.recent = []                    # 最近の被ダメ
@@ -485,6 +489,11 @@ class DmgCore(object):
                 self._move(key, op, pkt)
             elif op in OP_SPAWN:
                 self._spawn(op, pkt)
+            elif op == OP_UNIT and len(pkt) >= 12:
+                uid, owner = struct.unpack_from("<II", pkt, 4)
+                if len(self.units) > MOBS_MAX:
+                    self.units.clear()
+                self.units[uid] = owner
             elif op in (OP_NAME, OP_NAME_ALL) and len(pkt) >= 30:
                 aid = struct.unpack_from("<I", pkt, 2)[0]
                 self._name(aid, pkt[6:30], op, pkt)
@@ -753,6 +762,8 @@ class DmgCore(object):
         name = self.md.name_for(key)
         if not name:
             return
+        if src not in self.names and src in self.units:
+            src = self.units[src]                     # 技の設置物の当たり → 置いた人
         who = self.names.get(src)
         if not who:
             who = "ID{}".format(src)
