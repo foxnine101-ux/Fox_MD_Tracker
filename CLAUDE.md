@@ -24,7 +24,7 @@
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
 | `id2name.json` | アイテムID→日本語名(ラトリオ) |
 | `item_names_fix.json` | ラトリオに無いアイテムの名前(大本の手直し表。id2name より優先)。利用者の `アイテム名の手直し.json` をもらったらここに足す |
-| `ratorio_core.py` | 計算機(ROラトリオHub)をフォーク `foxnine101-ux/ratorio`(本家 roratorio-hub/ratorio + 見た目の手直しだけ)から取り込んで exe の隣の「ラトリオ」フォルダに置く。GitHub の commits → git/trees → raw で、要るファイル(engine/assets/lib/pages/calcx.html。約440個・13MB)の変わった分だけ落とす。`/ratorio/…` で配り、`/api/ratorio`(状態・確認・取り込み)。ラトリオはビルド不要。画面は `#calcwrap` の iframe(タブを切りかえても消さない)。**本家の更新はフォークに merge するだけ**。Fox 側は外から入力欄(OBJID_…)を動かすつなぎ役だけを持つ |
+| `ratorio_core.py` | 計算機(ROラトリオHub)をフォーク `foxnine101-ux/ratorio`(本家 roratorio-hub/ratorio + 見た目の手直しだけ)から取り込んで exe の隣の「ラトリオ」フォルダに置く。GitHub の commits → git/trees → raw で、要るファイル(engine/assets/lib/pages/calcx.html。約440個・13MB)の変わった分だけ落とす。`/ratorio/…` で配り、`/api/ratorio`(状態・確認・取り込み)。ラトリオはビルド不要。画面は `#calcwrap` の iframe(タブを切りかえても消さない)。**本家の更新はフォークに merge するだけ**。Fox 側は外から入力欄(OBJID_…)を動かすつなぎ役だけを持つ(app.html の `ratFill`): 職業 → Lv → 装備(欄は `RAT_MAIN`/`RAT_SHADOW`。武器は `ARMS_TYPE_RIGHT` を順に試す)・精錬・★(TRANSCENDENCE)・カード/エンチャント → ステータスの順。装備は 番号→名前(id2name)→選択肢の名前 でつなぐ(`ratFindOption`: 同じ名前 / 「[3]」「 (+10以上)」を外す / 先頭の「[シャドウ]」を外す / カードは「カード」を外す)。Fox はカードの空き枠を詰めて覚えているので、エンチャントは4枠のうち選択肢にある枠へ入れる。「なし」は値 0 の選択肢(検索つきの欄は先頭が「なし」とは限らない)。精錬を入れたあとは選択肢が作り直されるので待つ。つながらないものは手で結びつけ(`SETTINGS.ratLinks` = {番号: 選択肢の名前})。未対応: ランダムOP・スキル |
 | `ocr_core.py` | スクショから文字を読む(Windows.Media.Ocr 日本語を PowerShell から。2倍に拡大)。アイテムの説明の画面の1行目からアイテム名(`guess_name`)。`/api/ocr`・`/api/itemname` |
 
 生成スクリプトは rAthena の `db/re/*.yml` を引数に取る(raw.githubusercontent.com から取れる)。
