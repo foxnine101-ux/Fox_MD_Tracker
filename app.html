@@ -1195,10 +1195,16 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
       last = `読み込み=${d ? d.readyState : "-"}・部品=${reg ? Object.keys(reg).length : "なし"}・職業の欄=${job ? job.options.length : "-"}・読んだファイル=${res}・エラー=${errs.length ? errs.join(" / ") : "なし"}`;
       return reg && reg.calcCoreFromModel && reg.extractModelFromDom && job && job.options.length > 5 ? reg : null;
     };
+    let tErr = 0, tries = 0;
     for (let i = 0; seen < 150000; i++) {
       await sleep(250);
       if (!document.hidden) seen += 250;
       const reg = look(), job = f.contentDocument && f.contentDocument.querySelector("#OBJID_SELECT_JOB");
+      // 部品を1つでも取りそこねると、ラトリオは最後まで動かない(待っても変わらない)。エラーが出たら、少し待って読み込み直す(取れた分はブラウザが覚えているので、やり直すたびに残りが減る)
+      if (!reg && errs.length) {
+        if (!tErr) tErr = Date.now();
+        else if (Date.now() - tErr > 2500 && tries < 5) { tries++; engLog(`計算係の読み込みをやり直します(${tries}回目): ${last}`); errs.length = 0; tErr = 0; f.src = f.src; continue; }
+      }
       if (reg && (!query || +job.value > 0 || i > 40)) { ENG.reg = reg; break; }
     }
     if (!ENG.reg) { engLog(`計算係の起動に失敗(${Math.round((Date.now() - t0) / 1000)}秒): ${last}`); throw new Error("計算係（ラトリオ）の起動に時間がかかりすぎました（様子を動作ログに書きました）"); }

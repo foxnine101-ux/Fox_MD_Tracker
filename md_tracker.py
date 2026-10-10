@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.30.0"
+VERSION = "2.30.1"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -592,6 +592,7 @@ def start_live_server(core, lock, cfg):
 
     class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
         daemon_threads = True
+        request_queue_size = 256      # 同時に待てる接続の数。既定の 5 だと、計算係(ラトリオ)が約250ファイルを一気に取りに来たときに一部が断られて、起動に失敗する
         allow_reuse_address = True
 
     try:
