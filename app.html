@@ -827,6 +827,9 @@ td.dm-max{font-weight:700}
 @media (max-width:820px){.simc{grid-template-columns:1fr}}
 .simc .panel{padding:10px 14px}
 .simc h3{margin:0 0 6px;font-size:14px}
+.simc td:last-child{white-space:normal}
+.scpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:2px 12px;margin:8px 0;max-height:260px;overflow:auto}
+.scpick label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .simc table{width:100%;border-collapse:collapse;font-size:13px}
 .simc td,.simc th{padding:3px 6px;border-bottom:1px solid var(--line);text-align:left;position:static;min-width:0;max-width:none;background:none;white-space:nowrap}
 .simc td.v{text-align:right;font-variant-numeric:tabular-nums;font-weight:700}
@@ -1114,7 +1117,14 @@ async function engTemplate(jobId) {       // その職業のまっさらな mode
   await sleep(700);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null };
+async function engLoadData(q) {          // ラトリオの保存データ(URL の ? より後ろ)を計算係に読み込ませて、model を取り出す。開き直さないので速い
+  await engInit();
+  if (!ENG.ready) throw new Error(ENG.err || "計算係を起動できませんでした");
+  ENG.reg.CSaveController.loadFromURL(q);
+  await sleep(300);
+  return engFullModel();
+}
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 function simcSave() {                     // 少しまとめてから保存
@@ -1122,6 +1132,8 @@ function simcSave() {                     // 少しまとめてから保存
   SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model }) }); }, 600);
 }
 function simcSelect(id) { SIMC.cur = id; store.set("md_simchar", id); SIMC.res = null; }
+const simcPut = (id) => fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: SIMC.chars[id].name, model: SIMC.chars[id].model }) });
+const simcJobName = (model) => (ENG.jobs.find(([v]) => String(v) === String(model.status.jobId)) || [0, "キャラ"])[1];
 async function simcNew(jobId, name) {
   SIMC.busy = "キャラを作っています…"; render();
   await engInit();
@@ -1135,15 +1147,74 @@ async function simcImportUrl(text) {
   const q = String(text).trim().replace(/^.*\?/, "");
   if (!/^[A-Za-z0-9_\-=%.]{20,}$/.test(q)) { SIMC.msg = "ラトリオの保存URL（…calcx.html?〇〇）を貼り付けてください。"; render(); return; }
   SIMC.busy = "保存URL を読み込んでいます…"; SIMC.msg = ""; render();
-  await engInit(q);
-  if (ENG.ready) {
-    const model = engFullModel();
-    const job = (ENG.jobs.find(([v]) => String(v) === String(model.status.jobId)) || [0, "キャラ"])[1];
+  try {
+    const model = await engLoadData(q);
     const id = "c" + Date.now().toString(36);
-    SIMC.chars[id] = { name: `${job} Lv${model.status.baseLv}（URLから）`, model };
+    SIMC.chars[id] = { name: `${simcJobName(model)} Lv${model.status.baseLv}（URLから）`, model };
     simcSelect(id); simcSave();
-  }
+  } catch (e) { SIMC.msg = "読み込めませんでした: " + e.message; }
   SIMC.busy = ""; render();
+}
+// ラトリオのセーブファイル(#ratoriohub-savedata#。「名前,保存データ」が ; 区切りで並ぶ)。中身を一覧にして、選んだものだけ読み込む
+async function simcOpenFile(text) {
+  const lines = String(text).split(/\r?\n/);
+  if (lines[0].trim() !== "#ratoriohub-savedata#" || !lines[1]) { SIMC.msg = "ラトリオのセーブファイル（ratoriohub….txt）ではないようです。"; render(); return; }
+  await engInit();
+  if (!ENG.ready) { render(); return; }
+  const SC = ENG.reg.CSaveController;
+  const slots = lines[1].split(";").map((x, i) => { const k = x.indexOf(","), n = k < 0 ? "" : x.slice(0, k), d = k < 0 ? "" : x.slice(k + 1).trim(); let name = ""; try { name = n ? SC.decodeSaveName(n) : ""; } catch (e) { } return { i, name: name || `セーブ ${i + 1}`, d, on: true }; })
+    .filter((x) => /^[A-Za-z0-9_\-=%.]{20,}$/.test(x.d));
+  if (!slots.length) { SIMC.msg = "セーブファイルに、キャラが入っていませんでした。"; render(); return; }
+  SIMC.pick = { slots }; SIMC.msg = ""; render();
+}
+async function simcImportPicked() {
+  const list = SIMC.pick.slots.filter((x) => x.on); SIMC.pick = null;
+  let ok = 0, last = "";
+  for (let i = 0; i < list.length; i++) {
+    SIMC.busy = `セーブファイルを読み込んでいます… ${i + 1} / ${list.length}（${list[i].name}）`; render();
+    try {
+      const model = await engLoadData(list[i].d), id = "c" + Date.now().toString(36) + i;
+      SIMC.chars[id] = { name: list[i].name, model }; await simcPut(id); ok++; last = id;
+    } catch (e) { console.warn("simc import", list[i].name, e); }
+  }
+  if (last) simcSelect(last);
+  SIMC.busy = ""; SIMC.msg = `${ok} 件を読み込みました。` + (ok < list.length ? `（${list.length - ok} 件は読み込めませんでした）` : ""); render();
+}
+// 「ASPD 193 まで あといくつ」では動かしようがないので、AGI・DEX をいくつにすれば届くか(届いているなら、いくつまで下げられるか)を出す。
+// それぞれ単独で動かした場合。計算係で 1〜上限 を二分探索する(1つのステータスで 8回ほど計算)
+const SIMC_ASPD = 193, SIMC_STMAX = 130;
+function simcNeedKick() {
+  const ch = simcCur(); if (!ch || !ENG.ready) return;
+  const sig = JSON.stringify(ch.model);
+  if (SIMC.need && SIMC.need.sig === sig) return;
+  clearTimeout(SIMC.needT);
+  SIMC.needT = setTimeout(async () => {
+    const out = { sig };
+    try {
+      for (const k of ["agi", "dex"]) {
+        const cur = ch.model.status[k] || 1, top = Math.max(SIMC_STMAX, cur);
+        const at = async (v) => { await sleep(0); const now = simcCur(); if (!now || JSON.stringify(now.model) !== sig) throw new Error("changed"); const m = JSON.parse(sig); m.status[k] = v; return engCalc(m).c[37] >= SIMC_ASPD; };
+        if (!(await at(top))) { out[k] = null; continue; }
+        let lo = 1, hi = top;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
+        out[k] = lo;
+      }
+    } catch (e) { return; }                 // 途中で値が変わった → 新しい値でやり直しが走っている
+    SIMC.need = out;
+    const el = $("#sccaspd"); if (el) el.innerHTML = simcNeedText(ch.model);
+  }, 250);
+}
+function simcNeedText(m) {
+  const nd = SIMC.need;
+  if (!nd || nd.sig !== JSON.stringify(m)) return `<span class="muted">AGI・DEX の必要な値を計算中…</span>`;
+  const reached = (SIMC.res && SIMC.res.c[37]) >= SIMC_ASPD;
+  const one = (k, label) => {
+    const cur = m.status[k] || 1, v = nd[k];
+    if (v === null || v === undefined) return `${label} だけでは届かない`;
+    if (v === cur) return reached ? `${label} ${cur} は削れない` : `${label} ${cur}`;
+    return `${label} ${cur}→<b>${v}</b>（${v > cur ? "+" : "−"}${Math.abs(v - cur)}）`;
+  };
+  return (reached ? `<span class="good">193</span> のまま下げられるのは ` : `193 にするには `) + one("agi", "AGI") + (reached ? " ／ " : " または ") + one("dex", "DEX") + ` <span class="muted">（片方だけ動かした場合）</span>`;
 }
 // 結果の表(ラトリオのステータス欄に近い並び)
 function simcResultHtml(m, r) {
@@ -1155,8 +1226,10 @@ function simcResultHtml(m, r) {
     ${row("ATK", `${n(c[25])} + ${n(c[26])}`)}${row("MATK", `${n(c[27])} + ${n(c[28])}`)}
     ${row("DEF", `${n(c[29])} + ${n(c[30])}`)}${row("MDEF", `${n(c[31])} + ${n(c[32])}`)}
     ${row("HIT", n(c[33]))}${row("FLEE", n(c[34]))}${row("完全回避", n(c[36], 1))}${row("クリティカル", n(c[35], 1))}
-    ${row("ASPD", `<span class="${aspd >= 193 ? "good" : ""}">${n(aspd, 1)}</span>`, aspd >= 193 ? "193 に届いています" : aspd ? `193 まであと ${n(193 - aspd, 1)}` : "")}
-    ${row("詠唱の値（DEX×2+INT）", `<span class="${castP >= 530 ? "good" : ""}">${n(castP)}</span>`, castP >= 530 ? "変動詠唱なし（530 以上）" : `変動詠唱なしまで あと ${n(530 - castP)}`)}
+    ${row("ASPD", `<span class="${aspd >= 193 ? "good" : ""}">${n(aspd, 1)}</span>`, aspd ? `<span id="sccaspd">${simcNeedText(m)}</span>` : "")}
+    ${row("詠唱の値（DEX×2+INT）", `<span class="${castP >= 530 ? "good" : ""}">${n(castP)}</span>`, castP >= 530
+      ? `変動詠唱なし（530 以上）。削れるのは DEX ${Math.floor((castP - 530) / 2)} または INT ${castP - 530}`
+      : `変動詠唱なしにするには DEX +${Math.ceil((530 - castP) / 2)} または INT +${530 - castP}`)}
     ${row("変動詠唱の短縮", n(r.core.n_CastCutForDisp) + "%")}${row("固定詠唱の短縮", n(c[41]) + "%")}
     ${row("スキルディレイの短縮", n(r.core.delayDownForDisp) + "%")}
     ${row("HP回復 / SP回復", `${n(c[38])} / ${n(c[39])}`)}</table>`;
@@ -1184,10 +1257,17 @@ function renderSimChara() {
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>` : ""}
       <button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>新しく作る</button>
       <button class="ghost" id="sccurl">保存URLから読み込む</button>
+      <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
       ${ch ? `<button class="ghost" id="sccdup">複製</button><button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…") : esc(SIMC.msg)}</span></div></div>`;
+  if (SIMC.pick) {
+    const on = SIMC.pick.slots.filter((x) => x.on).length;
+    h += `<div class="panel simbox"><div><b>セーブファイルの中身（${SIMC.pick.slots.length} 件）</b> <span class="muted">読み込むものにチェックを入れてください。1件につき数秒かかります。</span></div>
+      <div class="scpick">${SIMC.pick.slots.map((x, i) => `<label><input type="checkbox" data-pick="${i}" ${x.on ? "checked" : ""}> ${esc(x.name)}</label>`).join("")}</div>
+      <div class="opts"><button id="scpgo" ${on ? "" : "disabled"}>選んだ ${on} 件を読み込む</button><button class="ghost" id="scpall">すべて選ぶ／外す</button><button class="ghost" id="scpno">やめる</button></div></div>`;
+  }
   if (!ch) {
-    h += `<div class="panel empty">「新しく作る」で職業を選んで1から作るか、「保存URLから読み込む」でラトリオの保存URL を読み込めます。<br>作ったキャラは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">「新しく作る」で職業を選んで1から作るか、ラトリオの保存URL・セーブファイルを読み込めます。<br>作ったキャラは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
     h += `<div class="panel empty">計算係（ROラトリオHub）を起動しています…</div>`;
   } else {
@@ -1214,6 +1294,14 @@ function renderSimChara() {
   if (g("sccname")) g("sccname").onchange = (e) => { ch.name = e.target.value.trim() || "キャラ"; simcSave(); e.target.blur(); render(); };
   if (g("sccnew")) g("sccnew").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, [{ cap: "職業を選ぶ" }].concat(ENG.jobs.slice().reverse().slice(0, 40).map(([v, t]) => ({ label: t, act: () => simcNew(v, t) })))); };
   if (g("sccurl")) g("sccurl").onclick = () => { const v = prompt("ラトリオの保存URL を貼り付けてください（https://…/calcx.html?〇〇）"); if (v) simcImportUrl(v); };
+  if (g("sccfile")) g("sccfile").onclick = () => { const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".txt,text/plain"; inp.onchange = () => { const f = inp.files[0]; if (f) f.text().then(simcOpenFile); }; inp.click(); };
+  if (SIMC.pick) {
+    $("#view").querySelectorAll("[data-pick]").forEach((el) => el.onchange = () => { SIMC.pick.slots[+el.dataset.pick].on = el.checked; render(); });
+    g("scpall").onclick = () => { const all = SIMC.pick.slots.every((x) => x.on); SIMC.pick.slots.forEach((x) => x.on = !all); render(); };
+    g("scpno").onclick = () => { SIMC.pick = null; render(); };
+    g("scpgo").onclick = simcImportPicked;
+  }
+  simcNeedKick();
   if (g("sccdup")) g("sccdup").onclick = () => { const id = "c" + Date.now().toString(36); SIMC.chars[id] = { name: ch.name + " のコピー", model: JSON.parse(JSON.stringify(ch.model)) }; simcSelect(id); simcSave(); render(); };
   if (g("sccdel")) g("sccdel").onclick = async (e) => {
     if (e.target.dataset.ok !== "1") { e.target.dataset.ok = "1"; e.target.textContent = "本当に消す？"; return; }
@@ -1224,7 +1312,7 @@ function renderSimChara() {
     // 値を変えたら、その場で計算し直して結果だけ描きかえる(入力中の欄はそのまま)
     const recalc = () => {
       try { SIMC.res = engCalc(ch.model); } catch (e) { SIMC.msg = "計算できませんでした: " + e.message; return; }
-      g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res);
+      g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); simcNeedKick();
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
       $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });

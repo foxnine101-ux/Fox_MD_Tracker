@@ -78,6 +78,9 @@
   model から取り出し・流し込みされる。印が無いと計算係に前のキャラの値が残り、結果がずれる(AGI120 で ASPD 193 のはずが 191.9 になった)。
   → `engCalc` は計算の間だけ `setN_Skill*SW(true)`、`engFullModel` はたたんだ欄の値を `engine/skill/skillstate.js` の `n_A_PassSkill/4/7/8` から直接読む
 - ステータスの合計は計算のあとの `roro-state.js` の `n_A_STR`…(基本6つ)。特性は `n_A_WIS` などが当てにならないので、素点 `pureStatus[6..11]` + `hmjob.js` の `g_bonusStatus[6..11]`
+- v2.20.1: 保存データの読み込みは `engLoadData(q)`(計算係の中で `_ratorioReg.CSaveController.loadFromURL(q)` → `engFullModel()`。開き直さない。開き直した場合と同じ model になることを確認ずみ)。
+  セーブファイル(1行目 `#ratoriohub-savedata#`、2行目が「名前,保存データ」の `;` 区切り。名前は `CSaveController.decodeSaveName`)は `simcOpenFile` → 一覧で選ぶ(`SIMC.pick`)→ `simcImportPicked`。
+  ASPD の横は「あといくつ」ではなく、AGI・DEX を単独で動かして 193 になる最小の値(`simcNeedKick` が二分探索 → `simcNeedText`)。利用者の要望:「あと2」は意味がない、AGI/DEX をどれだけ変えるかが大事
 - 残り: 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
   4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
 
