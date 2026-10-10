@@ -29,7 +29,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.13.1"
+VERSION = "2.14.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -39,6 +39,7 @@ CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
+ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
 SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
 DMG_RAW_FILE = os.path.join(HERE, "被ダメ_確認用データ.json")   # 通信そのもの(形を確かめる用)
 NAMES_CACHE = os.path.join(HERE, "quest_names_cache.json")
@@ -402,6 +403,32 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
+            if self.path.split("?")[0] == "/api/ocr" and self._local_only():
+                # スクリーンショット(画像そのもの)から文字を読む → {"name": 1行目から出した名前, "lines": 読めた行}
+                try:
+                    import ocr_core
+                    n = int(self.headers.get("Content-Length") or 0)
+                    if not 0 < n <= ocr_core.MAX_IMAGE:
+                        raise RuntimeError("画像が大きすぎるか、空です")
+                    lines = ocr_core.read_lines(self.rfile.read(n))
+                    out = {"ok": True, "name": ocr_core.guess_name(lines), "lines": [ocr_core.tidy(x) for x in lines]}
+                except Exception as e:
+                    out = {"ok": False, "error": str(e)}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/itemname" and self._local_only():
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 10000)).decode("utf-8"))
+                    if CHARS is None:
+                        raise ValueError
+                    with lock:
+                        if not CHARS.set_item_name(b["id"], str(b.get("name") or "")):
+                            raise ValueError
+                        save_item_name(str(b["id"]), CHARS.id2name[str(b["id"])])
+                        save_chars()
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
             if self.path.split("?")[0] == "/api/skillname" and self._local_only():
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
@@ -606,6 +633,26 @@ def load_skill_fix():
     return names, attrs
 
 
+def load_item_fix():
+    """アイテム名の手直し.json → {"番号": "名前"}"""
+    try:
+        with open(ITEM_FIX_FILE, "r", encoding="utf-8") as f:
+            return {str(k): str(v) for k, v in json.load(f).items() if str(k).isdigit() and str(v).strip()}
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print("[キャラ] アイテム名の手直しが読めませんでした:", e)
+        return {}
+
+
+def save_item_name(iid, name):
+    """アイテムの名前を1つ覚える(アイテム名の手直し.json に足す)。"""
+    fix = load_item_fix()
+    fix[str(iid)] = name
+    _write_json(ITEM_FIX_FILE, fix, indent=1)
+    print("[キャラ] アイテムの名前を覚えました: {} = {}".format(iid, name))
+
+
 def save_skill_fix():
     out = {}
     for k in sorted(set(DMG.fix) | set(DMG.efix)):
@@ -785,6 +832,7 @@ def main():
     apply_nyar_fix(core)
     if char_core is not None:
         CHARS = char_core.CharCore(md=core, log=print)
+        CHARS.id2name.update(load_item_fix())          # この PC で付けたアイテム名
         try:
             if os.path.exists(CHAR_STATE_FILE):
                 with open(CHAR_STATE_FILE, "r", encoding="utf-8") as f:

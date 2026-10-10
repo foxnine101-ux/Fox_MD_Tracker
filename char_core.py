@@ -174,14 +174,17 @@ def load_gear_info(folder=None):
 
 
 def load_id2name(folder=None):
-    """アイテムID→日本語名の対応表。ratorio の items_part*.json から作ったもの。"""
+    """アイテムID→日本語名の対応表。ratorio の items_part*.json から作ったもの(id2name.json)に、
+    ラトリオに無いアイテムの手直し表(item_names_fix.json)を重ねる。"""
     folder = folder or os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(folder, "id2name.json")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    out = {}
+    for fn in ("id2name.json", "item_names_fix.json"):
+        try:
+            with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
+                out.update({k: v for k, v in json.load(f).items() if not k.startswith("_")})
+        except (OSError, ValueError):
+            pass
+    return out
 
 
 class CharCore(object):
@@ -227,6 +230,18 @@ class CharCore(object):
             self.sets = data.get("sets") or {}
             self.shadows = data.get("shadows") or {}
             self._migrate_sets()
+            self._refresh_names()
+
+    def _refresh_names(self):
+        """覚えてある装備セットの中で「ID123」のままの名前を、いまの名前の表で直す(あとから名前がわかったもの)。"""
+        for table in (self.sets, self.shadows):
+            for s in table.values():
+                for it in s.get("items") or []:
+                    for x, key in [(it, "itemId")] + [(c, "id") for c in it.get("cards") or []]:
+                        n = self.id2name.get(str(x.get(key)))
+                        if n and x.get("name") != n and str(x.get("name") or "").startswith("ID"):
+                            x["name"] = n
+                            self.changed = True
 
     def _migrate_sets(self):
         """前の版の「キャラごとの装備セット」(ch["sets"])を、共通の装備セット・シャドウセットにまとめる。"""
@@ -414,7 +429,41 @@ class CharCore(object):
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                            "missing": ch.get("missing") or [],
                            "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch)}
-        return {"chars": chars, "sets": self.sets, "shadows": self.shadows}
+        return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
+
+    def set_item_name(self, iid, name):
+        """アイテムの名前を付ける(名前がわからないアイテム用)。覚えてある装備セットの中身の名前も直す。"""
+        iid, name = str(iid), (name or "").strip()[:40]
+        if not iid.isdigit() or not name:
+            return False
+        self.id2name[iid] = name
+        for table in (self.sets, self.shadows):
+            for s in table.values():
+                for it in s.get("items") or []:
+                    if str(it.get("itemId")) == iid:
+                        it["name"] = name
+                    for c in it.get("cards") or []:
+                        if str(c.get("id")) == iid:
+                            c["name"] = name
+        self.changed = True
+        return True
+
+    def unknown_items(self):
+        """名前がわからないアイテム(いま着ている装備と、覚えてある装備セットの中): [{id, slot}]"""
+        seen = {}
+
+        def look(it, slot):
+            for iid in [it.get("itemId")] + [c.get("id") for c in it.get("cards") or []]:
+                if iid and str(iid) not in self.id2name and str(iid) not in seen:
+                    seen[str(iid)] = slot if iid == it.get("itemId") else slot + "のカード・エンチャント"
+        for ch in self.chars.values():
+            for it in self._worn(ch):
+                look(it, self._item_view(it)["slot"])
+        for table in (self.sets, self.shadows):
+            for s in table.values():
+                for it in s.get("items") or []:
+                    look(it, it.get("slot") or "")
+        return [{"id": k, "slot": v} for k, v in seen.items()]
 
     def _table(self, sid):
         return self.shadows if str(sid).startswith("s") else self.sets

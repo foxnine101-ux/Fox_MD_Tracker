@@ -23,6 +23,8 @@
 | `mob_info.json` | モンスターの名前→Lv/HP/種族/サイズ/属性/ボス。`tools/make_mob_info.py <ラトリオ>`(ラトリオに番号が無いので名前でつなぐ。同じ名前の強さ違いは "185/250" のように / でつなぐ)。被ダメの相手の札(`dmg_mobs`) |
 | `option_names.json` | ランダムOP番号→日本語。`tools/make_option_names.py` |
 | `id2name.json` | アイテムID→日本語名(ラトリオ) |
+| `item_names_fix.json` | ラトリオに無いアイテムの名前(大本の手直し表。id2name より優先)。利用者の `アイテム名の手直し.json` をもらったらここに足す |
+| `ocr_core.py` | スクショから文字を読む(Windows.Media.Ocr 日本語を PowerShell から。2倍に拡大)。アイテムの説明の画面の1行目からアイテム名(`guess_name`)。`/api/ocr`・`/api/itemname` |
 
 生成スクリプトは rAthena の `db/re/*.yml` を引数に取る(raw.githubusercontent.com から取れる)。
 
@@ -57,7 +59,7 @@
 
 ## 利用者のファイル(exe と同じフォルダ。git には入れない)
 - 利用者のローカルの置き場所: `C:\Users\fuso1\OneDrive\Desktop\Fox_MD_Tracker`(実測データはここ。読むだけ。`設定.json` は送信キーがあるので開かない)
-`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `動作ログ.txt` `アップデートログ.txt`
+`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `動作ログ.txt` `アップデートログ.txt`
 
 ## テストのしかた
 - `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`

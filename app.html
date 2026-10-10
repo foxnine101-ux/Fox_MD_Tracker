@@ -379,7 +379,7 @@ let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出�
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.srvname")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.srvname, input.unkname")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -744,6 +744,9 @@ td.dm-max{font-weight:700}
 .eq-h input.eqtag{font:inherit;font-weight:700;width:3.6em;text-align:center;padding:3px 4px;border:1px solid var(--accent);border-radius:99px;background:var(--chip);color:var(--ink)}
 .eq-use{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:13px;padding:6px 0;border-top:1px solid var(--line)}
 .eq-use:first-child{border-top:0}
+.unk-drop{border:2px dashed var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;font-size:13px}
+.unk-drop.over{border-color:var(--accent);background:var(--chip)}
+.eq-use input.unkname{font:inherit;padding:3px 8px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);flex:1 1 260px;min-width:160px}
 .eq-sub{font-size:12px;margin:0 0 6px}
 .eq-st{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:13px;margin:4px 0}
 table.eq-t{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
@@ -924,6 +927,61 @@ function statusHtmlEq(st) {
     <div class="eq-st">${cell("Atk", two("ATK", "ATK2"))}${cell("Matk", d.MATKmin !== undefined ? `${d.MATKmin} + ${d.MATKmax}` : "-")}${cell("Def", two("DEF", "DEF2"))}${cell("Mdef", two("MDEF", "MDEF2"))}${cell("Hit", d.HIT ?? "-")}${cell("Flee", two("FLEE", "FLEE2"))}${cell("Critical", d.CRIT ?? "-")}</div>
     ${d["P.ATK"] !== undefined || d.RES !== undefined ? `<div class="eq-st">${["P.ATK", "S.MATK", "RES", "MRES", "H.PLUS", "C.RATE"].map((k) => cell(k, d[k] ?? "-")).join("")}</div>` : ""}`;
 }
+// ---------- 名前がわからないアイテム ----------
+// アイテムの名前は通信に無い(番号だけ)。データに無い新しいアイテムは、ゲームの「アイテムの説明の画面」の
+// スクリーンショットから文字を読んで名前を付ける(この PC で見ているときだけ)。手で打ってもよい
+const UNK = { vals: {}, sel: "", msg: "", busy: false };
+function unknownItemsHtml(list) {
+  if (!(typeof LOCAL !== "undefined" && LOCAL) || !list.length) return "";
+  if (!list.some((u) => u.id === UNK.sel)) UNK.sel = list[0].id;
+  return `<h2>名前がわからないアイテム（${list.length}）</h2><div class="panel eq-box">
+    <div class="unk-drop" id="unkdrop">ゲームで<b>アイテムの説明の画面</b>（アイテムを右クリックすると出る、いちばん上に名前がある画面）を出して、そのスクリーンショットを<b>ここに落とす</b>か、<b>Ctrl+V で貼り付けて</b>ください。読み取った名前が、下で選んでいる欄に入ります（手で打ってもOK）。
+      ${UNK.busy ? `<div><b>読み取り中…</b></div>` : UNK.msg ? `<div class="muted">${esc(UNK.msg)}</div>` : ""}</div>
+    ${list.map((u) => `<div class="eq-use"><label><input type="radio" name="unk" value="${esc(u.id)}" ${u.id === UNK.sel ? "checked" : ""}> <span class="muted">${esc(u.slot)}</span> <b>ID${esc(u.id)}</b></label>
+      <input class="unkname" data-id="${esc(u.id)}" value="${esc(UNK.vals[u.id] || "")}" placeholder="アイテムの名前">
+      <button class="ghost" data-saveitem="${esc(u.id)}">保存</button></div>`).join("")}
+    <p class="hint">保存した名前は、この PC の「アイテム名の手直し.json」に入ります。このファイルを作者に送ってもらえると、次の版からみんなの画面でも名前が出ます。</p></div>`;
+}
+async function ocrImage(file) {
+  if (!file || UNK.busy) return;
+  UNK.busy = true; UNK.msg = ""; render();
+  try {
+    const r = await fetch("/api/ocr", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file }).then((x) => x.json());
+    if (!r.ok) UNK.msg = "読めませんでした: " + (r.error || "");
+    else if (!r.name) UNK.msg = "文字が見つかりませんでした。アイテムの説明の画面だけが写るように撮ってみてください。";
+    else { UNK.vals[UNK.sel] = r.name; UNK.msg = `読み取り: 「${r.name}」（1行目: ${r.lines[0] || ""}）。合っていれば「保存」を押してください。`; }
+  } catch (e) { UNK.msg = "読めませんでした: " + e.message; }
+  UNK.busy = false; render();
+}
+const imageOf = (dt) => dt ? [...(dt.files || [])].find((f) => f.type.startsWith("image/")) || [...(dt.items || [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile())[0] : null;
+function bindUnknownItems() {
+  const drop = $("#unkdrop");
+  if (!drop) return;
+  const box = drop.parentElement;
+  box.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  box.ondragleave = () => drop.classList.remove("over");
+  box.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); const f = imageOf(e.dataTransfer); if (f) ocrImage(f); else { UNK.msg = "画像のファイルを落としてください。"; render(); } };
+  box.querySelectorAll('input[name="unk"]').forEach((el) => el.onchange = () => { UNK.sel = el.value; });
+  box.querySelectorAll("input.unkname").forEach((el) => {
+    el.oninput = () => { UNK.vals[el.dataset.id] = el.value; };
+    el.onfocus = () => { UNK.sel = el.dataset.id; const r = box.querySelector(`input[name="unk"][value="${CSS.escape(el.dataset.id)}"]`); if (r) r.checked = true; };
+    el.onkeydown = (ev) => { if (ev.key === "Enter") box.querySelector(`[data-saveitem="${CSS.escape(el.dataset.id)}"]`).click(); };
+  });
+  box.querySelectorAll("[data-saveitem]").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.saveitem, name = (UNK.vals[id] || "").trim();
+    if (!name) { UNK.msg = "名前を入れてから保存してください。"; render(); return; }
+    const r = await fetch("/api/itemname", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name }) });
+    if (r.ok) { delete UNK.vals[id]; UNK.msg = `ID${id} を「${name}」として覚えました。`; if (document.activeElement) document.activeElement.blur(); load(); }
+    else { UNK.msg = "保存できませんでした。"; render(); }
+  });
+}
+// キャラタブを開いているときの貼り付け(Win+Shift+S → Ctrl+V)
+document.addEventListener("paste", (e) => {
+  if (TAB !== "chars" || !$("#unkdrop")) return;
+  const f = imageOf(e.clipboardData);
+  if (f) { e.preventDefault(); ocrImage(f); }
+});
+
 // ---------- キャラ ----------
 // いまの装備・ステータスと、そのキャラが使った装備セット(装備セットはキャラをまたいで共通)
 function renderChars(chars) {
@@ -952,10 +1010,12 @@ function renderChars(chars) {
       <span class="muted">最後に着た ${when(st.chars[EQ_CHAR].last)}${Object.keys(st.chars).length > 1 ? `・ほかのキャラ ${esc(Object.keys(st.chars).filter((c) => c !== EQ_CHAR).map(cn).join("、"))}` : ""}</span></span>
       <button class="ghost" data-gs="${esc(sid)}">装備セットタブで見る</button></div>`).join("") + `</div>`;
   };
+  h += unknownItemsHtml(EQ.unknown || []);
   h += list(S, "このキャラが使った装備セット", e.cur) + list(SH, "このキャラが使ったシャドウセット", e.shadow);
   h += `<p class="hint">ステータスと装備は、通信から読んだいまのもの。装備セット（メイン10か所）とシャドウセット（6か所）は、キャラをまたいで共通です。名前や記号は「装備セット」タブで変えられます。</p>`;
   $("#view").innerHTML = h;
   $("#eqc").onchange = (ev) => { EQ_CHAR = ev.target.value; render(); };
+  bindUnknownItems();
   $("#view").querySelectorAll("[data-gs]").forEach((b) => b.onclick = () => { GS_OPEN[b.dataset.gs] = true; GS_FOCUS = b.dataset.gs; TAB = "gsets"; store.set("md_tab", TAB); render(); });
 }
 
