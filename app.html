@@ -2377,7 +2377,13 @@ function infoPop(ev, title, htmlPromise) {
   el.querySelector(".infox").onclick = () => el.remove();
   Promise.resolve(htmlPromise).then((h) => { el.querySelector(".infob").innerHTML = h || `<span class="muted">説明がありません（ラトリオに効果の記述がないものです）</span>`; }).catch((e) => { el.querySelector(".infob").innerHTML = `<span class="warn">読み込めませんでした: ${esc(e.message)}</span>`; });
 }
-document.addEventListener("contextmenu", (e) => {
+document.addEventListener("contextmenu", (e) => {          // ASPD の目安の潜在解放のチップ: どの装備の何枠目につくか + 効果の文章
+  const sc = e.target.closest && e.target.closest("[data-stpasc]"); const ch0 = sc && simcCur(), S0 = sc && SIMC.stp;
+  if (sc && ch0 && S0 && S0.as && !S0.as.err && ENG.ready) {
+    const v = +sc.dataset.stpasc, m = ch0.model, hits = S0.as.senzai.filter((x) => x.v === v); if (!hits.length) return; e.preventDefault();
+    const where = hits.map((x) => { const lb = (SIMC_REGIONS.find(([i]) => i === x.region) || [0, "場所" + x.region])[1], k = SIMC_CARD[x.region].indexOf(x.slot) + 1, cur = m.card[x.slot]; return `<div><b>${esc(lb)}</b>「${esc(simcItemName(m.equip[x.region]))}」の ${k} 枠目${cur && cur !== v ? `（いまは「${esc(simcCardName(cur))}」が入っています）` : cur === v ? "（いま付けています）" : "（いまは空き）"}</div>`; }).join("");
+    infoPop(e, hits[0].name, engInfoHtml("card", v).then((h) => `<div style="margin-bottom:6px"><span class="muted">つく装備</span>${where}</div>${h}`)); return;
+  }
   const b = e.target.closest && e.target.closest("button[data-item], button[data-card]"); if (!b || !ENG.ready) return;
   const ch = simcCur(); if (!ch) return; const m = ch.model;
   if (b.dataset.item !== undefined) { const r = +b.dataset.item, id = simcItemAt(m, r); if (!id || simcIsNone(r, id)) return; e.preventDefault(); infoPop(e, simcItemName(id), engInfoHtml("item", id)); return; }
