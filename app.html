@@ -417,7 +417,7 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
 const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
@@ -428,13 +428,15 @@ function reportJsError(msg, stack) {
 }
 window.addEventListener("error", (e) => reportJsError(e.message, e.error && e.error.stack));
 window.addEventListener("unhandledrejection", (e) => reportJsError((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
+const HSCROLL_SEL = ".tablewrap, .dm-box, #stp, .cmpbox";       // 横にスクロールできる枠(描き直すと左端に戻ってしまうので、位置を覚えて戻す)
 function render() {
-  const y = window.scrollY;
+  const y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
   try { renderNow(); } catch (e) {
     console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
   }
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
+  if (hs.tab === TAB && hs.v.some((x) => x > 0)) { const now = [...document.querySelectorAll(HSCROLL_SEL)]; if (now.length === hs.v.length) now.forEach((e, i) => { if (hs.v[i] > 0) e.scrollLeft = hs.v[i]; }); }      // 横の位置も戻す(同じタブで、枠の数が同じときだけ)
 }
 function renderNow() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
@@ -517,7 +519,7 @@ function setMd(name, patch) {
   for (const k of Object.keys(v)) if (v[k] === undefined) delete v[k];
   md[name] = v; saveSettings(); render();
 }
-const KIND_L = { weekly: "週次", daily: "デイリー", other: "その他" };
+const KIND_L = { weekly: "週次", daily: "デイリー", other: "クエスト" };
 function setMdMany(names, patch) {
   const md = SETTINGS.md = SETTINGS.md || {};
   for (const n of names) {
@@ -1076,7 +1078,7 @@ document.addEventListener("click", (ev) => {
   if (SEL.mds.size && Date.now() - SEL_GUARD > 300 && ["weekly", "daily", "other"].includes(TAB) && ev.target.isConnected && !ev.target.closest("thead th[data-g], #ctx")) { SEL.mds.clear(); render(); }   // MD の選択は、見出し以外をクリックで解除
   if (ev.target.isConnected && GRID_CLICK && ["weekly", "daily", "other"].includes(TAB) && !ev.target.closest("#tabs")) GRID_CLICK(ev);
 });
-// 耐性のカード → そのMDがあるマトリクス(週次/デイリー/その他)の列へ戻る
+// 耐性のカード → そのMDがあるマトリクス(週次/デイリー/クエスト)の列へ戻る
 function goMatrix(rzName) {
   const E = RZ.entries.find((x) => x.name === rzName);
   const G = E && buildGroups().find((g) => ["weekly", "daily", "other"].includes(g.kind) && resistFind(RZ.entries, g.name) === E);
@@ -5049,11 +5051,11 @@ function renderSettings(groups) {
     <div class="sortbar"><button class="ghost" id="mdreset">MDの並びを名前順に戻す</button></div><div class="panel list" id="mdlist">`;
   for (const G of groups) {
     const s = md[G.name] || {};
-    const autoL = { weekly: "週次", daily: "デイリー", other: "その他" }[G.auto];
+    const autoL = { weekly: "週次", daily: "デイリー", other: "クエスト" }[G.auto];
     h += `<div class="row" data-g="${esc(G.name)}"><span class="nm"><span class="grip" title="つかんで上下に動かすと並び替え">⋮⋮</span>${iconImg(G.name, true)}${esc(G.name)}</span>
       <input class="lbl" data-label="${esc(G.name)}" placeholder="表示名" value="${esc(s.label || "")}">
       <select data-kind="${esc(G.name)}">
-        ${[["auto", `自動（${autoL}）`], ["weekly", "週次"], ["daily", "デイリー"], ["other", "その他"], ["hide", "表示しない"]]
+        ${[["auto", `自動（${autoL}）`], ["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["hide", "表示しない"]]
           .map(([v, l]) => `<option value="${v}" ${(s.kind || "auto") === v ? "selected" : ""}>${l}</option>`).join("")}
       </select></div>`;
   }
