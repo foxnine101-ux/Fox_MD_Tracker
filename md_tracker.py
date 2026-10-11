@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.51.2"
+VERSION = "2.51.3"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1172,6 +1172,7 @@ def main():
         print(e)
         fail("通信の読み取りを始められませんでした。\nNpcap が入っているか確認してね (https://npcap.com/)\n\n{}".format(e))
         return
+    print("[起動] v{} データの置き場所: {} / 作業フォルダ: {} / exe: {}".format(VERSION, HERE, os.getcwd(), sys.executable))     # 「ファイルがデスクトップに出る」などの調査用
     print("通信を読んでいます。ROでログイン・マップ移動するとCTが記録されます。")
     local_only = upload(cfg, build_payload(core)) is None
     if local_only:
