@@ -1438,13 +1438,15 @@ async function engSchema(jobId) {
   } finally { open(false); }
   return ENG.cache[key] = out;
 }
-async function engTemplate(jobId) {       // その職業のまっさらな model(装備なし)。職業を変えたときの下ごしらえはラトリオに任せる
+async function engTemplate(jobId) {       // その職業のまっさらな model(装備なし)。職業を変えたときの下ごしらえはラトリオに任せる。約2.5秒かかるので、職業ごとに覚える(計算係を作り直すと忘れる)
+  const key = "tpl" + jobId; if (ENG.cache[key]) return JSON.parse(ENG.cache[key]);
   const d = ENG.frame.contentDocument, sel = d.querySelector("#OBJID_SELECT_JOB");
   const set = async (v) => { sel.value = String(v); sel.dispatchEvent(new Event("change", { bubbles: true })); await sleep(700); };
   if (String(ENG.state.n_A_JOB) === String(jobId)) await set(String(jobId) === "0" ? "1" : "0");   // 同じ職業のままだと、前に読み込んだキャラの装備が残る → いったん別の職業にする
   await set(jobId);
   engRndReset(null);
-  return engFullModel();
+  const model = engFullModel(); ENG.cache[key] = JSON.stringify(model);
+  return model;
 }
 async function engSettle(max = 4000) {   // ラトリオの中の後片づけ(時間差で動く初期化など)が終わって、取り出した中身が変わらなくなるまで待つ
   let prev = "", t0 = Date.now();
@@ -2227,16 +2229,17 @@ function stpHtml(m) {
     ${(() => { const L = simcLearnedList(m), n = simcLearnedCount(m); return L.length || n === 0 ? `<div class="muted" style="font-size:12px;margin:4px 0">【習】の装備（習得スキルのレベルで効果が変わる）: <b>${L.length ? esc(L.join("、")) : "いまの装備には無し"}</b>。習得スキルは、いまのキャラのものを使います（${n === null ? "確認中" : n === 0 ? `<span class="warn">入っていません。【習】の効果が出ません。「現在のキャラを反映」で入れてください</span>` : n + " 個入っています"}）。</div>` : ""; })()}
     <div class="stph">装備パターンごとの確認</div><div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
     <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
-    <div class="stph">ポイントを足したときの影響（余りの使い道）</div><div id="stpeff">${stpEffHtml(m, S)}</div></div>`;
+    ${simcFold("stpeff", "ポイントを足したときの影響（余りの使い道）", `<div id="stpeff">${stpEffHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}</div>`;
 }
 const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
 function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && el) el.innerHTML = stpMainHtml(m, S); }
 function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
   const mf = $("#view").querySelector('details[data-fold="opt"]'); if (!mf || !mf.open || !$("#stp") || !ENG.ready) return;
   const S = stpState(); if (!S) return;
-  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || !(S.eff && S.effSig === stpEffSig(m, S));
-  if (!need) return;
-  clearTimeout(S.kt); S.kt = setTimeout(() => stpHeavy(), S.rows ? 700 : 0);
+  const fe = $("#view").querySelector('details[data-fold="stpeff"]');
+  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S)));
+  if (!need || SIMC.busy) return;          // 「反映」などの作業中は計算しない(終わって描き直したあとに始める)
+  clearTimeout(S.kt); S.kt = setTimeout(() => stpHeavy(), S.rows ? 1000 : 500);
 }
 async function stpHeavy() {
   const c = simcCur(), S = stpState(); if (!c || !S) return;
@@ -2271,8 +2274,9 @@ async function stpHeavy() {
       }
       S.sug = R; S.sugSig = stpSugSig(m, S); put("stpsug", stpSugHtml(m, S));
     }
-    // 3) ポイントを足したときの影響
-    if (!(S.eff && S.effSig === stpEffSig(m, S))) {
+    // 3) ポイントを足したときの影響(枠を開いているときだけ)
+    const fe = $("#view").querySelector('details[data-fold="stpeff"]');
+    if (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S))) {
       const P0 = pats[0], withX = (dd) => stpEval(P0, dd, [3, 8]), b = withX(d), bx = stpExtra(b.r), sb0 = simcSbAvg(Object.assign(simcClone(P0.mm), { status: Object.assign({}, P0.mm.status, d) }), {});
       const base = { aspd: b.aspd, castP: b.castP, hp: b.hp, weight: bx.weight, ail: bx.ail, dmg: sb0 ? sb0.avg : null }, rows = [];
       for (const k of ["agi", "dex", "int", "vit", "str", "luk"]) {
@@ -3085,13 +3089,18 @@ async function simcApplySkills(model, skills) {
 const SIMC_JOBABBR = { "エレメンタルマスター": "EM", "インペリアルガード": "IG", "ドラゴンナイト": "DK", "シャドウクロス": "SX", "カーディナル": "CD", "ウィンドホーク": "WH", "アークメイジ": "AM", "マイスター": "MT", "アビスチェイサー": "AC", "インクイジター": "IQ", "トルバドゥール": "TR", "トルヴェール": "TV", "バイオロ": "BI", "ソウルアセティック": "SA", "ナイトウォッチ": "NW", "ハイパーノービス": "HN", "スピリットハンドラー": "SH", "ソウルリーパー": "SR", "サモナー": "SM", "リベリオン": "RB", "ルーンナイト": "RK", "ギロチンクロス": "GX", "アークビショップ": "AB", "レンジャー": "RA", "ウォーロック": "WL", "メカニック": "MC", "ロイヤルガード": "RG", "シャドウチェイサー": "SC", "ミンストレル": "MI", "ワンダラー": "WA", "ソーサラー": "SO", "ジェネティック": "GE" };
 // スロットの名前: キャラ名_Lv_職業の略称_装備スロットの記号(例: Fox_Thirteen_Lv267_EM_A)。記号が無い(登録していない装備)ときは「いま」
 const simcSlotName = (char, st, tag) => `${cn(char)}_Lv${(st && st.lv) || "?"}_${SIMC_JOBABBR[st && st.jobName] || (st && st.jobName) || "?"}_${tag || "いま"}`;
+function simcBusyNow(msg) {                   // 画面全体を描き直さず(計算し直さず)、「…しています」の帯だけを先に出す。終わったら普通に描き直す
+  const v = $("#view"); if (!v) return;
+  let b = v.querySelector(".busyfast"); if (!b) { b = document.createElement("div"); b.className = "busybar busyfast"; v.insertBefore(b, v.children[1] || null); }
+  b.textContent = msg;
+}
 async function simcFromFox(asNew, src) {    // src = {char, set, shadow, full}。full = いまのスロットの中身を、そのキャラ(職業・Lv・ステータス・装備)で置きかえる
   const F = src || SIMC.fox, EQ = DATA.equip || {}, e = (EQ.chars || {})[F.char];
   if (!e) return;
   const mainSet = (EQ.sets || {})[F.set], shSet = (EQ.shadows || {})[F.shadow], now = e.now || [];
   const st = (mainSet && (mainSet.chars || {})[F.char] && mainSet.chars[F.char].status) || e.status || {};
   let ch = simcCur(), id = SIMC.cur;
-  SIMC.busy = "キャラを読み込んでいます…"; SIMC.msg = ""; render();
+  SIMC.busy = "キャラを読み込んでいます…"; SIMC.msg = ""; simcBusyNow(SIMC.busy);
   if (!ENG.ready) { await engInit(); if (!ENG.ready) { SIMC.busy = ""; render(); return; } }
   try {
     if (asNew || F.full) {
@@ -3398,7 +3407,7 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    foldBind(V, (el) => { if (el.dataset.fold === "opt" && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    foldBind(V, (el) => { if ((el.dataset.fold === "opt" || el.dataset.fold === "stpeff") && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
     if (g("stp")) stpKick(m);
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
