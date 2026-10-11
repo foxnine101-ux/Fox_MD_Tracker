@@ -814,11 +814,14 @@ class CharCore(object):
         elif op == 0x0B39:
             body = pkt[5:]
             if len(body) < EQUIP_SIZE or len(body) % EQUIP_SIZE:
+                self.log("[装備] 装備の一覧(0B39)の長さが想定と違うので読めません: 全体={}バイト 本体={} 1件={}バイトで割った余り={} 先頭={}".format(
+                    len(pkt), len(body), EQUIP_SIZE, len(body) % EQUIP_SIZE, pkt[:24].hex()))
                 return
             items = [self._equip(body[i * EQUIP_SIZE:(i + 1) * EQUIP_SIZE])
                      for i in range(len(body) // EQUIP_SIZE)]
             worn = [e for e in items if e["wear"]]
             if not worn:
+                self.log("[装備] 装備の一覧(0B39)を受け取りましたが、着ているものがありません(全{}件)".format(len(items)))
                 return
             ch = self._ch()
             self._synced.add(getattr(self, "_key", None))
