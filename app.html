@@ -2338,7 +2338,7 @@ function stpHtml(m) {
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
   const oc = simcOptColors(m), okRows = S.rows && S.rowSig === stpRowSig(m, S);
   return `<div id="stp"><div class="bfbar"><span class="muted">条件</span>
-      <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
+      <button class="ghost" id="stprecalc" title="シミュレーターの計算結果を全部捨てて、いまの設定で計算し直します（数字が更新されていないと思ったときに）">再計算</button><label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
       <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
       <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
     ${stpBuffHtml(m)}
@@ -2351,6 +2351,7 @@ function stpHtml(m) {
     <div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
 `, ` <span class="muted">（選んだ装備スロット × シャドウのスロットを、いまのステータス・支援で着せた結果）</span>`, true)}
     ${simcFold("stpsb", "ダメージの目安（小型サンドバックマン）", stpSbCtl(m), ` <span class="muted">${esc(stpSbSum(m))}</span>`, false)}
+    ${simcFold("stpas", "ASPD の目安（サンドバックマンで選んだスキル）", `<div id="stpas">${stpAsHtml(m, S)}</div>`, ` <span class="muted">（「計算する」を押すと出ます）</span>`, false)}
     ${simcFold("stpgame", "ゲームの表示との照合（ASPD・ステータス・HP など）", simcFoldState().stpgame ? stpGameCmp(m) : `<div class="muted">開くと、ゲームの表示とアプリの計算を比べます。</div>`, ` <span class="muted">（食い違いの確認）</span>`, false)}
     <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
     ${simcFold("stpsw", "ステータスを変えたときのダメージ（INT を下げたらどれくらい？）", `<div class="bfbar"><label>ステータス <select data-stpswc="stat">${STP_KEYS.map((k) => `<option value="${k}" ${S.sw.stat === k ? "selected" : ""}>${STP_LABEL[k]}</option>`).join("")}</select></label>
@@ -2360,6 +2361,35 @@ function stpHtml(m) {
     ${simcFold("stpeff", "ポイントを足したときの影響（余りの使い道）", `<div id="stpeff">${stpEffHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}</div>`;
 }
 const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
+// ---- ASPD の目安: 撃ったあとの待ち = 攻撃モーション・スキルのディレイ・クールタイムのうち、いちばん長いもの(ラトリオの計算と同じ。資料: 思考の果てに「スキルディレイとモーションディレイ」)。
+// ASPD が効くのはモーションだけ。モーション(秒) = (200 − ASPD) × 0.02(ASPD 175 = 0.50 … 193 = 0.14)。ほかの待ち(ディレイ・クールタイム)のほうが長ければ、ASPD を上げても周期は縮まない ----
+const STP_MOT = (aspd) => Math.max(0, (200 - aspd) * 0.02);
+const stpAsSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([S.d, simcSbCfg(m)]);
+function stpAsCalc(m, S) {
+  const T = stpSbMt(m); if (!T) return { err: "サンドバックマンのスキルを選べません" };
+  const mm = simcClone(m); Object.assign(mm.status, S.d);
+  const c = engCalc(mm).c, r = engSandbag(mm, T.cfg, Object.assign({}, T.mt));
+  if (!r) return { err: "このスキルは計算できませんでした" };
+  const other = Math.max(r.delaySkill || 0, r.coolT || 0), aspd = c[37], cast = (r.castVary || 0) + (r.castFixed || 0);
+  const need = Math.min(193, Math.ceil(200 - other / 0.02 - 1e-9)), cyc = (a) => cast + Math.max(STP_MOT(a), other);
+  return { sig: stpAsSig(m, S), name: T.item.name, lv: T.mt.lv, aspd, castV: r.castVary || 0, castF: r.castFixed || 0, delay: r.delaySkill || 0, cool: r.coolT || 0, other, need, atCap: other < STP_MOT(193) - 1e-9,
+    rows: [193, 190, 185, 180, 175, 170, 160, 150].map((a) => ({ a, mot: STP_MOT(a), cyc: cyc(a), rel: cyc(193) / cyc(a) })), now: { mot: STP_MOT(aspd), cyc: cyc(aspd) } };
+}
+function stpAsHtml(m, S) {
+  const R = S.as, ok = R && R.sig === stpAsSig(m, S), n2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
+  const btn = `<button id="stpascalc" data-stpas="1">${R ? "計算し直す" : "計算する"}</button>`;
+  if (!R) return `<div class="muted" style="font-size:12px;margin:4px 0">サンドバックマンの枠で選んでいるスキルで、「ASPD をどこまで上げれば周期が縮まらなくなるか」を出します。</div><div class="opts">${btn}</div>`;
+  if (R.err) return `<div class="warn">${esc(R.err)}</div><div class="opts">${btn}</div>`;
+  const fx = (v) => `${n2(v)}秒`;
+  return `<div class="opts">${btn}${ok ? "" : `<span class="warn">条件を変えました。結果は前の設定のものです。「計算し直す」を押してください</span>`}</div>
+    <div style="${ok ? "" : "opacity:.5"}"><div class="muted" style="font-size:12px;margin:4px 0">${esc(R.name)} Lv${R.lv}。1回撃つ周期 = 詠唱（変動 ${fx(R.castV)} + 固定 ${fx(R.castF)}）+ 待ち。待ち = 攻撃モーション・ディレイ（${fx(R.delay)}）・クールタイム（${fx(R.cool)}）のいちばん長いもの。ASPD が効くのはモーションだけです。</div>
+    <div>${R.atCap ? `<b>ASPD 193（上限）でも、攻撃モーション ${fx(STP_MOT(193))} が待ちとして残ります。</b>ASPD は高いほど周期が縮みます。` : `<b>ASPD ${R.need} 以上あれば、これ以上上げても周期は変わりません</b>（ディレイ・クールタイムの ${fx(R.other)} のほうが、モーションより長くなるため）。`}
+      いまの試算の ASPD ${simcNum(R.aspd, 1)} は ${R.aspd >= R.need ? `<span class="good">境目以上です</span>` : `<span class="warn">境目より ${simcNum(R.need - R.aspd, 1)} 低いです</span>`}。
+      <button class="ghost" data-stpastarget="${R.need}" title="「ASPD を維持」の目標を、この境目にします">目標 ASPD を ${R.need} にする</button></div>
+    <table class="multi" style="margin-top:6px"><tr><th>ASPD</th><th>モーション</th><th>1回の周期</th><th>撃つ速さ（ASPD 193 を 100%）</th></tr>
+      ${R.rows.map((x) => `<tr${x.a === R.need ? ' style="font-weight:700"' : ""}><td>${x.a}</td><td class="v">${fx(x.mot)}</td><td class="v">${fx(x.cyc)}</td><td class="v">${Math.round(x.rel * 100)}%</td></tr>`).join("")}</table>
+    <div class="muted" style="font-size:12px">ラトリオの計算と資料の表に基づく目安です。設置系や押してすぐ出るスキルはモーションが固定で ASPD の影響を受けない、という情報もあります（ラトリオは全スキルを ASPD で変わるとして数えます）。変身中（真理の解放など）のモーションは別です。時限効果は入れていません。</div></div>`;
+}
 function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && el) el.innerHTML = stpMainHtml(m, S); }
 function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
   const mf = $("#view").querySelector('details[data-fold="opt"]'); if (!mf || !mf.open || !$("#stp") || !ENG.ready) return;
@@ -2780,7 +2810,7 @@ function engSandbag(model, cfg, mt, dbg) {                     // {per:{min,avg,
     return { mob: dbg ? (r.mobData || []).slice() : undefined, per: { min: g("GetDamageSummaryMinPerAtk"), avg: g("GetDamageSummaryAvePerAtk"), max: g("GetDamageSummaryMaxPerAtk") },
       unit: ((a.dmgUnitArray || [])[0] || []).slice(0, 3), hits: ((a.hitCountArray || [])[0] || []).slice(0, 3),
       cast: g("GetCastTime"), delay: g("GetDelayTime"), cool: g("GetCoolTime"), interval: g("GetAttackInterval"), perSec: g("GetDamageSummaryAvePerSec"), perSecActual: g("GetDamageSummaryAvePerSecActual"), hitRate: a.hitRate, noDmg: !!a.bNoDamage,
-      castVary: a.castVary, castFixed: a.castFixed, atkIvl: a.attackInterval, ground: !!a.bGroundInstallation };
+      castVary: a.castVary, castFixed: a.castFixed, atkIvl: a.attackInterval, ground: !!a.bGroundInstallation, delayMotion: a.delayMotion, delaySkill: a.delaySkill, coolT: a.coolTime, life: a.objectLifeTime, dmgIv: a.damageInterval };
   } finally {
     S.CM.GetMonsterId = origId;
     if (dm) { dm.clear(); dmSnap.forEach((v, k) => dm.set(k, v)); }
@@ -3622,6 +3652,12 @@ function renderSimChara() {
         const po = e.target.closest("[data-stpot]"); if (po) { m.status.speedPot = +po.dataset.stpot; changed(); return; }
         const a = e.target.closest("[data-stpapply]"); if (a) { const key = a.dataset.stpapply, c = key[0] === "b" ? (S.sug && S.sug.best || [])[+key.slice(1)] : (S.sug && S.sug.list || [])[+key]; if (c) { S.d.agi = c.agi; S.d.dex = c.dex; S.d.int = c.int; S.touched = true; render(); } return; }
         if (e.target.closest("#stpreflect")) { Object.assign(m.status, S.d); S.touched = false; SIMC.msg = "試算のステータスを、基本ステータスに入れました。"; changed(); return; }
+        if (e.target.closest("#stprecalc")) {      // 計算結果を全部捨てて、いまの設定で計算し直す
+          Object.keys(ENG.cache).filter((k) => /^(sbd:|stpk:|atkk:)/.test(k)).forEach((k) => delete ENG.cache[k]); if (ENG.calcCache && ENG.calcCache.clear) ENG.calcCache.clear();
+          S.rowSig = ""; S.sugSig = ""; S.effSig = ""; S.swSig = ""; S.rows = null; S.sug = null; S.eff = null; S.swR = null; render(); return;
+        }
+        const as = e.target.closest("[data-stpas]"); if (as) { as.disabled = true; as.textContent = "計算中…"; setTimeout(() => { try { S.as = stpAsCalc(m, S); } catch (err) { S.as = { err: "計算できませんでした: " + err.message }; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); }, 30); return; }
+        const at = e.target.closest("[data-stpastarget]"); if (at) { SIMC.opt.aspd = true; SIMC.opt.target = +at.dataset.stpastarget; render(); return; }
         if (e.target.closest("#stpreset")) { S.touched = false; render(); }
       };
       g("stp").onchange = (e) => {
