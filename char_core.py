@@ -800,11 +800,13 @@ class CharCore(object):
 
         elif op == 0x0999 and len(pkt) >= 11:            # 装備した(結果 0 = 成功)
             idx, loc = struct.unpack_from("<HI", pkt, 2)
+            self.log("[装備] {} 装備した 結果={} 持ち物の番号={} 場所={}".format(self._name(), pkt[10], idx, loc))
             if pkt[10] == 0:
                 self._wear(idx, loc, True)
 
         elif op == 0x099A and len(pkt) >= 9:             # 外した(結果 0 = 成功)
             idx, loc = struct.unpack_from("<HI", pkt, 2)
+            self.log("[装備] {} 外した 結果={} 持ち物の番号={} 場所={}".format(self._name(), pkt[8], idx, loc))
             if pkt[8] == 0:
                 self._wear(idx, loc, False)
 
@@ -830,6 +832,7 @@ class CharCore(object):
         eq, bag = ch.setdefault("equips", []), ch.setdefault("bag", [])
         item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
         if item is None:
+            self.log("[装備] 持ち物の一覧に番号 {} が無いので、装備の変更を反映できません(一覧 {} 件)".format(idx, len(eq) + len(bag)))
             return
         if item in eq:
             eq.remove(item)
