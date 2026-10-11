@@ -3,6 +3,13 @@
 ラグナロクオンライン(jRO)の通信を読んで、キャラごとのMDクールタイム・ニャル様の報告・被ダメ・装備を記録して画面に出す Windows 常駐ツール。
 利用者はプログラミング初心者。説明は日本語で、専門用語は身近なものにたとえる。作業は確認を挟まず最後まで進め、自分で動作確認してから報告する。
 
+## 開発の進め方(ローカル・クラウド共通)
+- **正は GitHub の main**。作業の最初に必ず `git pull`、区切りごとに push。別のセッションが先に進んでいることがある(v2.37.4 がそうだった)
+- コミットは `git -c user.name=Claude -c user.email=noreply@anthropic.com commit`(既定のメールだと GitHub が push を拒否)
+- 画面のテスト: `python tools/ui_test_server.py`(ポート 18788・保存は一時フォルダ。本物の exe の 8788 は避ける)をブラウザで開く。本物のデータは `--data <フォルダ>` で読むだけ(クラウドには無いので、無くても空で動く)。計算機の中身は `--ratorio <フォルダ>`。自動更新の確認は `tools/redraw_check.js` をコンソールで実行(`{kept:true, redrawn:true}` が正常)
+- 公開: `python tools/release.py <版> "<日本語メッセージ>" --notes <公開メモ>`(検査 → VERSION → release_notes.md → コミット → push → Actions 成功まで待つ。`--dry-run` で検査だけ)
+- リリース前に critic に diff を見せる(v2.37.4 の「描き直さない」が効いていないのを見つけた)。場所探しは scout
+
 ## ファイル
 | ファイル | 役目 |
 |---|---|
@@ -255,7 +262,7 @@
 
 ## テストのしかた
 - `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`
-- 画面: md_tracker を import → `md_core.MDCore` にダミーのキャラ・通信を流す → `start_live_server` → Playwright(Chromium)で操作・スクショ
+- 画面(おすすめは上の `tools/ui_test_server.py`): md_tracker を import → `md_core.MDCore` にダミーのキャラ・通信を流す → `start_live_server` → Playwright(Chromium)で操作・スクショ
   - 保存先の定数(`DMG_FILE` など)は一時フォルダに差しかえてから動かす(リポジトリを汚さない)
 - 利用者が送ってくれた本物の通信(確認用データの `hex`)をそのまま流して確かめるのがいちばん確実
 
