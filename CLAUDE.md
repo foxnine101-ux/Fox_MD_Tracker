@@ -189,12 +189,12 @@
 - **v2.34.0 公式サイトのモンスター情報**(`ro_official.py`。利用者の依頼: 入った MD のモンスター情報を公式サイトから負荷をかけずに自動で集める / 名前が分からない相手は使われたスキルから候補をタブで選んで手で紐付ける):
   - 取り先: `https://rotool.gungho.jp/`(robots.txt は全部許可)。JSON 検索 `/monster_filtered_search/?name=&detail=1`(名前の部分一致。ID名 `Name`・`JName`・Lv・HP・属性 `property`・種族・サイズ `scale`・種類 `class`・Atk 等。**スキルは無い**)、
     モンスター詳細 `/monster/<ID名>`(HTML。**使うスキル**・出現マップもある。`parse_detail`)、`/map_filtered_search/?name=`(MD の名前 → `map_file` 「1@ct0」。入ったマップ「0ef1@ct0」の後ろ `ct0` で見分ける)、`/map/<map_file>`(出現モンスター一覧 `parse_map`)。
-    **MD のマップの一覧は当てにならない**: `1@nls1`=26体 / `9@infi`(ファロス)=0体 / `1@ct2`(星座の塔)=536体(全部入り)。だから主な名簿は「見かけたモンスター」(`dmg_core.mob_seen` = 場所 → 名前。出現 09FD〜FF の種類 pkt[4]==5 が monster。フィールドは覚えない)と被ダメの相手の名前。一覧が `SMALL_MAP`(80)以下のマップだけ、そこのモンスターの詳細も集める
+    **MD のマップの一覧は当てにならない**: `1@nls1`=26体 / `9@infi`(ファロス)=0体 / `1@ct2`(星座の塔)=268体(全部入り。リンクが1体につき2つあるので、数えるときは重複をはずす)。だから主な名簿は「見かけたモンスター」(`dmg_core.mob_seen` = 場所 → 名前。出現 09FD〜FF の種類 pkt[4]==5 が monster。フィールドは覚えない)と被ダメの相手の名前。一覧が `SMALL_MAP`(80)以下のマップだけ、そこのモンスターの詳細も集める
   - **サイトポリシー(/sitepolicy/)**: 著作権は運営(ガンホー)にあり、個人的な利用以外での公開・配布は不可 → **集めたデータは `公式モンスター.json`(各 PC のローカル・.gitignore)だけ。アプリ(exe)にも GitHub にも同梱しない**(先に集めて同梱する案は、これで見送った)
-  - 負荷対策: 1件ずつ・`MIN_GAP`(3秒)+0〜1秒のゆらぎ・裏のスレッド・クッキー無し・同じものは二度取らない(見つからない名前は14日)・429/5xx/タイムアウトで30分休む・1回 `RUN_MAX`(120)件まで・アプリ起動の90秒後から30分おき(やることがあるときだけ)。UA は `Fox_MD_Tracker (personal local cache; …)`
+  - 負荷対策: 1件ずつ・`MIN_GAP`(3秒)+0〜1秒のゆらぎ・裏のスレッド・クッキー無し・同じものは二度取らない(見つからない名前は14日)・429/5xx/タイムアウトで30分休む(「今すぐ調べる」でも休みは解除しない)・取りにいく作業は同時に1つだけ(`_run_lock`。重なったら "busy")・1回 `RUN_MAX`(120)件まで・アプリ起動の90秒後から30分おき(やることがあるときだけ)。UA は `Fox_MD_Tracker (personal local cache; …)`
   - データ優先順位に足した: **実測(JRO_FIX) > 公式サイト(`Official.info`) > ラトリオ(mob_info.json) > rAthena**(`DmgCore.mob_view` が公式を先に引く。語彙は mob_info と同じ: 属性「闇1」・種族「悪魔」・サイズ「中」・ボス = 種類が一般以外なら 1。強さ違いは「185/250」)
   - 名前の分からない相手 `ID○○` は **1体ごとの番号(出会うたびに変わる)** で、モンスターの種類ではない。だから `DmgCore.unknown_groups()` が 場所 × 使った(名前のある)技の組み合わせ でグループにして、候補 = その場所で見かけた名前 + 公式の出現一覧、
-    技が全部合う順(使った技が1つも合わないものは外す)。`auto` = 全部の技に当てはまるのが見かけたモンスター1つだけのとき(`apply_auto` が60秒おきに自動で紐付ける)。`link_ids(where, ids, name, remember, skills)` は `_rename_who` で記録を付けかえて、`names[ID]` も入れる(その ID の次の被ダメが名前で入る)。
+    技が全部合う順(使った技が1つも合わないものは外す)。`auto` = **その場所の候補の使うスキルが全部取れていて**(`Official.detailed`。集めている途中は決めない)、全部の技に当てはまるのが見かけたモンスター1つだけのとき(`apply_auto` が60秒おきに自動で紐付ける。`_rename_who` は元に戻せないので慎重に)。出現一覧が `SMALL_MAP` を超えるマップ(星座の塔など)は一覧を候補にしない。`link_ids(where, ids, name, remember, skills)` は `_rename_who` で記録を付けかえて、`names[ID]` も入れる(その ID の次の被ダメが名前で入る)。
     `remember` = 決まり `links`([{where, skills, name}])。記録するときに `_rule_name(where, skill)` がその技にぴったり1つの決まりがあれば、その場で名前にする。他の技も使う相手は別グループ(混ぜない)
   - API: `/api/data` に `mob_groups`・`official`(状態)・`official_names`、POST `/api/moblink`・POST `/api/official`({enabled} / {run:1}。`kick`)。画面は被ダメタブの上(`officialHtml` / `mobGroupsHtml` / `bindMobGroups`)
   - テスト: 実ページを保存した fixture で `parse_*`・間隔・キャッシュ・429・上限を確認(scratchpad の `t_official.py`)、本物のサイトで 4 リクエストだけ実地確認ずみ。画面は `ui_server9.py`(`Official` の fetch を差しかえてサイトを呼ばない)

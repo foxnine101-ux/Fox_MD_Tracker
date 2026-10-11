@@ -93,6 +93,10 @@ def parse_detail(html_text):
 def parse_map(html_text):
     """マップのページ → その出現モンスターの一覧 [[ID名, 日本語名], …]"""
     out, seen = [], set()
+    i = html_text.find('id="monster_list_simple"')
+    if i >= 0:                               # 出現モンスターの表がある → その中だけ(ほかの場所のリンクを拾わない)
+        j = html_text.find("</table>", i)
+        html_text = html_text[i:j if j > 0 else len(html_text)]
     for a, b in re.findall(r'href="/monster/([^"/?#]+)"[^>]*>(.*?)</a>', html_text, flags=re.S):
         if a in seen:
             continue
@@ -155,6 +159,8 @@ class Official(object):
         self.mdmaps = {}      # MD の名前 -> {"files": [[ファイル名, マップ名], …], "t": 時刻}
         self.misses = {}      # 見つからなかった名前 -> 時刻
         self.pause_until = 0
+        self.SMALL_MAP = SMALL_MAP
+        self._run_lock = threading.Lock()     # 取りにいく作業は同時に1つだけ(裏の作業と「今すぐ調べる」が重ならないように)
         self.state = "idle"   # idle / working / paused / off
         self.last_run = 0
         self.last_error = ""
@@ -223,6 +229,11 @@ class Official(object):
 
     def has(self, name):
         return bool(self.recs(name))
+
+    def detailed(self, name):
+        """詳細ページまで取れている(使うスキルが分かっている)か。使うスキルが無いモンスターでも、取れていれば True。"""
+        rs = self.recs(name)
+        return bool(rs) and all(r.get("d") for r in rs)
 
     def map_index(self):
         """どこかのマップの一覧に載っている 日本語名 -> [ID名]"""
@@ -416,6 +427,8 @@ class Official(object):
         if self._clock() < self.pause_until:
             self.state = "paused"
             return "paused"
+        if not self._run_lock.acquire(False):
+            return "busy"                      # もう1つの作業が動いている → 重ねない(サイトに同時に2つ聞かない)
         self.state = "working"
         self.budget = RUN_MAX
         self.last_error = ""
@@ -440,6 +453,7 @@ class Official(object):
             if self.changed:
                 self.save()
             self.state = "paused" if self._clock() < self.pause_until else "idle"
+            self._run_lock.release()
         return res
 
     # ---------- 裏で動かす ----------
@@ -476,9 +490,8 @@ class Official(object):
 
     def kick(self, wanted):
         """「今すぐ調べる」: 休み中でなければ、いま1回だけ裏で動かす。"""
-        if self.state == "working" or not self.enabled:
-            return False
-        self.pause_until = 0
+        if self.state == "working" or not self.enabled or self._clock() < self.pause_until:
+            return False                       # 作業中・オフ・サイトの調子が悪くて休み中(休みは途中で解除しない)
         th = threading.Thread(target=lambda: self.run_once(wanted), name="official-kick", daemon=True)
         th.start()
         return True

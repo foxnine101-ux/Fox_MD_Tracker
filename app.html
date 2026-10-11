@@ -3346,7 +3346,7 @@ function officialHtml() {
       <span class="muted">RO公式ツールから、入った MD で見かけたモンスターの情報（Lv・HP・属性・種族・サイズ・使うスキルなど）を、この PC に集めています。1件ずつ3秒以上あけて、サイトに負荷をかけないようにしています。集めたものは、この PC の中だけに置きます。</span></div>
     <div class="opts"><span>集めた <b>${fmtN(O.mobs)}</b> 体（詳しい情報つき ${fmtN(O.details)}）／ これから調べる ${fmtN(O.pending)} 件 ／ ${esc(st)}</span>
       <label><input type="checkbox" id="offon" ${O.enabled ? "checked" : ""}> 自動で集める</label>
-      <button class="ghost" id="offrun" ${O.state === "working" || !O.enabled ? "disabled" : ""}>今すぐ調べる</button>${O.error ? ` <span class="warn">${esc(O.error)}</span>` : ""}</div></div>`;
+      <button class="ghost" id="offrun" ${O.state === "working" || O.state === "paused" || !O.enabled ? "disabled" : ""}>今すぐ調べる</button>${O.error ? ` <span class="warn">${esc(O.error)}</span>` : ""}</div></div>`;
 }
 const MG_SEL = {};
 const mgKey = (g) => g.where + "|" + (g.named || []).join(",") + "|" + (g.skills.length ? "" : g.ids[0]);
@@ -3359,7 +3359,7 @@ function mobGroupsHtml() {
       ${names.length ? "" : "（公式モンスター情報がまだ集まっていないので、候補は少ないです。しばらくすると増えます）"}</div>
     <datalist id="mgnames">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
     ${G.map((g, i) => {
-      const k = mgKey(g), sel = MG_SEL[k] !== undefined ? MG_SEL[k] : (g.auto || (g.cands[0] && g.cands[0].total && g.cands[0].match ? g.cands[0].name : ""));
+      const k = mgKey(g), fulls = g.cands.filter((c) => c.total && c.match === c.total && c.known), sel = MG_SEL[k] !== undefined ? MG_SEL[k] : (g.auto || (fulls.length === 1 ? fulls[0].name : ""));      // 最初から選んでおくのは、決まっているときだけ(迷うときは自分で選ぶ)
       return `<div class="mgcard" data-mgi="${i}"><div class="opts"><span class="tag">${esc(g.where)}</span> <b>ID ${g.ids.length} 体</b><span class="muted">${fmtN(g.hits)} 回</span>
         <span>${g.skills.map(([s, n]) => `<span class="mgsk${g.named.includes(s) ? "" : " dim"}">${esc(s)} ×${n}</span>`).join("")}</span></div>
         <div class="mgtabs">${g.cands.length ? g.cands.map((c) => `<button class="mgtab${c.name === sel ? " on" : ""}${c.name === g.auto ? " auto" : ""}" data-mgi="${i}" data-name="${esc(c.name)}" title="${c.seen ? "この場所で見かけたモンスター" : "この場所の出現モンスター一覧にある"}${c.known ? "" : "（使うスキルの情報はまだ無い）"}">${esc(c.name)}<small>${c.total ? `技 ${c.match}/${c.total}` : ""}${c.seen ? " ・見かけた" : ""}</small></button>`).join("") : `<span class="muted">候補がありません（下の欄に名前を入れてください）</span>`}</div>

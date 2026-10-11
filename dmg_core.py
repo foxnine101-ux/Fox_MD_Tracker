@@ -946,20 +946,25 @@ class DmgCore(object):
             for n in (self.mob_seen.get(where) or {}):
                 pool[n] = True
             if off is not None:
-                for n in off.monsters_on(where, self._suffixes(where)):
-                    pool.setdefault(n, False)
+                mo = off.monsters_on(where, self._suffixes(where))
+                if len(mo) <= getattr(off, "SMALL_MAP", 80):      # 一覧が大きいマップ(星座の塔など)は、全部入りなので候補にしない(見かけたものだけ)
+                    for n in mo:
+                        pool.setdefault(n, False)
             for g in by.values():
                 used = {norm(s) for s in g["named"]}
                 cands = []
                 for n, seen in pool.items():
+                    det = off is not None and off.detailed(n)        # 使うスキルまで分かっているか(スキルが無いモンスターでも、取れていれば True)
                     sk = {norm(s) for s in (off.skills_of(n) if off is not None else [])}
                     got = len(used & sk)
-                    if used and not got and sk:
-                        continue                                  # 使った技が1つも合わないモンスターは候補にしない
-                    cands.append({"name": n, "match": got, "total": len(used), "seen": bool(seen), "known": bool(sk), "extra": len(sk - used)})
+                    if used and det and not got:
+                        continue                                  # 使うスキルが分かっていて、使った技が1つも合わないモンスターは候補にしない
+                    cands.append({"name": n, "match": got, "total": len(used), "seen": bool(seen), "known": det, "extra": len(sk - used)})
                 cands.sort(key=lambda c: (-(c["match"] / c["total"] if c["total"] else 0), not c["seen"], not c["known"], c["extra"], c["name"]))
-                full = [c for c in cands if c["total"] and c["match"] == c["total"] and c["seen"] and c["known"]]
-                auto = full[0]["name"] if len(full) == 1 and sum(1 for c in cands if c["total"] and c["match"] == c["total"]) == 1 else None
+                full = [c for c in cands if c["total"] and c["match"] == c["total"] and c["known"]]
+                # 自動で決めるのは、その場所のモンスターの使うスキルが全部分かっていて(集めている途中ではなくて)、全部の技に当てはまるのが、見かけた1体だけのとき
+                complete = bool(cands) and all(c["known"] for c in cands)
+                auto = full[0]["name"] if complete and len(full) == 1 and full[0]["seen"] else None
                 groups.append({"where": where, "ids": sorted(g["ids"]), "named": list(g["named"]),
                                "skills": sorted(g["skills"].items(), key=lambda kv: -kv[1]), "hits": sum(g["skills"].values()),
                                "cands": cands[:10], "auto": auto})
