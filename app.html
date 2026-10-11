@@ -1425,6 +1425,9 @@ const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
 // いまログインしているキャラ(複数つながっているときは、いちばん最近動きがあったもの)。「いま着ている装備」は、このキャラの装備だけを指す
+// いまログインしているキャラ。キャラ選択画面に戻っている間は空 → 「現在のキャラ」のボタンは、最後にログインしていたキャラ(装備・職業を覚えている中で、いちばん新しいもの)で使えるようにする
+function lastChar() { const E = (DATA.equip || {}).chars || {}, n = nowChar(); if (n) return n; return Object.keys(E).filter((c) => (E[c].now || []).length && (E[c].status || {}).jobName).sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0] || ""; }
+const charWho = () => { const c = lastChar(); return c ? (nowChar() ? cn(c) : "最後にログインしていた " + cn(c)) : ""; };
 function nowChar() { const E = (DATA.equip || {}).chars || {}; return (DATA.now_chars || []).filter((c) => E[c]).sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0] || ""; }
 const simcStripSb = (m) => { if (!m || !m.foxSb) return m; const c = Object.assign({}, m); delete c.foxSb; return c; };      // サンドバックマンの設定は「変更」に数えない
 const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(simcStripSb(c.model)) !== JSON.stringify(simcStripSb(c.saved));
@@ -1737,12 +1740,12 @@ function simcFragItems(m, shadow) {       // 装備セットタブに出す用�
 }
 const simcDirty = (m, shadow) => { const sig = shadow ? m.foxShadowSig : m.foxSetSig; return !!sig && sig !== simcFragSig(m, shadow); };
 function simcSetTabs(m, shadow) {         // 装備スロット: 記号を押すとメニュー(反映 = 計算機に入れる / 上書き = いまの計算機の装備を保存 / 名前 / 登録を外す)
-  const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0, nc = nowChar(), E = (DATA.equip || {}).chars || {};
+  const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0, nc = lastChar(), E = (DATA.equip || {}).chars || {};
   const hasNow = nc && (E[nc].now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
   return `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
     + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備に切りかえます。右クリックで、上書き・名前の変更など）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
     + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しいスロットに保存します">＋新しいスロットに保存</button>`
-    + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `いまログインしている「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインすると使えます"}">いま着ている装備を反映</button>`
+    + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `${esc(charWho())}「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインして装備を読み込むと使えます"}">いま着ている装備を反映</button>`
     + `<button class="settab more" data-wearmore="${sh}" title="これまでに着たことのある組み合わせ（履歴）から選んで、計算機に入れます">保存した装備から ▾</button>`;
 }
 // ---- 支援・アイテム・スキル(数が多いので: 分類のタブ + 目的のしぼり込み + 検索 + 「オンのもの」) ----
@@ -2642,9 +2645,11 @@ function renderSimChara() {
         <button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
       <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオ」で中身を入れられます">＋ 新しいスロットを作成</button>
-        <button id="sccnewnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備が入った、新しいスロットを作ります（いまのスロットはそのまま。名前は キャラ名_Lv_職業_装備スロット）` : "ゲームにログインすると使えます"}">＋ 現在のキャラで新しいスロットを作成${nowChar() ? `（${esc(cn(nowChar()))}）` : ""}</button>
-        ${ch ? `<button id="sccnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">⟳ 現在のキャラを反映${nowChar() ? `（${esc(cn(nowChar()))}）` : ""}</button>` : ""}
-        ${nowChar() ? "" : `<span class="muted">「現在のキャラ」のボタンは、ゲームにログインすると使えます。</span>`}</div>
+        <button id="sccnewnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備が入った、新しいスロットを作ります（いまのスロットはそのまま。名前は キャラ名_Lv_職業_装備スロット）` : "ゲームにログインして、キャラを読み込むと使えます"}">＋ 現在のキャラで新しいスロットを作成${lastChar() ? `（${esc(charWho())}）` : ""}</button>
+        ${ch ? `<button id="sccnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">⟳ 現在のキャラを反映</button>
+        <button id="sccnowequip" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}が着ている装備（メインとシャドウ）だけを、このスロットに入れます（職業・ステータスはそのまま）` : "ゲームにログインすると使えます"}">⟳ 現在の装備を反映</button>` : ""}
+        ${lastChar() ? (nowChar() ? "" : `<span class="muted">ログインしていないので、最後にログインしていたキャラを使います。</span>`) : `<span class="muted">「現在のキャラ」のボタンは、ゲームにログインしてキャラを読み込むと使えます。</span>`}</div>
+      ${SIMC.msg && /できません|取り込めません|作れません/.test(SIMC.msg) ? `<div class="busybar" style="background:#e5484d;color:#fff">${esc(SIMC.msg)}</div>` : ""}
       ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}
       ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「ロード」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「ロード」で戻せます。"}</div>` : ""}</div>`;
   {
@@ -2758,10 +2763,15 @@ function renderSimChara() {
     } catch (e) { SIMC.msg = "作れませんでした: " + e.message; }
     SIMC.busy = ""; render();
   };
-  if (g("sccnewnow")) g("sccnewnow").onclick = () => { const c = nowChar(); if (c) simcFromFox(true, { char: c, set: "", shadow: "" }); };
+  if (g("sccnewnow")) g("sccnewnow").onclick = () => { const c = lastChar(); if (c) simcFromFox(true, { char: c, set: "", shadow: "" }); };
+  if (g("sccnowequip")) g("sccnowequip").onclick = async () => {
+    const c = lastChar(); if (!c) return;
+    if (await askOnce("wear", `計算機の装備とシャドウ装備を、${charWho()}「${cn(c)}」が着ている装備に切りかえます。
+スロットに保存していない、いまの装備（変更したところ）は消えます。`, "切りかえる")) { simcWearSet("now:" + c, false); simcWearSet("now:" + c, true); }
+  };
   if (g("sccnow")) g("sccnow").onclick = async () => {
-    const c = nowChar(); if (!c) return;
-    if (await askOnce("nowchar", `スロット「${ch.name}」に、いまログインしている「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「ロード」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
+    const c = lastChar(); if (!c) return;
+    if (await askOnce("nowchar", `スロット「${ch.name}」に、${charWho()}「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「ロード」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
   };
   if (g("sccretry")) g("sccretry").onclick = () => { ENG.err = ""; engInit().then(render); render(); };
   if (g("sccsavebtn")) g("sccsavebtn").onclick = () => { ch.saved = simcClone(ch.model); simcSave(); SIMC.msg = "保存しました。"; render(); };
@@ -2906,7 +2916,7 @@ function renderSimChara() {
       el.oncontextmenu = (e) => { e.preventDefault(); menu(e.clientX, e.clientY); };
     });
     V.querySelectorAll("[data-simreg]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcRegister(el.dataset.simreg === "1", ""); });
-    V.querySelectorAll("[data-wearnow]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const c = nowChar(); if (c) wearAsk("now:" + c, el.dataset.wearnow === "1", cn(c) + " がいま着ている装備"); });
+    V.querySelectorAll("[data-wearnow]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const c = lastChar(); if (c) wearAsk("now:" + c, el.dataset.wearnow === "1", cn(c) + " がいま着ている装備"); });
     V.querySelectorAll("[data-wearmore]").forEach((el) => el.onclick = (e) => {
       e.preventDefault();
       const shadow = el.dataset.wearmore === "1", L = simcSetList(m, shadow);
