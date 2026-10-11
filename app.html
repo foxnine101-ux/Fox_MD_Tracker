@@ -2861,15 +2861,15 @@ async function simcRegister(shadow, take) {     // いまの計算機の装備�
 // ---- Fox のキャラ・装備セットを取り込む(通信で読んだ名前 → ラトリオの候補の名前でつなぐ) ----
 const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
 const SIMC_FOXSH = [[65536, 19], [131072, 14], [262144, 15], [524288, 21], [1048576, 22], [2097152, 23]];
-function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して
-  const nm = (o) => o.n || o.t, link = (SETTINGS.ratLinks || {})[gameId];
+function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して。候補の名前の先頭の「【習】」などは外して比べる(「【習】デイヴィッドシールド」= ゲームの「デイヴィッドシールド」)。【】の無い候補があれば、そちらを先に選ぶ
+  const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = (SETTINGS.ratLinks || {})[gameId];
   if (link) { const o = opts.find((x) => nm(x) === link); if (o) return o; }
   const n = ratNorm(name);
   if (!n || /^ID\d+$/.test(n)) return null;
   const bare = n.replace(/^\[[^\]]*\]/, ""), base = (t) => ratNorm(String(t).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "").replace(/\[\d\]$/, ""));
-  const real = opts.filter((o) => o.v);
-  return real.find((o) => ratNorm(nm(o)) === n) || real.find((o) => base(nm(o)) === n) || (bare !== n ? real.find((o) => base(nm(o)) === bare) : null)
-    || (isCard ? real.find((o) => base(nm(o)) === n.replace(/カード$/, "")) : null) || null;
+  const real = opts.filter((o) => o.v), pick = (f) => real.find((o) => !/^【/.test(String(nm(o) ?? "")) && f(o)) || real.find(f);
+  return pick((o) => ratNorm(nmS(o)) === n) || pick((o) => base(nmS(o)) === n) || (bare !== n ? pick((o) => base(nmS(o)) === bare) : null)
+    || (isCard ? pick((o) => base(nmS(o)) === n.replace(/カード$/, "")) : null) || null;
 }
 function simcWearCards(m, region, it) {   // Fox は空の枠を詰めて覚えているので、「その名前が候補にある、まだ空いている枠」に入れる
   const rows = [], opts = simcCardOpts(region, m.equip[region]), cs = SIMC_CARD[region], free = [0, 1, 2, 3].filter((i) => opts[i].length > 1);
