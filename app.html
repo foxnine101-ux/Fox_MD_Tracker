@@ -902,7 +902,7 @@ td.dm-max{font-weight:700}
 .abar .aw i{display:block;height:100%;background:var(--accent);border-radius:5px}.abar .av{flex:0 0 7em;text-align:right;font-variant-numeric:tabular-nums}.abar .an2{flex:0 0 10em;font-size:12px}
 .atkbig{display:flex;flex-wrap:wrap;gap:24px}.atkbig b{font-size:24px}.atkmres{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.atkmob{margin-top:4px}
 .atkfxg{margin:6px 0}.atkfxl{display:flex;flex-wrap:wrap;gap:6px}.afx{border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;background:var(--panel);cursor:pointer;display:inline-flex;gap:4px;align-items:center}
-.afx{user-select:none}.afxn{margin-left:3px}.afxrate td,.afxrate th{padding:2px 8px}.afx.dim{color:var(--muted);opacity:.7}.afx.on.dim{opacity:1}.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
+.infopop{position:fixed;z-index:9999;width:430px;max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);padding:8px 12px;font-size:13px}.infoh{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.infox{cursor:pointer;opacity:.7}.infob{line-height:1.5}.afx{user-select:none}.afxn{margin-left:3px}.afxrate td,.afxrate th{padding:2px 8px}.afx.dim{color:var(--muted);opacity:.7}.afx.on.dim{opacity:1}.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
 .sbres{margin:6px 0}
 .sbrec{margin-top:10px}
 .sbdet{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
@@ -2360,35 +2360,100 @@ function stpHtml(m) {
       <div id="stpsw">${stpSwHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}
     ${simcFold("stpeff", "ポイントを足したときの影響（余りの使い道）", `<div id="stpeff">${stpEffHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}</div>`;
 }
+// 装備・カード・エンチャントの詳細(ラトリオの「アイテム情報」と同じ文章。効果・セット効果つき)。右クリックで出す
+async function engInfoHtml(kind, id) {
+  const w = ENG.frame.contentWindow, d = ENG.frame.contentDocument;
+  ENG.x.info = ENG.x.info || (await w.eval(`import("${engBase()}engine/equip/CItemInfoManager.js")`)).CItemInfoManager;
+  const div = d.createElement("div");
+  (kind === "card" ? ENG.x.info.RebuildInfoTableSubCardDetail : ENG.x.info.RebuildInfoTableSubItemDetail)(div, id, false);
+  return div.innerHTML;
+}
+function infoPop(ev, title, htmlPromise) {
+  document.querySelectorAll(".infopop").forEach((e) => e.remove());
+  const el = document.createElement("div"); el.className = "infopop";
+  el.innerHTML = `<div class="infoh"><b>${esc(title)}</b><a class="infox" title="閉じる">×</a></div><div class="infob"><span class="spin">読み込み中…</span></div>`;
+  document.body.appendChild(el);
+  const x = Math.min(ev.clientX + 8, window.innerWidth - 440), y = Math.min(ev.clientY + 8, window.innerHeight - 200); el.style.left = Math.max(8, x) + "px"; el.style.top = Math.max(8, y) + "px";
+  el.querySelector(".infox").onclick = () => el.remove();
+  Promise.resolve(htmlPromise).then((h) => { el.querySelector(".infob").innerHTML = h || `<span class="muted">説明がありません（ラトリオに効果の記述がないものです）</span>`; }).catch((e) => { el.querySelector(".infob").innerHTML = `<span class="warn">読み込めませんでした: ${esc(e.message)}</span>`; });
+}
+document.addEventListener("contextmenu", (e) => {
+  const b = e.target.closest && e.target.closest("button[data-item], button[data-card]"); if (!b || !ENG.ready) return;
+  const ch = simcCur(); if (!ch) return; const m = ch.model;
+  if (b.dataset.item !== undefined) { const r = +b.dataset.item, id = simcItemAt(m, r); if (!id || simcIsNone(r, id)) return; e.preventDefault(); infoPop(e, simcItemName(id), engInfoHtml("item", id)); return; }
+  const [r, i] = b.dataset.card.split(":").map(Number), id = m.card[SIMC_CARD[r][i]]; if (!id) return;
+  e.preventDefault(); infoPop(e, simcCardName(id), engInfoHtml("card", id));
+});
+document.addEventListener("click", (e) => { if (!(e.target.closest && e.target.closest(".infopop"))) document.querySelectorAll(".infopop").forEach((x) => x.remove()); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".infopop").forEach((x) => x.remove()); });
 const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
 // ---- ASPD の目安: 撃ったあとの待ち = 攻撃モーション・スキルのディレイ・クールタイムのうち、いちばん長いもの(ラトリオの計算と同じ。資料: 思考の果てに「スキルディレイとモーションディレイ」)。
 // ASPD が効くのはモーションだけ。モーション(秒) = (200 − ASPD) × 0.02(ASPD 175 = 0.50 … 193 = 0.14)。ほかの待ち(ディレイ・クールタイム)のほうが長ければ、ASPD を上げても周期は縮まない ----
 const STP_MOT = (aspd) => Math.max(0, (200 - aspd) * 0.02);
 const stpAsSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([S.d, simcSbCfg(m)]);
+// 1つの構成(mm = ステータス込みの model)の、このスキルの詠唱・待ち・ASPD の境目
+function stpAsCore(mm, T) {
+  const c = engCalc(mm).c, r = engSandbag(mm, T.cfg, Object.assign({}, T.mt));
+  if (!r) return null;
+  const other = Math.max(r.delaySkill || 0, r.coolT || 0), aspd = c[37], castV = r.castVary || 0, castF = r.castFixed || 0, cast = castV + castF;
+  const cyc = (a) => cast + Math.max(STP_MOT(a), other);
+  return { aspd, castV, castF, delay: r.delaySkill || 0, cool: r.coolT || 0, other, need: Math.min(193, Math.ceil(200 - other / 0.02 - 1e-9)), atCap: other < STP_MOT(193) - 1e-9,
+    rows: [193, 190, 185, 180, 175, 170, 160, 150].map((a) => ({ a, mot: STP_MOT(a), cyc: cyc(a), rel: cyc(193) / cyc(a) })), cyc };
+}
+// 潜在解放(エレメンタルマスター)の候補: 装備の場所ごとに、選べるものと入る枠(ラトリオの候補の表から)。同じ番号は1つ
+function stpSenzaiList(m) {
+  const out = [], seen = new Set();
+  for (const [r, slots] of Object.entries(SIMC_CARD)) {
+    const itemId = m.equip[r]; if (!itemId) continue;
+    let opts; try { opts = simcCardOpts(+r, itemId); } catch (e) { continue; }
+    opts.forEach((lst, k) => (lst || []).forEach((o) => { if (o.v && /潜在解放\(エレメンタルマスター/.test(String(o.n || o.t || "")) && !seen.has(o.v + ":" + slots[k])) { seen.add(o.v + ":" + slots[k]); out.push({ v: o.v, slot: slots[k], region: +r, name: String(o.n || o.t) }); } }));
+  }
+  return out;
+}
+const stpAsBase = (m, S) => { const mm = simcClone(m); Object.assign(mm.status, S.d); return mm; };
+// 選んだ潜在解放(S.asOn: 番号 → オンか。無ければ、いま付いているか)を着けた構成
+function stpAsVirtualModel(m, S, R) {
+  const mm = stpAsBase(m, S);
+  for (const c of R.senzai) { const on = S.asOn && S.asOn[c.v] !== undefined ? S.asOn[c.v] : mm.card[c.slot] === c.v; if (on) mm.card[c.slot] = c.v; else if (mm.card[c.slot] === c.v) mm.card[c.slot] = 0; }
+  return mm;
+}
+const stpSenzaiLabel = (nm) => { const mm = /エレメンタルマスター([IVX]+)\)\s*(.*)$/.exec(nm); return mm ? "潜在 " + mm[1] + (mm[2] ? " " + mm[2] : "") : nm; };
 function stpAsCalc(m, S) {
   const T = stpSbMt(m); if (!T) return { err: "サンドバックマンのスキルを選べません" };
-  const mm = simcClone(m); Object.assign(mm.status, S.d);
-  const c = engCalc(mm).c, r = engSandbag(mm, T.cfg, Object.assign({}, T.mt));
-  if (!r) return { err: "このスキルは計算できませんでした" };
-  const other = Math.max(r.delaySkill || 0, r.coolT || 0), aspd = c[37], cast = (r.castVary || 0) + (r.castFixed || 0);
-  const need = Math.min(193, Math.ceil(200 - other / 0.02 - 1e-9)), cyc = (a) => cast + Math.max(STP_MOT(a), other);
-  return { sig: stpAsSig(m, S), name: T.item.name, lv: T.mt.lv, aspd, castV: r.castVary || 0, castF: r.castFixed || 0, delay: r.delaySkill || 0, cool: r.coolT || 0, other, need, atCap: other < STP_MOT(193) - 1e-9,
-    rows: [193, 190, 185, 180, 175, 170, 160, 150].map((a) => ({ a, mot: STP_MOT(a), cyc: cyc(a), rel: cyc(193) / cyc(a) })), now: { mot: STP_MOT(aspd), cyc: cyc(aspd) } };
+  const base = stpAsBase(m, S), B = stpAsCore(base, T);
+  if (!B) return { err: "このスキルは計算できませんでした" };
+  // このスキルの詠唱・ディレイ・クールタイムに効く潜在解放だけを残す(その枠を空にしたときと、付けたときを比べる)
+  const senzai = [], empty = {};
+  for (const c of stpSenzaiList(base)) {
+    const m0 = simcClone(base); m0.card[c.slot] = 0; const a = empty[c.slot] || (empty[c.slot] = stpAsCore(m0, T));
+    const m1 = simcClone(base); m1.card[c.slot] = c.v; const b = stpAsCore(m1, T);
+    if (!a || !b) continue;
+    const d = { castV: b.castV - a.castV, castF: b.castF - a.castF, delay: b.delay - a.delay, cool: b.cool - a.cool };
+    if (Object.values(d).some((x) => Math.abs(x) > 1e-6)) senzai.push(Object.assign({}, c, { d }));
+  }
+  return { sig: stpAsSig(m, S), name: T.item.name, lv: T.mt.lv, base: B, senzai };
 }
 function stpAsHtml(m, S) {
-  const R = S.as, ok = R && R.sig === stpAsSig(m, S), n2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
+  const R = S.as, ok = R && R.sig === stpAsSig(m, S), n2 = (v) => (Math.round(v * 100) / 100).toFixed(2), fx = (v) => `${n2(v)}秒`;
   const btn = `<button id="stpascalc" data-stpas="1">${R ? "計算し直す" : "計算する"}</button>`;
-  if (!R) return `<div class="muted" style="font-size:12px;margin:4px 0">サンドバックマンの枠で選んでいるスキルで、「ASPD をどこまで上げれば周期が縮まらなくなるか」を出します。</div><div class="opts">${btn}</div>`;
+  if (!R) return `<div class="muted" style="font-size:12px;margin:4px 0">サンドバックマンの枠で選んでいるスキルで、「ASPD をどこまで上げれば周期が縮まなくなるか」を出します。そのスキルに効く潜在解放を、1つずつ切りかえて比べられます。</div><div class="opts">${btn}</div>`;
   if (R.err) return `<div class="warn">${esc(R.err)}</div><div class="opts">${btn}</div>`;
-  const fx = (v) => `${n2(v)}秒`;
+  const B = R.base, on = (c) => (S.asOn && S.asOn[c.v] !== undefined ? S.asOn[c.v] : stpAsBase(m, S).card[c.slot] === c.v);
+  const dtxt = (d) => [["castV", "変動詠唱"], ["castF", "固定詠唱"], ["delay", "ディレイ"], ["cool", "クールタイム"]].filter(([k]) => Math.abs(d[k]) > 1e-6).map(([k, l]) => `${l} ${d[k] > 0 ? "+" : "−"}${n2(Math.abs(d[k]))}s`).join(" ／ ");
+  let V = B, changed = false;
+  if (ok) { changed = R.senzai.some((c) => on(c) !== (stpAsBase(m, S).card[c.slot] === c.v)); if (changed) { const T = stpSbMt(m); V = T && stpAsCore(stpAsVirtualModel(m, S, R), T) || B; } }
+  const chips = R.senzai.length ? R.senzai.map((c) => `<span class="afx${on(c) ? " on" : ""}" data-stpasc="${c.v}" title="${esc(c.name)}（${esc(dtxt(c.d))}）。同じ枠に入る潜在解放は、どれか1つです">${esc(stpSenzaiLabel(c.name))}<span class="muted" style="font-size:11px;margin-left:4px">${esc(dtxt(c.d))}</span></span>`).join("") : `<span class="muted">このスキルの詠唱・ディレイ・クールタイムに効く潜在解放は、いまの装備の候補にありません。</span>`;
+  const line = (label, X) => `<tr><td>${label}</td><td class="v">${fx(X.castV)}</td><td class="v">${fx(X.castF)}</td><td class="v">${fx(X.delay)}</td><td class="v">${fx(X.cool)}</td><td class="v"><b>${X.atCap ? "193（上限でも足りない）" : X.need}</b></td></tr>`;
   return `<div class="opts">${btn}${ok ? "" : `<span class="warn">条件を変えました。結果は前の設定のものです。「計算し直す」を押してください</span>`}</div>
-    <div style="${ok ? "" : "opacity:.5"}"><div class="muted" style="font-size:12px;margin:4px 0">${esc(R.name)} Lv${R.lv}。1回撃つ周期 = 詠唱（変動 ${fx(R.castV)} + 固定 ${fx(R.castF)}）+ 待ち。待ち = 攻撃モーション・ディレイ（${fx(R.delay)}）・クールタイム（${fx(R.cool)}）のいちばん長いもの。ASPD が効くのはモーションだけです。</div>
-    <div>${R.atCap ? `<b>ASPD 193（上限）でも、攻撃モーション ${fx(STP_MOT(193))} が待ちとして残ります。</b>ASPD は高いほど周期が縮みます。` : `<b>ASPD ${R.need} 以上あれば、これ以上上げても周期は変わりません</b>（ディレイ・クールタイムの ${fx(R.other)} のほうが、モーションより長くなるため）。`}
-      いまの試算の ASPD ${simcNum(R.aspd, 1)} は ${R.aspd >= R.need ? `<span class="good">境目以上です</span>` : `<span class="warn">境目より ${simcNum(R.need - R.aspd, 1)} 低いです</span>`}。
-      <button class="ghost" data-stpastarget="${R.need}" title="「ASPD を維持」の目標を、この境目にします">目標 ASPD を ${R.need} にする</button></div>
+    <div style="${ok ? "" : "opacity:.5"}"><div class="muted" style="font-size:12px;margin:4px 0">${esc(R.name)} Lv${R.lv}。1回撃つ周期 = 詠唱（変動 + 固定）+ 待ち。待ち = 攻撃モーション・ディレイ・クールタイムのいちばん長いもの。ASPD が効くのはモーションだけです。</div>
+    <div class="muted" style="font-size:12px">このスキルに効く潜在解放（押して切りかえ。同じ枠のものは1つだけ）</div><div class="atkfxl" style="margin:4px 0 8px">${chips}</div>
+    <table class="multi"><tr><th>構成</th><th>変動詠唱</th><th>固定詠唱</th><th>ディレイ</th><th>クールタイム</th><th>ASPD の境目（これ以上は周期が変わらない）</th></tr>${line("いまの装備", B)}${changed ? line("<b>選んだ構成</b>", V) : ""}</table>
+    <div style="margin-top:6px">${V.atCap ? `<b>ASPD 193（上限）でも、攻撃モーション ${fx(STP_MOT(193))} が待ちとして残ります。</b>ASPD は高いほど周期が縮みます。` : `<b>${changed ? "選んだ構成では、" : ""}ASPD ${V.need} 以上あれば、これ以上上げても周期は変わりません</b>（ディレイ・クールタイムの ${fx(V.other)} のほうが、モーションより長くなるため）。`}
+      いまの試算の ASPD ${simcNum(V.aspd, 1)} は ${V.aspd >= V.need ? `<span class="good">境目以上です</span>` : `<span class="warn">境目より ${simcNum(V.need - V.aspd, 1)} 低いです</span>`}。
+      <button class="ghost" data-stpastarget="${V.need}" title="「ASPD を維持」の目標を、この境目にします">目標 ASPD を ${V.need} にする</button></div>
     <table class="multi" style="margin-top:6px"><tr><th>ASPD</th><th>モーション</th><th>1回の周期</th><th>撃つ速さ（ASPD 193 を 100%）</th></tr>
-      ${R.rows.map((x) => `<tr${x.a === R.need ? ' style="font-weight:700"' : ""}><td>${x.a}</td><td class="v">${fx(x.mot)}</td><td class="v">${fx(x.cyc)}</td><td class="v">${Math.round(x.rel * 100)}%</td></tr>`).join("")}</table>
-    <div class="muted" style="font-size:12px">ラトリオの計算と資料の表に基づく目安です。設置系や押してすぐ出るスキルはモーションが固定で ASPD の影響を受けない、という情報もあります（ラトリオは全スキルを ASPD で変わるとして数えます）。変身中（真理の解放など）のモーションは別です。時限効果は入れていません。</div></div>`;
+      ${V.rows.map((x) => `<tr${x.a === V.need ? ' style="font-weight:700"' : ""}><td>${x.a}</td><td class="v">${fx(x.mot)}</td><td class="v">${fx(x.cyc)}</td><td class="v">${Math.round(x.rel * 100)}%</td></tr>`).join("")}</table>
+    <div class="muted" style="font-size:12px">ラトリオの計算と資料の表に基づく目安です。潜在解放は、装備の枠にそのまま入れたときの効果です（切りかえは、この比較の中だけで、キャラの装備は変わりません）。設置系や押してすぐ出るスキルはモーションが固定で ASPD の影響を受けない、という情報もあります（ラトリオは全スキルを ASPD で変わるとして数えます）。変身中（真理の解放など）のモーションは別です。時限効果は入れていません。</div></div>`;
 }
 function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && el) el.innerHTML = stpMainHtml(m, S); }
 function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
@@ -3656,7 +3721,13 @@ function renderSimChara() {
           Object.keys(ENG.cache).filter((k) => /^(sbd:|stpk:|atkk:)/.test(k)).forEach((k) => delete ENG.cache[k]); if (ENG.calcCache && ENG.calcCache.clear) ENG.calcCache.clear();
           S.rowSig = ""; S.sugSig = ""; S.effSig = ""; S.swSig = ""; S.rows = null; S.sug = null; S.eff = null; S.swR = null; render(); return;
         }
-        const as = e.target.closest("[data-stpas]"); if (as) { as.disabled = true; as.textContent = "計算中…"; setTimeout(() => { try { S.as = stpAsCalc(m, S); } catch (err) { S.as = { err: "計算できませんでした: " + err.message }; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); }, 30); return; }
+        const as = e.target.closest("[data-stpas]"); if (as) { as.disabled = true; as.textContent = "計算中…"; setTimeout(() => { try { S.asOn = {}; S.as = stpAsCalc(m, S); } catch (err) { S.as = { err: "計算できませんでした: " + err.message }; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); }, 30); return; }
+        const ac = e.target.closest("[data-stpasc]"); if (ac && S.as && !S.as.err) {      // 潜在解放の切りかえ(同じ枠のものは1つだけ)
+          const v = +ac.dataset.stpasc, c = S.as.senzai.find((x) => x.v === v); if (!c) return;
+          const cur = (x) => (S.asOn && S.asOn[x.v] !== undefined ? S.asOn[x.v] : stpAsBase(m, S).card[x.slot] === x.v), was = cur(c);
+          S.asOn = S.asOn || {}; S.as.senzai.filter((x) => x.slot === c.slot).forEach((x) => { S.asOn[x.v] = false; }); S.asOn[v] = !was;
+          const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return;
+        }
         const at = e.target.closest("[data-stpastarget]"); if (at) { SIMC.opt.aspd = true; SIMC.opt.target = +at.dataset.stpastarget; render(); return; }
         if (e.target.closest("#stpreset")) { S.touched = false; render(); }
       };
