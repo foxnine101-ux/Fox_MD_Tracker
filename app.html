@@ -1859,14 +1859,24 @@ function simcBuffSet(m, it, v) {
   m[it.f] = m[it.f] || [];
   m[it.f][it.i] = it.type === "c" ? (it.f.startsWith("conf") ? (v ? 1 : 0) : !!v) : (Number(v) || 0);
 }
+// ASPD ポーション(どれか1つ)。ラトリオの SpeedPotName(スピードアップ・ハイスピード・バーサーク)。ASPD が 10 / 15 / 20 % 増える。m.status.speedPot 0〜3 が唯一の持ち主(支援の一覧には無い)。ステータスシミュレーター・「支援・アイテム・スキル」・「ASPDに効く支援」で同じものを出す
+const STP_POTS = ["なし", "スピードアップポーション（攻撃速度増加）", "ハイスピードポーション", "バーサークポーション"];
+function simcPotHtml(m) {
+  return `<div class="settabs simpot" style="margin:4px 0"><span class="muted">ASPD ポーション（どれか1つ）</span>${STP_POTS.map((t, i) => `<button class="settab${(m.status.speedPot || 0) === i ? " on" : ""}" data-stpot="${i}" title="${i ? ["", "ASPD +10%", "ASPD +15%（Lv40以上・使える職）", "ASPD +20%（Lv85以上・使える職）"][i] : "ポーションを使わない"}">${t}</button>`).join("")}</div>`;
+}
 function simcBuffSum(m) {                 // たたんだときに見出しへ出す: オンにしているもの
   const sc = simcSchema(m); if (!sc) return "";
   const on = sc.filter((it) => it.g !== "learn" && simcBuffOn(m, it));
-  return on.length ? `オン ${on.length}個: ${on.slice(0, 8).map((it) => it.label).join("、")}${on.length > 8 ? " ほか" : ""}` : "オンにしているものはありません";
+  const pot = (m.status.speedPot || 0) ? STP_POTS[m.status.speedPot] : "";
+  return on.length || pot ? `オン ${on.length + (pot ? 1 : 0)}個: ${on.map((it) => it.label).concat(pot ? [pot] : []).slice(0, 8).join("、")}${on.length + (pot ? 1 : 0) > 8 ? " ほか" : ""}` : "オンにしているものはありません";
 }
 const simcTagStoreKey = (m) => `md_simtags:${(RAT || {}).date || ""}:${m.status.jobId}`;
 function simcTags(m) { try { return JSON.parse(store.get(simcTagStoreKey(m)) || "null"); } catch (e) { return null; } }
 function simcBuffListHtml(m) {
+  const potH = (SIMC.bf.tab === "item" || SIMC.bf.tab === "on" || SIMC.bf.purpose === "a") && !SIMC.bf.q ? simcPotHtml(m) : "";
+  return potH + simcBuffListHtml0(m);
+}
+function simcBuffListHtml0(m) {
   const sc = simcSchema(m), B = SIMC.bf, tags = simcTags(m) || {}, q = pickNorm(B.q);
   let list = sc.filter((it) => (q ? true : B.tab === "on" ? simcBuffOn(m, it) && it.g !== "learn" : it.g === B.tab));
   if (q) list = list.filter((it) => pickNorm(it.label).includes(q) || (it.opts || []).some((o) => pickNorm(o[1]).includes(q)));
@@ -2252,9 +2262,8 @@ const stpSugSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([SIMC.opt.as
 const stpEffSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d) + stpDmgSig(m);
 const stpSwSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([S.d, S.sw]) + stpDmgSig(m);
 // よく使う支援(濃縮サラマインジュース・ブレッシング・速度増加)のスイッチ。「支援・アイテム・スキル」の枠と同じ値を動かす(同期)
-const STP_POTS = ["なし", "攻撃速度増加ポーション", "ハイスピードポーション", "バーサークポーション"];      // ラトリオの SpeedPotName(スピードアップ・ハイスピード・バーサーク)。ASPD が 10 / 15 / 20 % 増える。どれか1つ(排他)
 function stpBuffHtml(m) {
-  const pot = `<div class="settabs" style="margin:4px 0"><span class="muted">ポーション（どれか1つ）</span>${STP_POTS.map((t, i) => `<button class="settab${(m.status.speedPot || 0) === i ? " on" : ""}" data-stpot="${i}" title="${i ? ["", "ASPD +10%", "ASPD +15%（Lv40以上・使える職）", "ASPD +20%（Lv85以上・使える職）"][i] : "ポーションを使わない"}">${t}</button>`).join("")}</div>`;
+  const pot = simcPotHtml(m);
   const sc = simcSchema(m); if (!sc) return pot;
   const items = SIMC_QUICK.map(([f, i]) => sc.find((it) => it.f === f && it.i === i)).filter(Boolean); if (!items.length) return pot;
   return pot + `<div class="opts"><b>支援</b><div class="bfgrid" style="flex:1;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${items.map((it) => {
@@ -2281,6 +2290,29 @@ function stpSbCtl(m) {
       <label>属性Lv <select data-stpsb="lv">${[1, 2, 3, 4].map((i) => `<option value="${i}" ${i === cfg.lv ? "selected" : ""}>Lv${i}</option>`).join("")}</select></label><label>サイズ ${sel("size", SB_SIZES, cfg.size)}</label></div>
     <div class="atkfxl" style="margin:4px 0"><span class="muted">時限効果（かかったときの数字を「時限効果込み」に出します。「与ダメシミュ」と共通）</span>${fx.map((e) => `<label class="afx${on[e.id] ? " on" : ""}${atkFxOwned(owned, e) ? "" : " dim"}" title="${esc(e.text)}${atkFxOwned(owned, e) ? "" : "\nいまの装備には付いていません（試したいときは選べます）"}"><input type="checkbox" data-stpfx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}</label>`).join("")}</div></div>`;
 }
+// ゲームの表示(通信で覚えた、そのキャラの最後のステータス)と、アプリの計算の突き合わせ。差があれば、ゲームで使っている支援・食品・ポーションがアプリで未設定かもしれない
+function stpGameCmp(m) {
+  const ch = lastChar(), E = ((DATA.equip || {}).chars || {})[ch];
+  if (!E || !(E.status || {}).derived) return `<div class="muted">ゲームのキャラのデータがありません（ゲームにログインすると、ステータスを覚えます）。</div>`;
+  const g = E.status.derived, gs = E.status.stats || {}, r = engCalc(simcClone(m)), c = r.c, tot = r.tot;
+  const gt = (k) => (gs[k] ? (gs[k].base || 0) + (gs[k].plus || 0) : null);
+  const aspdG = g.ASPD !== undefined ? Math.round((200 - g.ASPD / 10) * 10) / 10 : null;          // ゲームの ASPD = 200 − amotion/10
+  const rows = [["ASPD", aspdG, c[37], 1], ...["STR", "AGI", "VIT", "INT", "DEX", "LUK"].map((k) => [k + "（合計）", gt(k), tot[k], 0]), ["最大HP", g.MaxHP, c[23], 0], ["最大SP", g.MaxSP, c[24], 0],
+    ["ATK（ステータス分）", g.ATK, c[25], 0], ["ATK（装備分）", g.ATK2, c[26], 0], ["MATK（大）", g.MATKmax, c[27], 0], ["MATK（小）", g.MATKmin, c[28], 0], ["DEF", g.DEF, c[29], 0], ["DEF（装備分）", g.DEF2, c[30], 0], ["MDEF", g.MDEF, c[31], 0], ["MDEF（装備分）", g.MDEF2, c[32], 0],
+    ["HIT", g.HIT, c[33], 0], ["FLEE", g.FLEE, c[34], 0], ["CRI", g.CRIT, c[36], 1]].filter((x) => x[1] !== null && x[1] !== undefined);
+  const n = simcNum, diff = rows.filter((x) => Math.abs((x[2] || 0) - (x[1] || 0)) > (x[3] ? 0.15 : 0.5));
+  // ASPD の差は、ポーションの違いで説明できることが多い(4通りを試す)
+  let hint = "";
+  if (aspdG !== null) {
+    const hit = STP_POTS.map((t, i) => { const mm = simcClone(m); mm.status.speedPot = i; return { t, i, a: engCalc(mm).c[37] }; }).filter((x) => Math.floor(x.a + 1e-9) === Math.floor(aspdG + 1e-9));
+    const now = m.status.speedPot || 0;
+    hint = hit.length ? (hit.some((x) => x.i === now) ? `<div class="good">いまのポーションの設定（${esc(STP_POTS[now])}）で、ASPD はゲームと合っています。</div>` : `<div class="warn">ゲームの ASPD ${n(aspdG, 1)} に合うのは、ポーションが <b>${hit.map((x) => esc(x.t) + "（" + n(x.a, 1) + "）").join("、")}</b> のとき。いまの設定は「${esc(STP_POTS[now])}」です。</div>`) : `<div class="warn">ポーションを変えても、ゲームの ASPD ${n(aspdG, 1)} には合いません（ほかの支援・食品・スキルが、ゲームで効いているかもしれません）。</div>`;
+  }
+  return `<div class="muted" style="font-size:12px;margin:4px 0">ゲームのキャラ「${esc(cn(ch))}」が最後にログインしたときのステータスと、アプリの計算（いまのスロット）を比べます。スロットの装備・支援・ポーションが、ゲームと同じときだけ意味があります。</div>${hint}
+    <table class="multi"><tr><th>項目</th><th>ゲーム</th><th>アプリ</th><th>差</th></tr>${rows.map(([l, a, b, f]) => { const d = (b || 0) - (a || 0), ok = Math.abs(d) <= (f ? 0.15 : 0.5);
+      return `<tr><td>${l}</td><td class="v">${n(a, f)}</td><td class="v">${n(b, f)}</td><td class="v">${ok ? `<span class="good">一致</span>` : `<span class="warn">${d > 0 ? "+" : "−"}${n(Math.abs(d), f)}</span>`}</td></tr>`; }).join("")}</table>
+    <div class="muted" style="font-size:12px">${diff.length ? `${diff.length} 項目に差があります。HP・HIT・FLEE・CRI の差は、ゲームで食べている食品・使っているアイテムが、アプリの「支援・アイテム・スキル」に入っていないためかもしれません。` : "全項目が一致しています。"}</div>`;
+}
 function stpSbSum(m) { try { const T = stpSbMt(m); if (!T) return ""; const c = T.cfg; return `${T.item.name} Lv${T.mt.lv} ／ ${SB_KINDS[c.kind]}・${SB_RACES[c.race]}・${SB_ELES[c.ele]}${c.lv}・${SB_SIZES[c.size]}${atkActiveIds(null).length ? ` ／ 時限効果 ${atkActiveIds(null).length} 個` : ""}`; } catch (e) { return ""; } }
 function stpHtml(m) {
   const S = stpState(), O = SIMC.opt, sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs, combos = sel.main.length * sel.sh.length;
@@ -2300,6 +2332,7 @@ function stpHtml(m) {
     <div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
 `, ` <span class="muted">（選んだ装備スロット × シャドウのスロットを、いまのステータス・支援で着せた結果）</span>`, true)}
     ${simcFold("stpsb", "ダメージの目安（小型サンドバックマン）", stpSbCtl(m), ` <span class="muted">${esc(stpSbSum(m))}</span>`, false)}
+    ${simcFold("stpgame", "ゲームの表示との照合（ASPD・ステータス・HP など）", simcFoldState().stpgame ? stpGameCmp(m) : `<div class="muted">開くと、ゲームの表示とアプリの計算を比べます。</div>`, ` <span class="muted">（食い違いの確認）</span>`, false)}
     <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
     ${simcFold("stpsw", "ステータスを変えたときのダメージ（INT を下げたらどれくらい？）", `<div class="bfbar"><label>ステータス <select data-stpswc="stat">${STP_KEYS.map((k) => `<option value="${k}" ${S.sw.stat === k ? "selected" : ""}>${STP_LABEL[k]}</option>`).join("")}</select></label>
         <label>向き <select data-stpswc="dir"><option value="-1" ${S.sw.dir < 0 ? "selected" : ""}>下げる</option><option value="1" ${S.sw.dir > 0 ? "selected" : ""}>上げる</option></select></label>
@@ -2480,7 +2513,8 @@ function simcRelHtml(m, letters, key, title) {
   const qi = (it) => SIMC_QUICK.findIndex(([f, i]) => it.f === f && it.i === i);       // よく使うものは、いちばん上に
   list.sort((a, b) => (qi(b) >= 0) - (qi(a) >= 0) || (qi(a) >= 0 && qi(b) >= 0 ? qi(a) - qi(b) : 0) || simcBuffOn(m, b) - simcBuffOn(m, a));
   const nOn = list.filter((it) => simcBuffOn(m, it)).length, st = simcFoldState(), open = st[key] === undefined ? true : st[key];
-  return `<details class="relbox" data-fold="${key}" ${open ? "open" : ""}><summary><span>${title}</span> <span class="muted">（オン ${nOn} ／ ${list.length}。「支援・アイテム・スキル」の枠と同じものです）</span></summary><div class="relgrid">${list.map((it) => {
+  const potH = letters.includes("a") ? simcPotHtml(m) : "";
+  return `<details class="relbox" data-fold="${key}" ${open ? "open" : ""}><summary><span>${title}</span> <span class="muted">（オン ${nOn} ／ ${list.length}。「支援・アイテム・スキル」の枠と同じものです）</span></summary>${potH}<div class="relgrid">${list.map((it) => {
     const on = simcBuffOn(m, it), v = simcBuffVal(m, it), ot = it.type === "s" && on ? (it.opts.find((o) => o[0] === Number(v)) || [])[1] : "";
     return `<label class="bfi sm sw${on ? " on" : ""}" title="${esc(it.label)}"><input type="checkbox" data-rel="${simcBuffKey(it)}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span>${ot ? `<span class="bfg">${esc(ot)}</span>` : ""}</label>`;
   }).join("")}</div></details>`;
@@ -3489,6 +3523,8 @@ function renderSimChara() {
       V.querySelectorAll("[data-bfs]").forEach((el) => el.onclick = nav((b) => { B.sub = b.dataset.bfs; }));
       if (g("sccbon")) g("sccbon").onchange = nav((b) => { B.onOnly = b.checked; });
       if (g("sccbq")) { g("sccbq").oninput = (e) => { B.q = e.target.value; relist(); }; g("sccbq").onkeydown = (e) => { if (e.key === "Escape") { B.q = ""; e.target.blur(); render(); } }; }
+      V.querySelectorAll(".relbox .simpot [data-stpot]").forEach((el) => { el.onclick = () => { m.status.speedPot = +el.dataset.stpot; changed(); }; });
+      if (g("sccbuffs")) g("sccbuffs").addEventListener("click", (e) => { const po = e.target.closest("[data-stpot]"); if (po) { m.status.speedPot = +po.dataset.stpot; changed(); } });      // 一覧は作り直されるので、押したときの処理は枠に持たせる
       if (g("sccbuffs")) g("sccbuffs").onchange = (e) => {
         const el = e.target.closest("[data-bf]"), it = el && byKey[el.dataset.bf]; if (!it) return;
         simcBuffSet(m, it, el.type === "checkbox" ? el.checked : el.value);
