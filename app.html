@@ -29,15 +29,15 @@
     border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
   #login input { margin: 12px 0; }
   button { font: inherit; cursor: pointer; border: 0; border-radius: 8px; padding: 9px 16px; background: var(--accent); color: #fff; }
-  button:not(:disabled):active { filter: brightness(.7); transform: translateY(1px); }
-  .clickflash { position: fixed; z-index: 99999; pointer-events: none; border-radius: 8px; border: 3px solid #ffd54a; background: rgba(255,213,74,.35); animation: clickflash .9s ease-out forwards; }
-  @keyframes clickflash { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.15); } }
+  button:not(:disabled):active { background-image: linear-gradient(rgba(0,0,0,.28), rgba(0,0,0,.28)); }      /* 押しているあいだだけ、色が濃くなる */
   .whochar { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--chip); white-space: nowrap; }
   .whochar.on::before { content: "●"; color: #3ecf6e; margin-right: 5px; }
   .whochar.off { color: var(--muted); }
   .busybar { display: flex; align-items: center; gap: 8px; margin: 6px 0; padding: 7px 12px; border-radius: 8px; background: #ffd54a; color: #3a2d00; font-weight: 700; }
   .busybar::before { content: ""; width: 14px; height: 14px; border: 3px solid #3a2d00; border-top-color: transparent; border-radius: 50%; animation: busyspin .8s linear infinite; flex: none; }
   @keyframes busyspin { to { transform: rotate(360deg); } }
+  .spin { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); }
+  .spin::before { content: ""; width: 14px; height: 14px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: busyspin .8s linear infinite; flex: none; }
   button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); padding: 5px 10px; }
   button.gear { font-size: 16px; line-height: 1; padding: 4px 9px; }
   button.gear.on { background: var(--accent); color: #fff; border-color: var(--accent); }
@@ -422,6 +422,11 @@ const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["set
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
 function render() {
+  const y = window.scrollY;
+  renderNow();
+  if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
+}
+function renderNow() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
   if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, input.mglink, input.sbnote, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
@@ -494,7 +499,6 @@ const postSet = (body) => fetch("/api/equipset", { method: "POST", headers: { "C
 const setLabel = (st) => (st && st.tag) || "履歴";
 function hideCtx() { const m = $("#ctx"); if (m) m.hidden = true; }
 document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#ctx")) hideCtx(); }, true);
-document.addEventListener("click", (e) => { const bt = e.target.closest && e.target.closest("button"); if (!bt || bt.disabled) return; const r = bt.getBoundingClientRect(), f = document.createElement("div"); f.className = "clickflash"; f.style.cssText = `left:${r.left - 3}px;top:${r.top - 3}px;width:${r.width}px;height:${r.height}px`; document.body.appendChild(f); setTimeout(() => f.remove(), 1000); }, true);      // 押したのが分かるように、一瞬ひかる
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") hideCtx(); });
 window.addEventListener("scroll", hideCtx, true);
 function setMd(name, patch) {
@@ -1127,7 +1131,7 @@ function renderResist(chars, now) {
     }
   }
 }
-setInterval(() => { if (DATA && !document.hidden && TAB === "resist") load(); }, 20000);
+setInterval(() => { if (DATA && !document.hidden && TAB === "resist") load(true); }, 20000);
 
 // ---------- 被ダメ ----------
 // ツールが記録した「だれの・どの技で・どれくらい受けたか」。キャラごと・MDごとに [回数, 合計, 最大, 最後, ヒット数]
@@ -1524,7 +1528,7 @@ function simcNeedKick() {
 }
 function simcNeedText(m) {
   const nd = SIMC.need;
-  if (!nd || nd.sig !== JSON.stringify(m)) return `<span class="muted">AGI・DEX の必要な値を計算中…</span>`;
+  if (!nd || nd.sig !== JSON.stringify(m)) return `<span class="spin">AGI・DEX の必要な値を計算中…</span>`;
   const reached = (SIMC.res && SIMC.res.c[37]) >= SIMC_ASPD;
   const one = (k, label) => {
     const cur = m.status[k] || 1, v = nd[k];
@@ -1909,7 +1913,7 @@ function simcMultiTable(m, rows, total) {
     + rows.map((x) => `<tr><td>${x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span> <span class="muted">${esc(x.st.name || x.st.auto || "")}</span>` : esc(x.label)}${x.miss ? ` <span class="warn" title="ラトリオの候補に同じ名前が無くて、装備できなかったものがあります（未装備）">（未装備 ${x.miss}）</span>` : ""}</td>
       <td class="v"><span class="${x.aspd >= SIMC_ASPD ? "good" : ""}">${n(x.aspd, 1)}</span></td><td>${need(x.agi, st.agi)}</td><td>${need(x.dex, st.dex)}</td>
       <td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td><td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td></tr>`).join("") + `</table>`;
-  if (rows.length < total) return h + `<div class="muted">計算中… ${rows.length} / ${total}</div>`;
+  if (rows.length < total) return h + `<div class="spin">計算中… ${rows.length} / ${total}</div>`;
   const all = (k) => (rows.some((x) => x[k] === null || x[k] === undefined) ? null : Math.max(...rows.map((x) => x[k])));
   const agi = all("agi"), dex = all("dex"), minCast = Math.min(...rows.map((x) => x.castP));
   h += `<div class="multisum"><b>全部のセットで ASPD 193</b>: ${agi === null ? "AGI だけでは届かないセットがあります" : `AGI ${st.agi}→<b>${agi}</b>（${agi > st.agi ? "+" : agi < st.agi ? "−" : "±"}${Math.abs(agi - st.agi)}）`} <span class="muted">または</span> ${dex === null ? "DEX だけでは届かないセットがあります" : `DEX ${st.dex}→<b>${dex}</b>（${dex > st.dex ? "+" : dex < st.dex ? "−" : "±"}${Math.abs(dex - st.dex)}）`}<br>
@@ -1921,7 +1925,7 @@ function simcMultiHtml(m) {
   const tabs = simcSetList(m, false).tabs;
   if (!tabs.length) return `<div class="muted">装備セットを登録すると、セットごとの ASPD・詠唱を並べて見られます（装備欄の右上の「＋登録」）。</div>`;
   const ok = SIMC.multi && SIMC.multi.sig === simcMultiSig(m);
-  return `<div id="sccmulti">${ok ? simcMultiTable(m, SIMC.multi.rows, SIMC.multi.rows.length) : `<div class="muted">計算中…</div>`}</div>
+  return `<div id="sccmulti">${ok ? simcMultiTable(m, SIMC.multi.rows, SIMC.multi.rows.length) : `<div class="spin">計算中…</div>`}</div>
     <div class="muted" style="font-size:12px;margin-top:4px">登録した装備セットを1つずつ着せた場合です。ステータス・シャドウ装備・支援は、いまのままで計算しています。AGI・DEX は、片方だけ動かした場合の値です。</div>`;
 }
 // ---- ステータスポイント ----
@@ -2472,7 +2476,7 @@ async function sbxApply(id) {
 }
 function renderSandbagTab() {
   if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">サンドバックマンは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
-  if (!SBX.recs) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); sbxLoad().then(render); return; }
+  if (!SBX.recs) { $("#view").innerHTML = simNav() + `<div class="panel empty"><span class="spin">読み込み中…</span></div>`; bindSimNav(); sbxLoad().then(render); return; }
   if (RAT && RAT.installed && !ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const R = SBX.recs, f = (v, d = 0) => simcNum(v, d);
   let h = simNav() + `<div class="panel simbox"><div class="opts"><b>サンドバックマン</b><span class="muted">キャラシミュレーターの「サンドバックマン」の枠で記録した計算結果です（新しい順・最大200件）。「この設定をキャラシミュに反映してジャンプ」で、そのときのキャラ・装備・設定を、いまのスロットに入れて開きます。</span></div></div>`;
@@ -2495,6 +2499,18 @@ function renderSandbagTab() {
   V.querySelectorAll("[data-sbdel]").forEach((el) => el.onclick = async () => { if (await askOnce("sbdel", "この記録を削除します。", "削除")) { await sbPost({ delete: el.dataset.sbdel }); await sbxLoad(); render(); } });
   V.querySelectorAll("input.sbnote").forEach((el) => { el.onkeydown = (e) => { if (e.key === "Enter") el.blur(); }; el.onchange = async () => { await sbPost({ note: [el.dataset.sbn, el.value] }); const r = R.find((x) => x.id === el.dataset.sbn); if (r) r.note = el.value; }; });
   if (SBX.focus) { const el = V.querySelector(`[data-sbr="${CSS.escape(SBX.focus)}"]`); SBX.focus = ""; if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => el.classList.remove("mx-flash"), 2500); } }
+}
+// 枠(details)の開け閉めを覚える。描き直した直後に勝手に飛んでくる toggle は、中身が変わっていないので無視する
+function foldBind(root, after) {
+  root.querySelectorAll("details[data-fold]").forEach((el) => {
+    let was = el.open;
+    el.ontoggle = () => {
+      if (el.open === was) return;
+      was = el.open;
+      const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st));
+      if (after) after(el);
+    };
+  });
 }
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
@@ -2640,9 +2656,9 @@ async function simcFromFox(asNew, src) {    // src = {char, set, shadow, full}�
 }
 function renderSimChara() {
   if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">キャラ・装備のシミュレーターは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
-  if (!RAT) { $("#view").innerHTML = simNav() + `<div class="panel empty">確認中…</div>`; bindSimNav(); ratStatus().then(render); return; }
+  if (!RAT) { $("#view").innerHTML = simNav() + `<div class="panel empty"><span class="spin">確認中…</span></div>`; bindSimNav(); ratStatus().then(render); return; }
   if (!RAT.installed) { $("#view").innerHTML = simNav() + `<div class="panel empty">このシミュレーターは、ROラトリオHub のデータと計算を使います。<br>先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
-  if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty"><span class="spin">読み込み中…</span></div>`; bindSimNav(); simcLoad().then(render); return; }
   if (ENG.err && !ENG.loading && !ENG.retried) { ENG.retried = true; ENG.err = ""; }      // 前もっての起動に失敗していたら、タブを開いたときに1回だけ自動でやり直す
   if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const ch = simcCur(), ids = Object.keys(SIMC.chars);
@@ -2745,7 +2761,7 @@ function renderSimChara() {
     g("scpno").onclick = () => { SIMC.pick = null; render(); };
     g("scpgo").onclick = simcImportPicked;
   }
-  $("#view").querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); });
+  foldBind($("#view"));
   if (g("sccmain") && ch) {
     // 枠の並びは自分で変えられる(見出しの ⋮⋮ をつかんで上下に動かす)。基本ステータスと特性ステータスは、横並びのまま1つとして動く
     const main = g("sccmain"), keyOf = (el) => (el.classList.contains("simrow2") ? "stats" : el.dataset.fold), ord = SETTINGS.simOrder || [];
@@ -2905,7 +2921,7 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    foldBind(V, (el) => { if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
     { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
@@ -3141,11 +3157,11 @@ function renderCalc(chars) {
     bar.innerHTML = ""; body.innerHTML = `<div class="panel empty">計算機は、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`;
     return;
   }
-  if (!RAT) { body.innerHTML = `<div class="panel empty">確認中…</div>`; ratStatus().then(render); return; }
+  if (!RAT) { body.innerHTML = `<div class="panel empty"><span class="spin">確認中…</span></div>`; ratStatus().then(render); return; }
   const st = RAT;
   const credit = `<span class="muted">計算機は <a href="https://github.com/roratorio-hub/ratorio" target="_blank" rel="noopener">ROラトリオHub</a>（PolyForm Noncommercial License）をそのまま使っています。</span>`;
   if (!st.installed) {
-    const h = st.state === "downloading" ? `<b>取り込み中… ${st.progress}%</b>`
+    const h = st.state === "downloading" ? `<b class="spin">取り込み中… ${st.progress}%</b>`
       : `<button id="ratget">ラトリオを取り込む（約13MB）</button>${st.error ? `<div class="err">${esc(st.error)}</div>` : ""}`;
     bar.innerHTML = "";
     const html = `<div class="panel empty">ステータス・ダメージ計算機（ROラトリオHub）を、この PC に取り込んで使います。<br>最初に1回だけダウンロードします（インターネットが必要です）。<br><br>${h}<br><br>${credit}</div>`;
@@ -4195,14 +4211,18 @@ function saveSettings() {
     finally { SAVING = false; }
   }, 400);
 }
-async function load() {
+let LOAD_SIG = "";
+async function load(quiet) {      // quiet = 自動の読み直し。前と同じ内容なら画面を描き直さない(開いている枠・入力中の内容がそのまま残る)
   try {
     const j = await api("GET");
+    const sig = JSON.stringify(j.data);
+    const same = quiet && DATA && sig === LOAD_SIG;
+    LOAD_SIG = sig;
     DATA = j.data;
     if (!saveTimer && !SAVING) SETTINGS = j.settings || {};   // 保存待ちのあいだは手元の設定を使う(並びが一瞬戻らないように)
     $("#login").hidden = true; $("#app").hidden = false;
     store.set("md_pw", PW);
-    render();
+    if (!same) render();
   } catch (e) {
     if (e.message === "401") { showLogin(PW ? "合言葉が違います" : ""); PW = ""; store.del("md_pw"); }
     else if (typeof LOCAL !== "undefined" && LOCAL) { if (DATA) $("#upd").textContent = "ツールが止まっているみたい（Fox_MD_Trackerを起動してね）"; else showLogin("Fox_MD_Trackerが起動していません"); }
@@ -4222,9 +4242,9 @@ $("#gear").onclick = (e) => {      // 歯車: イベント・入場履歴・設�
   showCtx(Math.max(8, r.right - 200), r.bottom + 4, GEAR_TABS.map(([k, l]) => ({ label: (TAB === k ? "● " : "") + l + (k === "event" && GEAR_EVENTS ? `（${GEAR_EVENTS}件）` : ""), act: () => go(k) })));
 };
 $("#tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (!b) return; TAB = b.dataset.tab; store.set("md_tab", TAB); render(); };
-setInterval(() => { if (DATA && TAB !== "settings") render(); }, 30000);
-setInterval(() => { if (DATA && !document.hidden && TAB !== "settings") load(); }, 120000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && DATA) load(); });
+setInterval(() => { if (DATA && ["weekly", "daily", "other", "nyar", "event", "history", "resist"].includes(TAB)) render(); }, 30000);      // 時間で表示が変わるタブだけ(計算機などは描き直さない)
+setInterval(() => { if (DATA && !document.hidden && TAB !== "settings") load(true); }, 120000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && DATA) load(true); });
 
 // この PC のツール(Fox_MD_Tracker)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
@@ -4264,7 +4284,7 @@ if (LOCAL) {
   checkUpdate(); setInterval(() => checkUpdate(), 60000);
   $("#logout").hidden = true;
   document.querySelector("#app h1").insertAdjacentHTML("afterend", `<span class="tag on" title="この PC のツールから直接表示しています">この PC</span>`);
-  setInterval(() => { if (!document.hidden && TAB !== "settings") load(); }, 5000);
+  setInterval(() => { if (!document.hidden && TAB !== "settings") load(true); }, 5000);
   load();
 } else if (PW) load(); else showLogin("");
 // アプリを開いたら、計算係(ラトリオ)を前もって起動しておく(計算機タブを開いたときに待たなくて済む。ラトリオを取り込んである PC だけ)
