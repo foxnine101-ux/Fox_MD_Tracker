@@ -936,7 +936,6 @@ details.slotc{border-color:var(--slotc)}
 .bfi .swt{flex:none;width:28px;height:15px;border-radius:8px;background:var(--line);position:relative;transition:background .15s}
 .bfi .swt::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}
 .bfi.on .swt{background:var(--ok,#3fb950)}.bfi.on .swt::after{left:15px}
-.simframe{border:3px solid transparent;border-radius:14px;padding:8px;background:linear-gradient(var(--bg),var(--bg)) padding-box,var(--fc) border-box}
 .setframe{border:2px solid transparent;border-radius:10px;padding:6px;background:linear-gradient(var(--panel),var(--panel)) padding-box,var(--fc) border-box}
 .setdot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px;vertical-align:-1px}
 .missdet{font-size:12px;color:var(--soon,#e8a100);white-space:normal}.missdet button{padding:0 8px;font-size:11px;margin-left:2px}
@@ -1758,7 +1757,6 @@ function simcEquipHtml(m, shadow) {
 // 装備セット・シャドウセットの色(記号の色)。大枠・表の行に使う。複数のときは、色を等分した斜めのしま(2色なら半分ずつ)
 const simcGrad = (cs) => !cs.length ? "" : cs.length === 1 ? `linear-gradient(${cs[0]},${cs[0]})` : `linear-gradient(135deg, ${cs.map((c, i) => `${c} ${Math.round(i * 100 / cs.length)}% ${Math.round((i + 1) * 100 / cs.length)}%`).join(", ")})`;
 const simcSetColor = (shadow, sid) => { const st = (((DATA.equip || {})[shadow ? "shadows" : "sets"]) || {})[sid]; return st && st.tag ? tagColor(st) : ""; };
-const simcFrameColors = (m) => [simcSetColor(false, m.foxSet), simcSetColor(true, m.foxShadow)].filter(Boolean);
 // ---- 装備スロット(A・B…)は「箱」: 箱の中身が変わったら(上書き・ゲームの装備の登録など)、その箱を使っている全部のキャラスロットに自動で反映する(「反映」を押さなくてよい) ----
 // 箱の中身は「装備セット(中身のハッシュの ID)」で、上書きすると記号(A)が新しい ID に移る → キャラスロットは ID の他に記号(foxSetTag / foxShadowTag)を覚えておいて、記号が指す最新の中身に追従する。
 // 未保存の変更(＊)があるキャラスロットは、作業中の内容を守るため追従しない(装備欄に「更新されています」と出す。記号を押せば最新にできる)。ENG が使えるとき(装備を着せるのに必要)だけ
@@ -2839,9 +2837,18 @@ function foldBind(root, after) {
 }
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
+// 装備に関係する項目(枠)は、いま選んでいる装備スロット・シャドウのスロットの色の枠にする(複数の色はしま。「比べる」で選んだ装備スロットの色も、比べられる枠に足す)
+const SIMC_FOLDCOL = { res: "all", key: "cmp", opt: "all", resist: "cmp", x: "cmp", sb: "all", eq: "main", sh: "shadow" };
+function simcFoldColors(key) {
+  const k = SIMC_FOLDCOL[key], c = k && SIMV === "chara" ? simcCur() : null; if (!c) return [];
+  const m = c.model, main = simcSetColor(false, m.foxSet), sh = simcSetColor(true, m.foxShadow);
+  const cs = k === "main" ? [main] : k === "shadow" ? [sh] : [main, sh];
+  if (k === "cmp") for (const sid of SIMC.cmp || []) cs.push(simcSetColor(false, sid));
+  return cs.filter((x, i, a) => x && a.indexOf(x) === i);
+}
 function simcFold(key, title, body, head = "", openDefault = true) {
-  const st = simcFoldState(), open = st[key] === undefined ? openDefault : st[key];
-  return `<details class="panel fold" data-fold="${key}" ${open ? "open" : ""}><summary><b>${title}</b>${head}</summary>${body}</details>`;
+  const st = simcFoldState(), open = st[key] === undefined ? openDefault : st[key], cs = simcFoldColors(key);
+  return `<details class="panel fold${cs.length ? " setframe" : ""}" ${cs.length ? `style="--fc:${simcGrad(cs)}" ` : ""}data-fold="${key}" ${open ? "open" : ""}><summary><b>${title}</b>${head}</summary>${body}</details>`;
 }
 const simcXKinds = () => { try { const v = JSON.parse(store.get("md_simx") || "[5]"); return Array.isArray(v) ? v.filter((k) => ENG_XKINDS.some(([id]) => id === k)) : [5]; } catch (e) { return [5]; } };
 function simcExtraHtml(r) {
@@ -3094,7 +3101,6 @@ function renderSimChara() {
       ${simcFold("sb", "サンドバックマン", simcSbHtml(m), ` <span class="muted foldsum">${esc(sbDesc(simcSbCfg(m)))}</span>`, false)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
-  { const nav = simNav(), cs = ch ? simcFrameColors(ch.model) : []; if (cs.length && h.startsWith(nav)) h = nav + `<div class="simframe" style="--fc:${simcGrad(cs)}" title="いま選んでいる装備スロット${cs.length > 1 ? "・シャドウのスロット" : ""}の色">` + h.slice(nav.length) + `</div>`; }
   $("#view").innerHTML = h;
   bindSimNav();
   const g = (id) => $("#" + id);
