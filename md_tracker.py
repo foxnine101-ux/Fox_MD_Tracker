@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.35.0"
+VERSION = "2.36.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -41,6 +41,8 @@ STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
 OFFICIAL_FILE = os.path.join(HERE, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
+SANDBAG_FILE = os.path.join(HERE, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
+SANDBAG_MAX = 200
 SIM_CHARS_FILE = os.path.join(HERE, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
 ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
 SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
@@ -415,6 +417,8 @@ def start_live_server(core, lock, cfg):
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
                 return self._send(200, json.dumps(names, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/sandbag":            # サンドバックマンの記録(この PC に保存)
+                return self._send(200, json.dumps({"records": load_sandbag()}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
                 return self._send(200, json.dumps(load_sim_chars(), ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/ratorio":
@@ -530,6 +534,43 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
+            if self.path.split("?")[0] == "/api/sandbag" and self._local_only():
+                # サンドバックマンの記録: {add: 記録} / {delete: ID} / {note: [ID, 文]}。同じ中身(key)の記録は1つにまとめる。最大 SANDBAG_MAX 件(古いものから消える)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 400000)).decode("utf-8"))
+                    with lock:
+                        recs = load_sandbag()
+                        out = {"ok": True}
+                        if isinstance(b.get("add"), dict):
+                            r = b["add"]
+                            if not isinstance(r.get("model"), dict) or not r.get("key"):
+                                raise ValueError
+                            r["id"] = "r" + format(int(time.time() * 1000), "x")
+                            r["t"] = int(time.time())
+                            r.setdefault("note", "")
+                            old = next((x for x in recs if x.get("key") == r["key"]), None)
+                            if old is not None:
+                                old["t"] = r["t"]                 # 同じ中身は新しく作らず、日時だけ更新して先頭へ
+                                recs.remove(old)
+                                recs.insert(0, old)
+                                out["id"] = old["id"]
+                            else:
+                                recs.insert(0, r)
+                                out["id"] = r["id"]
+                            del recs[SANDBAG_MAX:]
+                        elif b.get("delete"):
+                            recs = [x for x in recs if x.get("id") != str(b["delete"])]
+                        elif isinstance(b.get("note"), list) and len(b["note"]) == 2:
+                            for x in recs:
+                                if x.get("id") == str(b["note"][0]):
+                                    x["note"] = str(b["note"][1])[:200]
+                        else:
+                            raise ValueError
+                        _write_json(SANDBAG_FILE, {"records": recs})
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps(out), "application/json")
             if self.path.split("?")[0] == "/api/simchars" and self._local_only():
                 # 計算機のキャラを保存・削除: {id, name, model} / {id, delete: 1}
                 try:
@@ -783,6 +824,17 @@ def load_skill_fix():
     except Exception as e:
         print("[被ダメ] スキル名の手直しが読めませんでした:", e)
     return names, attrs
+
+
+def load_sandbag():
+    """サンドバックマン記録.json → [記録, …](新しい順)"""
+    try:
+        with open(SANDBAG_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        r = d.get("records") if isinstance(d, dict) else None
+        return r if isinstance(r, list) else []
+    except (OSError, ValueError):
+        return []
 
 
 def load_sim_chars():

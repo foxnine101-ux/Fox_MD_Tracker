@@ -200,6 +200,16 @@
   - テスト: 実ページを保存した fixture で `parse_*`・間隔・キャッシュ・429・上限を確認(scratchpad の `t_official.py`)、本物のサイトで 4 リクエストだけ実地確認ずみ。画面は `ui_server9.py`(`Official` の fetch を差しかえてサイトを呼ばない)
 - **v2.35.0 ステ振りの相談**(利用者の指定): 目標 ASPD(`SIMC.opt.target`。`SIMC_ASPD`=193 は ASPD の欄など他の枠の印のまま)、対象は装備スロットのタグ × シャドウのスロットのタグ(`mainSel` / `shSel`。"now" = 計算機にいま入っているもの。`simcOptSets`。最大 `SIMC_OPT_COMBO_MAX`=16通り)。
   **ラトリオは基本ステータスを 130 に切らない**(AGI 300 でも ASPD が伸びる)ので、届かないときは `SIMC_STTOP`(400)まで探して「いくつ要るか」を出す(`simcOptShort`、`simcMinStat`、`simcNeedKick`)。ふつうの探索は 130 まで。画面の言葉は「（1個入らず）」ではなく「（未装備 1）」
+- **v2.36.0 サンドバックマン**(利用者の依頼。ゲームのお試し道場のモンスター。ブログ https://ro-challenge.blog.jp/archives/1080740694.html : 最大HP 1,000倍 = 10億、属性・サイズを自由に指定。草とプレイヤーの種類はオミット):
+  - 計算は、ラトリオの「手入力モンスター」(`MONSTER_ID_MONSTER_TENYURYOKU` = 929。値は `CMobConfInput` の `SetMobConfInput(MOB_CONF_INPUT_DATA_INDEX_*)`)を使う。`engSandbag(model, cfg, mt)`:
+    手入力の値(Lv1・HP 1e9・DEF 600・MDEF 100・RES/MRES 0・属性 = 属性番号×10+Lv・種族・サイズ・BOSS)を入れ、`CMonsterMapAreaComponentManager.GetMonsterId` を一時的に 929 を返すものに差しかえ、`calcFromModel`(= 計算 + ダメージ。`calcCoreFromModel` はダメージを出さない)を呼び、
+    `finally` で全部元に戻す(支援の印・手入力の値・GetMonsterId)。**キャラの計算 → サンドバックマン → キャラの計算 で charaData・補助情報の表が同じになることを確認ずみ**(隠れた状態の確認。この枠はこれまで2回ここでずれた)
+  - DEF 600 / MDEF 100 は `DEF_DIV` / `MDEF_DIV`(ラトリオの除算 DEF = 装備側。ゲームの画面の「防御力」)に入る。ゲームの実測とは未照合なので画面は「目安」
+  - 攻撃方法の一覧: `engAttackMethods(model)` = `CAttackMethodAreaComponentManager.GetEffectiveAttackMethodDataArray()`(直前に `engCalc(model)` で計算係を model に合わせる。職業ごとの攻撃スキルだけ)。各方法の `GetNextOptionList()` が「レベル → ほかの設定」の鎖(`sbChain`)。
+    `optionValueArray` = 鎖の2つ目以降の値、`skillLv` = 1つ目。通常攻撃(skill 0)は結果が空なので候補から外している。エレメンタルバスターなどが 0 になるのは精霊などの「自分のスキル」の設定が要るため(追加設定ではない)
+  - 設定は `model.foxSb`(`simcSbCfg`)。**「変更」には数えない**(`simcStripSb`。スロットの ＊ が付かない)。枠は `simcFold("sb")`(最後。開いたときだけ計算する)
+  - 記録: `サンドバックマン記録.json`(`/api/sandbag` GET / POST {add / delete / note}。同じ `key`(中身のハッシュ)は日時だけ更新。最大 200 件。.gitignore)。1件 = {key, slot, job, model(その時の全部), sb(設定とスキル), res(数字), note}。
+    タブは `SIMV = "sb"`(`renderSandbagTab`)。結果 → 記録: `sbxGo`、記録 → キャラシミュ: `sbxApply`(いまのスロットの作業中の内容を置きかえる。`askOnce("sbapply")`。スロットが無ければ新しく作る)
 - 残り: ~~5 ダメージ・被ダメとの連携~~(済)。与ダメージ(攻撃側)の計算はまだ(被ダメの記録から、そのときのキャラ・装備・敵・技を計算機に入れる)。ほかに 性能カスタマイズ・時限効果・オートスペル、二刀流の左手、シャドウのエンチャント、Fox のランダムオプション → ラトリオの番号
 - 第3段階への利用者の注文(済): 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、

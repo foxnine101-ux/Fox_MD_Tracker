@@ -404,7 +404,7 @@ let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出�
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, input.mglink, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, input.mglink, input.sbnote, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -862,6 +862,9 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.sbres{margin:6px 0}
+.sbrec{margin-top:10px}
+.sbdet{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
 .mgcard{border-top:1px solid var(--line);padding:8px 0}
 .mgcard:first-of-type{border-top:0}
 .mgsk{display:inline-block;margin:0 6px 2px 0;padding:0 8px;border-radius:99px;background:var(--chip);font-size:12px}
@@ -1191,10 +1194,10 @@ function statusHtmlEq(st) {
 // (本家が更新されたら「ラトリオを更新」で取り込むだけ)。キャラはこの PC に保存する(計算機のキャラ.json)
 let SIMV = store.get("md_simv") || "chara";
 function simNav() {
-  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button></div>`;
+  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button><button data-simv="sb" class="${SIMV === "sb" ? "on" : ""}">サンドバックマン</button></div>`;
 }
 function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) => b.onclick = () => { SIMV = b.dataset.simv; store.set("md_simv", SIMV); render(); }); }
-function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : renderSimChara(); }
+function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : SIMV === "sb" ? renderSandbagTab() : renderSimChara(); }
 
 const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
 // ラトリオのファイルは /ratorio/v-<取り込んだ版>/… で読む。この形の URL はブラウザが覚えるので、2回目からは読み直さない(約440ファイル)。
@@ -1255,6 +1258,7 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     if (!query) { const b = ENG.reg.extractModelFromDom(); ENG.blank = (b.equip || []).slice(); ENG.blankShadow = ((b.shadowEquip || {}).itemId || []).slice(); }   // 「なし」のときの番号(開いた直後の状態)
     ENG.blank = ENG.blank || []; ENG.blankShadow = ENG.blankShadow || [];
     ENG.x.jobh = await imp("data/mig.job.h.js");
+    await engSbInit();
     try { ENG.xinfo = (await imp("ui/CExtraInfoAreaComponentManager.js")).CExtraInfoAreaComponentManager; } catch (e) { ENG.xinfo = null; }
     ENG.cache = {};
     ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
@@ -1408,13 +1412,14 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, sb: { methods: null, res: null, sig: "", err: "", mt: null, item: null, chain: null, recId: "" }, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
 // いまログインしているキャラ(複数つながっているときは、いちばん最近動きがあったもの)。「いま着ている装備」は、このキャラの装備だけを指す
 function nowChar() { const E = (DATA.equip || {}).chars || {}; return (DATA.now_chars || []).filter((c) => E[c]).sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0] || ""; }
-const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(c.model) !== JSON.stringify(c.saved);
+const simcStripSb = (m) => { if (!m || !m.foxSb) return m; const c = Object.assign({}, m); delete c.foxSb; return c; };      // サンドバックマンの設定は「変更」に数えない
+const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(simcStripSb(c.model)) !== JSON.stringify(simcStripSb(c.saved));
 function simcSave() {                     // 少しまとめてから保存
   clearTimeout(SIMC.saveT);
   SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }); }, 600);
@@ -2285,6 +2290,174 @@ function simcDmgHtml(m, r) {
     <div class="muted" style="font-size:12px;margin-top:4px">${D.rel ? `「受けたとき」の列は、このスロットのキャラに、そのときのステータスと装備セットを入れて計算したものです。記録のダメージ（${fmtN(P.baseDmg)}）に「いまの軽減 ÷ 受けたときの軽減」をかけて出しているので、装備・ステータス・支援を変えた分だけが数字に効きます（軽減前は約 ${fmtN(Math.round(raw))}）。` : `<span class="warn">このスロットの職業が、攻撃を受けたキャラと違うので、「受けたとき」の列は記録の表からの逆算です（軽減前は約 ${fmtN(Math.round(raw))}）。数字のずれが大きくなります。「このときのキャラ・装備でスロットを作る」で作ったスロットだと、より正確です。</span>`}見出しの右の「比べる」で装備セットを選ぶと、横に並びます。魔法ダメージそのものへの耐性と、エナジーコートなどは自動では入らないので、上の「補助」で選んでください。目安です。</div>`;
   return h;
 }
+// ---- サンドバックマン(ゲームのお試し道場のモンスター) ----
+// ラトリオの「手入力モンスター」(ID 929)を、サンドバッグマンの固定の強さ(Lv1・HP 10億・DEF 600・MDEF 100)にして、メインスキルのダメージを計算する。
+//   種類(一般/BOSS)・種族・属性・属性Lv・サイズは自由。草・プレイヤーの種類は扱わない。RES・MRES はゲームの画面に出ないので 0 とする。
+//   計算の間だけ「手入力モンスターが選ばれている」ことにして、終わったら元に戻す(キャラの計算に影響を残さない)
+const SB_FIXED = { lv: 1, hp: 1000000000, def: 600, mdef: 100 };
+const SB_KINDS = ["一般", "BOSS"], SB_RACES = ["無形", "不死", "動物", "植物", "昆虫", "魚貝", "悪魔", "人間", "天使", "竜族"], SB_ELES = ["無", "水", "地", "火", "風", "毒", "聖", "闇", "念", "不死"], SB_SIZES = ["小", "中", "大"];
+const SB_DEFAULT = { kind: 1, race: 0, ele: 0, lv: 2, size: 1, full: "", vals: [] };      // 初期値はゲームの画面の例(BOSS・無形・無2・中)
+const SB_MOB_KEYS = ["LV", "HP", "STR", "INT", "VIT", "DEX", "AGI", "LUK", "ATK", "MATK", "RANGE", "DEF", "MDEF", "BASE_EXP", "JOB_EXP", "SIZE", "ELEMENT", "RACE", "BOSS_TYPE", "GRASS_TYPE", "RES", "MRES"];
+function simcSbCfg(m) { m.foxSb = Object.assign({}, SB_DEFAULT, m.foxSb || {}); if (!Array.isArray(m.foxSb.vals)) m.foxSb.vals = []; return m.foxSb; }
+async function engSbInit() {
+  if (ENG.sb) return ENG.sb;
+  const w = ENG.frame.contentWindow, imp = (p) => w.eval(`import("${engBase()}engine/${p}")`);
+  ENG.sb = { CM: (await imp("monster/CMonsterMapAreaComponentManager.js")).CMonsterMapAreaComponentManager, MC: await imp("monster/CMobConfInput.js"), EN: await imp("const/EnumMobConfId.js"),
+    mon: (await imp("monster/monster.dat.js")).MONSTER_ID_MONSTER_TENYURYOKU, AM: (await imp("battle/CAttackMethodAreaComponentManager.js")).CAttackMethodAreaComponentManager };
+  return ENG.sb;
+}
+// そのキャラが使える攻撃方法(メインスキルの候補)。職業・装備ごとにラトリオが決める。各方法は「レベル → ほかの設定…」の選択の鎖(tree)を持つ
+function engAttackMethods(model) {
+  const S = ENG.sb, key = "atkm:" + JSON.stringify([model.status.jobId, model.equip, (model.weapon || {}).type, model.learnedSkill, (model.shadowEquip || {}).itemId]);
+  if (ENG.cache[key]) return ENG.cache[key];
+  engCalc(model);                                         // 計算係の中の職業・装備を model に合わせる(攻撃方法の一覧は、そのときの状態から作られる)
+  const lst = (ol) => {
+    if (!ol) return null;
+    const o = { label: ol.GetLabel(), type: ol.GetType(), def: ol.GetDefaultOptionDataValue(), attrs: ol.GetHtmlAttrArrayArray() || [], opts: [], next: null };
+    ol.ForEachOptionData((d) => { o.opts.push([d.GetValue(), d.GetLabel(), lst(d.GetNextOptionList())]); });
+    o.next = lst(ol.GetNextOptionList());
+    return o;
+  };
+  return ENG.cache[key] = S.AM.GetEffectiveAttackMethodDataArray().map((a) => ({ full: String(a.GetFullId()), skill: a.GetSkillId(), src: a.GetSourceType(), name: a.GetDispName(), tree: lst(a.GetNextOptionList()) }));
+}
+function sbChain(root, vals) {                            // 選んだ値(vals)で、設定の鎖をたどる。値が合わなければ初期値にする。[{ol, v}]
+  const out = []; let ol = root, i = 0;
+  while (ol && i < 12) {
+    let v = vals[i];
+    if (ol.type === 0) { if (!ol.opts.some((o) => o[0] === v)) v = ol.opts.some((o) => o[0] === ol.def) ? ol.def : (ol.opts[0] ? ol.opts[0][0] : 0); }
+    else if (v === undefined || v === null || Number.isNaN(+v)) v = ol.def;
+    out.push({ ol, v });
+    const o = ol.type === 0 ? ol.opts.find((x) => x[0] === v) : null;
+    ol = (o && o[2]) || ol.next; i++;
+  }
+  return out;
+}
+function engSandbag(model, cfg, mt) {                     // {per:{min,avg,max}, unit:[…], hits:[…], cast, delay, cool, interval, perSec, hitRate, noDmg} か、計算できなければ null
+  const S = ENG.sb, E = S.EN, mk = (k) => E["MOB_CONF_INPUT_DATA_INDEX_" + k];
+  const old = SB_MOB_KEYS.map((k) => S.MC.GetMobConfInput(mk(k))), origId = S.CM.GetMonsterId, before = ENG.sw.map((x) => x.m[x.get]);
+  const set = { LV: SB_FIXED.lv, HP: SB_FIXED.hp, STR: 1, INT: 1, VIT: 1, DEX: 1, AGI: 1, LUK: 1, ATK: 1, MATK: 1, RANGE: 1, DEF: SB_FIXED.def, MDEF: SB_FIXED.mdef, BASE_EXP: 1, JOB_EXP: 1,
+    SIZE: cfg.size, ELEMENT: cfg.ele * 10 + cfg.lv, RACE: cfg.race, BOSS_TYPE: cfg.kind ? 1 : 0, GRASS_TYPE: 0, RES: 0, MRES: 0 };
+  let r = null;
+  try {
+    SB_MOB_KEYS.forEach((k) => S.MC.SetMobConfInput(mk(k), set[k]));
+    S.CM.GetMonsterId = () => S.mon;
+    ENG.sw.forEach((x) => x.m[x.set](true));
+    engRndReset(model.foxRnd);
+    const mm = JSON.parse(JSON.stringify(model));
+    mm.attackMethod = { skillId: mt.skill, sourceType: mt.src, skillLv: mt.lv, optionValueArray: mt.opts };
+    r = ENG.reg.calcFromModel(mm);
+    const a = (r.activeResultArray || [])[0];
+    if (!a) return null;
+    const g = (n) => { try { return r[n](); } catch (e) { return null; } };
+    return { per: { min: g("GetDamageSummaryMinPerAtk"), avg: g("GetDamageSummaryAvePerAtk"), max: g("GetDamageSummaryMaxPerAtk") },
+      unit: ((a.dmgUnitArray || [])[0] || []).slice(0, 3), hits: ((a.hitCountArray || [])[0] || []).slice(0, 3),
+      cast: g("GetCastTime"), delay: g("GetDelayTime"), cool: g("GetCoolTime"), interval: g("GetAttackInterval"), perSec: g("GetDamageSummaryAvePerSec"), hitRate: a.hitRate, noDmg: !!a.bNoDamage };
+  } finally {
+    S.CM.GetMonsterId = origId;
+    SB_MOB_KEYS.forEach((k, i) => S.MC.SetMobConfInput(mk(k), old[i]));
+    ENG.sw.forEach((x, i) => x.m[x.set](before[i]));
+  }
+}
+const hash53 = (s) => { let h1 = 0xdeadbeef, h2 = 0x41c6ce57; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); } h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909); return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16); };
+const SBX = { recs: null, focus: "", open: {} };
+async function sbxLoad() { SBX.recs = await fetch("/api/sandbag").then((r) => r.json()).then((d) => d.records || []).catch(() => []); }
+const sbPost = (body) => fetch("/api/sandbag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).catch(() => ({}));
+const sbDesc = (cfg) => `${SB_KINDS[cfg.kind]}・${SB_RACES[cfg.race]}・${SB_ELES[cfg.ele]}${cfg.lv}・${SB_SIZES[cfg.size]}`;
+function simcSbState(m) {                                 // 枠を開いているときだけ。攻撃方法の一覧・選んだ方法・計算結果を用意する
+  const S = SIMC.sb, cfg = simcSbCfg(m);
+  S.err = "";
+  try {
+    S.methods = engAttackMethods(m);
+    let item = S.methods.find((x) => x.full === cfg.full) || S.methods.find((x) => x.skill !== 0) || S.methods[0];
+    if (!item) { S.item = null; S.res = null; S.err = "この職業の攻撃スキルが見つかりません"; return; }
+    cfg.full = item.full;
+    const chain = sbChain(item.tree, cfg.vals); cfg.vals = chain.map((c) => c.v);
+    const lv = chain[0] ? +chain[0].v : 1, opts = chain.slice(1).map((c) => +c.v);
+    const optText = chain.slice(1).map((c) => (c.ol.label ? c.ol.label + ":" : "") + (c.ol.type === 0 ? ((c.ol.opts.find((o) => o[0] === c.v) || [])[1] ?? c.v) : c.v)).join(" ");
+    S.item = item; S.chain = chain; S.mt = { skill: item.skill, src: item.src, lv, opts, name: item.name, optText };
+    const sig = JSON.stringify([simcStripSb(m), cfg.kind, cfg.race, cfg.ele, cfg.lv, cfg.size, item.full, cfg.vals]);
+    if (S.sig !== sig) { S.res = engSandbag(m, cfg, S.mt); S.sig = sig; S.key = hash53(sig); if (!S.res) S.err = "このスキルは、サンドバッグマンに対して計算できませんでした"; }
+  } catch (e) { S.err = "計算できませんでした: " + e.message; S.res = null; }
+}
+function simcSbNums(res) {                                // 数字の表(画面と記録で同じ形)
+  const n = (v, f = 0) => simcNum(v, f), row = (l, v, note = "") => `<tr><td>${l}</td><td class="v">${v}</td><td class="muted">${note}</td></tr>`;
+  const [u0, u1, u2] = res.unit || [], [h0, h1, h2] = res.hits || [], avg = res.per.avg || 0;
+  const rng = (a, b2, c, f = 0) => (a === c ? n(a, f) : `${n(a, f)} ～ ${n(c, f)}`);
+  return `<table>${row("1回の使用の合計ダメージ（平均）", `<b>${n(avg)}</b>`, res.per.min !== res.per.max ? `最小 ${n(res.per.min)} ／ 最大 ${n(res.per.max)}` : "")}
+    ${row("1ヒットのダメージ", u1 === undefined ? "-" : rng(u0, u1, u2), "ヒット数 " + (h1 === undefined ? "-" : rng(h0, h1, h2)))}
+    ${row("詠唱 / ディレイ / 間隔", `${n(res.cast, 2)} / ${n(res.delay, 2)} / ${n(res.interval, 2)} 秒`, res.cool ? `クールタイム ${n(res.cool, 2)} 秒` : "")}
+    ${row("1秒あたり（平均）", n(res.perSec), "")}
+    ${row("HP 10億を削るのに", avg ? `約 ${n(Math.ceil(SB_FIXED.hp / avg))} 回` : "-", avg && res.interval ? `約 ${n(Math.ceil(SB_FIXED.hp / avg) * res.interval, 1)} 秒` : "")}</table>`;
+}
+function simcSbHtml(m) {
+  const cfg = simcSbCfg(m), S = SIMC.sb;
+  const sel = (id, arr, cur) => `<select data-sbc="${id}">${arr.map((t, i) => `<option value="${i}" ${i === cur ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  let h = `<div class="muted" style="margin-bottom:6px">ゲームのお試し道場の「サンドバッグマン」と同じ設定のモンスターに、メインスキルを使ったときのダメージを、簡易に計算します（数字のみ・目安）。固定の強さ: <b>Lv ${SB_FIXED.lv} ／ HP ${fmtN(SB_FIXED.hp)} ／ DEF ${SB_FIXED.def} ／ MDEF ${SB_FIXED.mdef}</b>（RES・MRES はゲームの画面に出ないので 0 として計算）。キャラは、いま開いているスロットのものです。</div>
+    <div class="bfbar"><label>種類 ${sel("kind", SB_KINDS, cfg.kind)}</label><label>種族 ${sel("race", SB_RACES, cfg.race)}</label><label>属性 ${sel("ele", SB_ELES, cfg.ele)}</label>
+      <label>属性Lv <select data-sbc="lv">${[1, 2, 3, 4].map((i) => `<option value="${i}" ${i === cfg.lv ? "selected" : ""}>Lv${i}</option>`).join("")}</select></label><label>サイズ ${sel("size", SB_SIZES, cfg.size)}</label></div>`;
+  if (!(simcFoldState().sb)) return h + `<div class="muted">この枠を開くと、メインスキルを選んで計算できます。</div>`;
+  simcSbState(m);
+  if (S.methods && S.item) {
+    h += `<div class="bfbar"><label>メインスキル <select data-sbc="full">${S.methods.filter((x) => x.skill !== 0 || S.methods.length === 1).map((x) => `<option value="${esc(x.full)}" ${x.full === cfg.full ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+      ${(S.chain || []).map((c, i) => c.ol.type === 0
+        ? `<label>${esc(i === 0 ? "Lv" : c.ol.label || "設定")} <select data-sbo="${i}">${c.ol.opts.map((o) => `<option value="${esc(o[0])}" ${o[0] === c.v ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></label>`
+        : `<label>${esc(c.ol.label || "設定")} <input type="number" data-sbo="${i}" value="${esc(c.v)}" style="width:6em"></label>`).join("")}</div>`;
+  }
+  if (S.err) h += `<div class="warn">${esc(S.err)}</div>`;
+  if (S.res) {
+    const known = (SBX.recs || []).find((x) => x.key === S.key);
+    h += `<div class="sbres">${simcSbNums(S.res)}</div>`
+      + (S.res.per.avg === 0 && !S.res.noDmg ? `<div class="warn">ダメージが 0 になりました。このスキルは、「支援・アイテム・スキル」の「自分のスキル」の設定（エレメンタルマスターなら精霊の召喚など）が要る場合があります。</div>` : "")
+      + `<div class="opts"><button id="sbrec">${known ? "もう一度記録する（日時を更新）" : "この結果を記録する"}</button>${known ? `<button class="ghost" data-sbgo="${esc(known.id)}">記録を見る →</button>` : ""}<span class="muted">記録は「サンドバックマン」のタブで見られます。</span></div>`;
+  }
+  return h;
+}
+async function simcSbRecord(m) {
+  const S = SIMC.sb, cfg = simcSbCfg(m); if (!S.res || !S.mt) return;
+  const ch = simcCur(), model = simcClone(m);
+  const rec = { key: S.key, slot: { id: SIMC.cur, name: ch ? ch.name : "" }, job: simcJobName(m), model,
+    sb: { cfg: { kind: cfg.kind, race: cfg.race, ele: cfg.ele, lv: cfg.lv, size: cfg.size }, full: cfg.full, vals: cfg.vals.slice(), skill: S.mt.name, skillLv: S.mt.lv, optText: S.mt.optText }, res: S.res };
+  const r = await sbPost({ add: rec });
+  await sbxLoad(); SIMC.msg = r.id ? "サンドバックマンの記録に追加しました。" : "記録できませんでした。"; render();
+}
+function sbxGo(id) { SBX.focus = id; SIMV = "sb"; store.set("md_simv", SIMV); TAB = "sim"; store.set("md_tab", TAB); render(); }
+async function sbxApply(id) {
+  const r = (SBX.recs || []).find((x) => x.id === id); if (!r) return;
+  let ch = simcCur();
+  if (ch && !(await askOnce("sbapply", `スロット「${ch.name}」の作業中の内容を、この記録のときのキャラ・装備・サンドバッグマンの設定で置きかえます。\n保存していない変更は消えます（保存してあれば「ロード」で戻せます）。`, "反映する"))) return;
+  if (!ch) { const nid = "c" + Date.now().toString(36); ch = SIMC.chars[nid] = { name: "記録: " + (r.slot.name || r.job), model: simcClone(r.model), saved: simcClone(r.model) }; simcSelect(nid); await simcPut(nid); }
+  else { ch.model = simcClone(r.model); simcSbCfg(ch.model); simcSave(); }
+  SIMC.res = null; SIMC.report = null; SIMC.sb.sig = "";
+  const st = simcFoldState(); st.sb = true; store.set("md_simfold", JSON.stringify(st));
+  SIMV = "chara"; store.set("md_simv", SIMV); TAB = "sim"; store.set("md_tab", TAB); render();
+  setTimeout(() => { const el = $("#view").querySelector('details[data-fold="sb"]'); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); }, 400);
+}
+function renderSandbagTab() {
+  if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">サンドバックマンは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
+  if (!SBX.recs) { $("#view").innerHTML = simNav() + `<div class="panel empty">読み込み中…</div>`; bindSimNav(); sbxLoad().then(render); return; }
+  if (RAT && RAT.installed && !ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
+  const R = SBX.recs, f = (v, d = 0) => simcNum(v, d);
+  let h = simNav() + `<div class="panel simbox"><div class="opts"><b>サンドバックマン</b><span class="muted">キャラシミュレーターの「サンドバックマン」の枠で記録した計算結果です（新しい順・最大200件）。「この設定をキャラシミュに反映してジャンプ」で、そのときのキャラ・装備・設定を、いまのスロットに入れて開きます。</span></div></div>`;
+  if (!R.length) h += `<div class="panel empty">まだ記録がありません。キャラシミュレーターの「サンドバックマン」の枠で、メインスキルを選んで「この結果を記録する」を押してください。</div>`;
+  h += R.map((r) => {
+    const cfg = r.sb.cfg, res = r.res, st = r.model.status || {}, open = SBX.open[r.id], avg = res.per.avg || 0;
+    const det = open ? `<div class="sbdet"><div class="muted">${esc(r.job)}　BaseLv ${st.baseLv} / JobLv ${st.jobLv}　STR ${st.str} AGI ${st.agi} VIT ${st.vit} INT ${st.int} DEX ${st.dex} LUK ${st.luk}</div>
+      ${ENG.ready ? `<table class="eqt">${SIMC_REGIONS.concat(SIMC_SHADOW).map(([i, l]) => { const id = simcItemAt(r.model, i); return simcIsNone(i, id) ? "" : `<tr><td class="muted">${l}</td><td>${esc(simcItemName(id))}</td></tr>`; }).join("")}</table>` : `<div class="muted">装備の名前は、計算係の起動後に出ます…</div>`}
+      <div class="sbres">${simcSbNums(res)}</div></div>` : "";
+    return `<div class="panel sbrec${SBX.focus === r.id ? " mx-flash" : ""}" data-sbr="${esc(r.id)}"><div class="opts"><b>${esc(r.sb.skill)} Lv${esc(r.sb.skillLv)}${r.sb.optText ? " " + esc(r.sb.optText) : ""}</b>
+      <span class="tag">${esc(sbDesc(cfg))}</span><span class="muted">${when(r.t)} ／ ${esc(r.slot.name || "")}（${esc(r.job)} Lv${st.baseLv}）</span></div>
+      <div class="opts"><span>1回の平均 <b>${f(avg)}</b></span><span class="muted">（最小 ${f(res.per.min)} ／ 最大 ${f(res.per.max)}）</span><span>1秒あたり <b>${f(res.perSec)}</b></span><span class="muted">詠唱 ${f(res.cast, 2)} ／ ディレイ ${f(res.delay, 2)} 秒</span></div>
+      <div class="opts"><input class="sbnote" data-sbn="${esc(r.id)}" value="${esc(r.note || "")}" placeholder="メモ" style="width:18em"><button data-sbapply="${esc(r.id)}">この設定をキャラシミュに反映してジャンプ</button>
+        <button class="ghost" data-sbdetail="${esc(r.id)}">${open ? "詳細をとじる" : "詳細"}</button><button class="ghost" data-sbdel="${esc(r.id)}">削除</button></div>${det}</div>`;
+  }).join("");
+  $("#view").innerHTML = h; bindSimNav();
+  const V = $("#view");
+  V.querySelectorAll("[data-sbapply]").forEach((el) => el.onclick = () => sbxApply(el.dataset.sbapply));
+  V.querySelectorAll("[data-sbdetail]").forEach((el) => el.onclick = () => { SBX.open[el.dataset.sbdetail] = !SBX.open[el.dataset.sbdetail]; render(); });
+  V.querySelectorAll("[data-sbdel]").forEach((el) => el.onclick = async () => { if (await askOnce("sbdel", "この記録を削除します。", "削除")) { await sbPost({ delete: el.dataset.sbdel }); await sbxLoad(); render(); } });
+  V.querySelectorAll("input.sbnote").forEach((el) => { el.onkeydown = (e) => { if (e.key === "Enter") el.blur(); }; el.onchange = async () => { await sbPost({ note: [el.dataset.sbn, el.value] }); const r = R.find((x) => x.id === el.dataset.sbn); if (r) r.note = el.value; }; });
+  if (SBX.focus) { const el = V.querySelector(`[data-sbr="${CSS.escape(SBX.focus)}"]`); SBX.focus = ""; if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => el.classList.remove("mx-flash"), 2500); } }
+}
 // たためる枠。開け閉めは覚えておく(md_simfold = {枠の名前: 開いているか})
 const simcFoldState = () => { try { return JSON.parse(store.get("md_simfold") || "{}"); } catch (e) { return {}; } };
 function simcFold(key, title, body, head = "", openDefault = true) {
@@ -2497,7 +2670,8 @@ function renderSimChara() {
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
-      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}</div>
+      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}
+      ${simcFold("sb", "サンドバックマン", simcSbHtml(m), ` <span class="muted foldsum">${esc(sbDesc(simcSbCfg(m)))}</span>`, false)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -2598,6 +2772,14 @@ function renderSimChara() {
     // 装備の編集。替えたら全部描き直す(計算は 0.1秒ほど)
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
+    // サンドバックマン
+    {
+      const cfg = simcSbCfg(m), S = SIMC.sb, again = () => { simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
+      V.querySelectorAll("[data-sbc]").forEach((el) => el.onchange = () => { const k = el.dataset.sbc; if (k === "full") { cfg.full = el.value; cfg.vals = []; } else cfg[k] = +el.value; again(); });
+      V.querySelectorAll("[data-sbo]").forEach((el) => el.onchange = () => { const i = +el.dataset.sbo; cfg.vals = (S.chain || []).map((c) => c.v).slice(0, i); cfg.vals[i] = el.tagName === "SELECT" && !Number.isNaN(+el.value) ? +el.value : +el.value; again(); });
+      if (g("sbrec")) g("sbrec").onclick = () => simcSbRecord(m);
+      V.querySelectorAll("[data-sbgo]").forEach((el) => el.onclick = () => sbxGo(el.dataset.sbgo));
+    }
     // 装備セットを並べて比べる
     V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else SIMC.cmp = [sid]; render(); });      // 並べるのは「いまの装備」+ 1つ(別のを選ぶと入れかわる)
     simcCmpFill(m); simcCmpKick(m);
@@ -2660,7 +2842,7 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); });
+    V.querySelectorAll("details[data-fold]").forEach((el) => el.ontoggle = () => { const st = simcFoldState(); st[el.dataset.fold] = el.open; store.set("md_simfold", JSON.stringify(st)); if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
     { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
