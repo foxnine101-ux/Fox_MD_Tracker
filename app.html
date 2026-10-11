@@ -324,7 +324,28 @@ function accKnown() {      // 知っているアカウントID(通信で見た�
 const accLabel = (a) => (a === "?" || !a ? "アカウント不明" : (SETTINGS.accNames || {})[a] || "アカウント（ID末尾 " + String(a).slice(-4) + "）");
 function setCharAcc(keys, a) { SETTINGS.charAcc = SETTINGS.charAcc || {}; keys.forEach((k) => { if (a) SETTINGS.charAcc[k] = a; else delete SETTINGS.charAcc[k]; }); saveSettings(); render(); }
 function nameAcc(a) { const cur = (SETTINGS.accNames || {})[a] || "", n = prompt(`このアカウント（ID末尾 ${String(a).slice(-4)}）の名前（空にすると、名前を消します）`, cur); if (n === null) return; SETTINGS.accNames = SETTINGS.accNames || {}; if (n.trim()) SETTINGS.accNames[a] = n.trim().slice(0, 20); else delete SETTINGS.accNames[a]; saveSettings(); render(); }
-const CHAR_COLORS = [["赤", "#e03131", "🟥"], ["オレンジ", "#f08c00", "🟧"], ["黄", "#fab005", "🟨"], ["緑", "#2f9e44", "🟩"], ["青", "#1c7ed6", "🟦"], ["紫", "#7048e8", "🟪"], ["茶", "#a0643c", "🟫"], ["灰", "#868e96", "⬜"]];
+// 色の選択(メニューの「色をつける…」)。たくさんのキャラに使い分けられるよう、色見本 36 色 + 好きな色(色の選択・16進数) + 最近使った色
+const LAST_PT = { x: 200, y: 200 };
+document.addEventListener("contextmenu", (e) => { LAST_PT.x = e.clientX; LAST_PT.y = e.clientY; }, true);
+const COLOR_GRID = ["#e03131", "#c2255c", "#9c36b5", "#6741d9", "#3b5bdb", "#1971c2", "#0c8599", "#099268", "#2f9e44", "#66a80f", "#f08c00", "#e8590c",
+  "#ff8787", "#faa2c1", "#e599f7", "#b197fc", "#91a7ff", "#74c0fc", "#66d9e8", "#63e6be", "#8ce99a", "#c0eb75", "#ffd43b", "#ffa94d",
+  "#a0643c", "#868e96", "#495057", "#212529", "#ffffff", "#ced4da", "#d9480f", "#862e9c", "#364fc6", "#087f5b", "#5c940d", "#e67700"];
+function pickCharColor(keys, x, y) {
+  document.querySelectorAll(".colorpop").forEach((e) => e.remove());
+  const rec = (SETTINGS.recentColors || []).slice(0, 8), cur = (SETTINGS.charColor || {})[keys[0]] || "#1c7ed6";
+  const d = document.createElement("div"); d.className = "colorpop";
+  const sw = (c) => `<button class="sw" data-c="${c}" style="background:${c}" title="${c}"></button>`;
+  d.innerHTML = `<div class="muted" style="margin-bottom:4px">${keys.length > 1 ? `選んだ${keys.length}人` : esc(cn(keys[0]))} の色</div><div class="swgrid">${COLOR_GRID.map(sw).join("")}</div>
+    ${rec.length ? `<div class="muted" style="margin:6px 0 2px">最近使った色</div><div class="swgrid">${rec.map(sw).join("")}</div>` : ""}
+    <div class="opts" style="margin-top:8px"><label>好きな色 <input type="color" id="cpick" value="${/^#[0-9a-f]{6}$/i.test(cur) ? cur : "#1c7ed6"}"></label><button id="cpok">この色にする</button><button class="ghost" id="cpx">とじる</button></div>`;
+  document.body.appendChild(d);
+  const r = d.getBoundingClientRect(); d.style.left = Math.max(4, Math.min(x, innerWidth - r.width - 4)) + "px"; d.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + "px";
+  const apply = (c) => { SETTINGS.recentColors = [c].concat((SETTINGS.recentColors || []).filter((v) => v !== c)).slice(0, 8); d.remove(); setCharColor(keys, c); };
+  d.onclick = (e) => { const b = e.target.closest("button.sw"); if (b) apply(b.dataset.c); };
+  d.querySelector("#cpok").onclick = () => apply(d.querySelector("#cpick").value);
+  d.querySelector("#cpx").onclick = () => d.remove();
+  setTimeout(() => document.addEventListener("pointerdown", function off(ev) { if (!d.contains(ev.target)) { d.remove(); document.removeEventListener("pointerdown", off); } }), 0);
+}
 function setCharColor(keys, col) { SETTINGS.charColor = SETTINGS.charColor || {}; keys.forEach((k) => { if (col) SETTINGS.charColor[k] = col; else delete SETTINGS.charColor[k]; }); saveSettings(); render(); }
 function applyCharColors() {          // キャラの行・列の左端に、手で付けた色の帯を出す(キャラを右クリック)
   const cc = SETTINGS.charColor || {};
@@ -335,9 +356,8 @@ function charMenu(c) {
   const keys = many ? [...SEL.chars] : [c];
   const items = [{ cap: many ? `選んだ${keys.length}人（${keys.map(cn).join("、")}）` : cn(c) }];
   items.push({ label: many ? `選んだ${keys.length}人を隠す` : "このキャラを隠す", act: () => hideChars(keys) });
-  items.push("-", { cap: "行の左端の色" });
-  CHAR_COLORS.forEach(([nm, col, sq]) => items.push({ label: `${sq} ${nm}${(SETTINGS.charColor || {})[c] === col ? "（いま）" : ""}`, act: () => setCharColor(keys, col) }));
-  items.push({ label: "色をはずす", act: () => setCharColor(keys, "") });
+  items.push("-", { label: ((SETTINGS.charColor || {})[c] ? "■ " : "") + "色をつける…（行の左端）", act: () => pickCharColor(keys, LAST_PT.x, LAST_PT.y) });
+  if (keys.some((k) => (SETTINGS.charColor || {})[k])) items.push({ label: "色をはずす", act: () => setCharColor(keys, "") });
   const accs = accKnown();
   if (accs.length) {      // アカウントの設定(ニャル様の週の回数などが、アカウントごとに数えられる)
     items.push("-", { cap: "アカウント" });
@@ -945,7 +965,7 @@ td.dm-max{font-weight:700}
 .abar .aw i{display:block;height:100%;background:var(--accent);border-radius:5px}.abar .av{flex:0 0 7em;text-align:right;font-variant-numeric:tabular-nums}.abar .an2{flex:0 0 10em;font-size:12px}
 .atkbig{display:flex;flex-wrap:wrap;gap:24px}.atkbig b{font-size:24px}.atkmres{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.atkmob{margin-top:4px}
 .atkfxg{margin:6px 0}.atkfxl{display:flex;flex-wrap:wrap;gap:6px}.afx{border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;background:var(--panel);cursor:pointer;display:inline-flex;gap:4px;align-items:center}
-.licdlg{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}.licbox{width:min(760px,92vw);max-height:84vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}.licpre{white-space:pre-wrap;font:12.5px/1.6 inherit;margin:6px 0 0}.infopop{position:fixed;z-index:9999;width:430px;max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);padding:8px 12px;font-size:13px}.infoh{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.infox{cursor:pointer;opacity:.7}.infob{line-height:1.5}.afx{user-select:none}.afxn{margin-left:3px}.afxrate td,.afxrate th{padding:2px 8px}.afx.dim{color:var(--muted);opacity:.7}.afx.on.dim{opacity:1}.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
+.colorpop{position:fixed;z-index:9999;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);padding:10px 12px}.swgrid{display:grid;grid-template-columns:repeat(12,22px);gap:4px}.swgrid .sw{width:22px;height:22px;border-radius:5px;border:1px solid rgba(128,128,128,.5);padding:0;cursor:pointer}.swgrid .sw:hover{outline:2px solid var(--accent)}.licdlg{position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center}.licbox{width:min(760px,92vw);max-height:84vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 16px}.licpre{white-space:pre-wrap;font:12.5px/1.6 inherit;margin:6px 0 0}.infopop{position:fixed;z-index:9999;width:430px;max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.45);padding:8px 12px;font-size:13px}.infoh{display:flex;justify-content:space-between;gap:8px;margin-bottom:4px}.infox{cursor:pointer;opacity:.7}.infob{line-height:1.5}.afx{user-select:none}.afxn{margin-left:3px}.afxrate td,.afxrate th{padding:2px 8px}.afx.dim{color:var(--muted);opacity:.7}.afx.on.dim{opacity:1}.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
 .sbres{margin:6px 0}
 .sbrec{margin-top:10px}
 .sbdet{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
