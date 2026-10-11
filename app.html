@@ -902,7 +902,7 @@ td.dm-max{font-weight:700}
 .abar .aw i{display:block;height:100%;background:var(--accent);border-radius:5px}.abar .av{flex:0 0 7em;text-align:right;font-variant-numeric:tabular-nums}.abar .an2{flex:0 0 10em;font-size:12px}
 .atkbig{display:flex;flex-wrap:wrap;gap:24px}.atkbig b{font-size:24px}.atkmres{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.atkmob{margin-top:4px}
 .atkfxg{margin:6px 0}.atkfxl{display:flex;flex-wrap:wrap;gap:6px}.afx{border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;background:var(--panel);cursor:pointer;display:inline-flex;gap:4px;align-items:center}
-.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
+.afx.dim{color:var(--muted);opacity:.7}.afx.on.dim{opacity:1}.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
 .sbres{margin:6px 0}
 .sbrec{margin-top:10px}
 .sbdet{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
@@ -2047,7 +2047,7 @@ function simcSbAvg(m, over, useFx) {
     if (ENG.cache[key] !== undefined) return ENG.cache[key];
     const T = stpSbMt(mm); if (!T) return null;
     const mt = Object.assign({}, T.mt);
-    if (useFx) mt.fx = atkFxApplied(atkActiveIds(stpSbKind(mm, T.cfg, mt)), T.cfg.kind === 1);
+    if (useFx) mt.fx = atkFxApplied(atkActiveIds(stpSbKind(mm, T.cfg, mt)), T.cfg.kind === 1, mm.status);
     const r = engSandbag(mm, T.cfg, mt);
     return ENG.cache[key] = r ? { avg: r.per.avg, name: T.item.name } : null;
   } catch (e) { return null; }
@@ -2272,14 +2272,16 @@ function stpSbCtl(m) {
   const cfg = T.cfg, sel = (id, arr, cur) => `<select data-stpsb="${id}">${arr.map((t, i) => `<option value="${i}" ${i === cur ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
   let kind = "b"; try { kind = stpSbKind(simcClone(m), cfg, T.mt); } catch (e) { /* 判定できなければ両方 */ }
   const on = atkFxSet().on, fx = atkFxAll().filter((e) => e.kind === "b" || e.kind === kind || kind === "b");
-  return `<div class="stpsbc"><div class="opts"><b>ダメージの目安（小型サンドバックマン）</b><span class="muted">サンドバックマンの枠と同じ設定です。ステータスを変えたときの、メインスキル1回の平均ダメージ</span></div>
+  const owned = atkOwnedNames(m);
+  return `<div class="stpsbc"><div class="muted" style="font-size:12px">サンドバックマンの枠と同じ設定です。ステータスを変えたときの、メインスキル1回の平均ダメージ。グレーの文字の効果は、いまの装備に付いていません（試したいときは選べます）</div>
     <div class="bfbar"><label>スキル <select data-stpsb="full">${T.methods.filter((x) => x.skill !== 0 || T.methods.length === 1).map((x) => `<option value="${esc(x.full)}" ${x.full === cfg.full ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
       ${T.chain.map((c, i) => c.ol.type === 0 ? `<label>${esc(i === 0 ? "Lv" : c.ol.label || "設定")} <select data-stpsb="o:${i}">${c.ol.opts.map((o) => `<option value="${esc(o[0])}" ${o[0] === c.v ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></label>` : `<label>${esc(c.ol.label || "設定")} <input type="number" data-stpsb="o:${i}" value="${esc(c.v)}" style="width:6em"></label>`).join("")}
       <span class="tag">${kind === "p" ? "物理" : kind === "m" ? "魔法" : "物理・魔法"}</span></div>
     <div class="bfbar"><label>種類 ${sel("kind", SB_KINDS, cfg.kind)}</label><label>種族 ${sel("race", SB_RACES, cfg.race)}</label><label>属性 ${sel("ele", SB_ELES, cfg.ele)}</label>
       <label>属性Lv <select data-stpsb="lv">${[1, 2, 3, 4].map((i) => `<option value="${i}" ${i === cfg.lv ? "selected" : ""}>Lv${i}</option>`).join("")}</select></label><label>サイズ ${sel("size", SB_SIZES, cfg.size)}</label></div>
-    <div class="atkfxl" style="margin:4px 0"><span class="muted">時限効果（かかったときの数字を「時限効果込み」に出します。「与ダメシミュ」と共通）</span>${fx.map((e) => `<label class="afx${on[e.id] ? " on" : ""}" title="${esc(e.text)}"><input type="checkbox" data-stpfx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}</label>`).join("")}</div></div>`;
+    <div class="atkfxl" style="margin:4px 0"><span class="muted">時限効果（かかったときの数字を「時限効果込み」に出します。「与ダメシミュ」と共通）</span>${fx.map((e) => `<label class="afx${on[e.id] ? " on" : ""}${atkFxOwned(owned, e) ? "" : " dim"}" title="${esc(e.text)}${atkFxOwned(owned, e) ? "" : "\nいまの装備には付いていません（試したいときは選べます）"}"><input type="checkbox" data-stpfx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}</label>`).join("")}</div></div>`;
 }
+function stpSbSum(m) { try { const T = stpSbMt(m); if (!T) return ""; const c = T.cfg; return `${T.item.name} Lv${T.mt.lv} ／ ${SB_KINDS[c.kind]}・${SB_RACES[c.race]}・${SB_ELES[c.ele]}${c.lv}・${SB_SIZES[c.size]}${atkActiveIds(null).length ? ` ／ 時限効果 ${atkActiveIds(null).length} 個` : ""}`; } catch (e) { return ""; } }
 function stpHtml(m) {
   const S = stpState(), O = SIMC.opt, sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs, combos = sel.main.length * sel.sh.length;
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
@@ -2288,15 +2290,16 @@ function stpHtml(m) {
       <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
       <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
       <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
-    <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid) || (sid === stpNowSid(m, false) && sel.main.includes("now")), s2)).join("")}</div>
-      <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid) || (sid === stpNowSid(m, true) && sel.sh.includes("now")), s2)).join("")}</div>
-      <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ）</span>` : ""}</span></div>
     ${stpBuffHtml(m)}
     <div class="muted" style="font-size:12px;margin:2px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（「支援・アイテム・スキル」の枠のオンのもの）</div>
-    ${stpSbCtl(m)}
     <div id="stpmain">${stpMainHtml(m, S)}</div>
+    ${simcFold("stppat", "装備パターンごとの確認", `    <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid) || (sid === stpNowSid(m, false) && sel.main.includes("now")), s2)).join("")}</div>
+      <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid) || (sid === stpNowSid(m, true) && sel.sh.includes("now")), s2)).join("")}</div>
+      <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ）</span>` : ""}</span></div>
     ${(() => { const L = simcLearnedList(m), n = simcLearnedCount(m); return L.length || n === 0 ? `<div class="muted" style="font-size:12px;margin:4px 0">【習】の装備（習得スキルのレベルで効果が変わる）: <b>${L.length ? esc(L.join("、")) : "いまの装備には無し"}</b>。習得スキルは、いまのキャラのものを使います（${n === null ? "確認中" : n === 0 ? `<span class="warn">入っていません。【習】の効果が出ません。「現在のキャラを反映」で入れてください</span>` : n + " 個入っています"}）。</div>` : ""; })()}
-    <div class="stph">装備パターンごとの確認</div><div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
+    <div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
+`, ` <span class="muted">（選んだ装備スロット × シャドウのスロットを、いまのステータス・支援で着せた結果）</span>`, true)}
+    ${simcFold("stpsb", "ダメージの目安（小型サンドバックマン）", stpSbCtl(m), ` <span class="muted">${esc(stpSbSum(m))}</span>`, false)}
     <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
     ${simcFold("stpsw", "ステータスを変えたときのダメージ（INT を下げたらどれくらい？）", `<div class="bfbar"><label>ステータス <select data-stpswc="stat">${STP_KEYS.map((k) => `<option value="${k}" ${S.sw.stat === k ? "selected" : ""}>${STP_LABEL[k]}</option>`).join("")}</select></label>
         <label>向き <select data-stpswc="dir"><option value="-1" ${S.sw.dir < 0 ? "selected" : ""}>下げる</option><option value="1" ${S.sw.dir > 0 ? "selected" : ""}>上げる</option></select></label>
@@ -2310,7 +2313,8 @@ function stpKick(m) {                            // 重い計算(装備パター
   const mf = $("#view").querySelector('details[data-fold="opt"]'); if (!mf || !mf.open || !$("#stp") || !ENG.ready) return;
   const S = stpState(); if (!S) return;
   const fe = $("#view").querySelector('details[data-fold="stpeff"]'), fw = $("#view").querySelector('details[data-fold="stpsw"]');
-  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S))) || (fw && fw.open && !(S.swR && S.swSig === stpSwSig(m, S)));
+  const pf = $("#view").querySelector('details[data-fold="stppat"]');
+  const need = (pf && pf.open && !(S.rows && S.rowSig === stpRowSig(m, S))) || !(S.sug && S.sugSig === stpSugSig(m, S)) || (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S))) || (fw && fw.open && !(S.swR && S.swSig === stpSwSig(m, S)));
   if (!need || SIMC.busy) return;          // 「反映」などの作業中は計算しない(終わって描き直したあとに始める)
   clearTimeout(S.kt); S.kt = setTimeout(() => stpHeavy(), S.rows ? 1000 : 500);
 }
@@ -2321,8 +2325,9 @@ async function stpHeavy() {
   const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
   try {
     const pats = stpPats(m, S), d = Object.assign({}, S.d), MAXV = SIMC_STMAX;
-    // 1) 装備パターンの表
-    if (!(S.rows && S.rowSig === stpRowSig(m, S))) {
+    // 1) 装備パターンの表(枠を開いているときだけ)
+    const pf = $("#view").querySelector('details[data-fold="stppat"]');
+    if (pf && pf.open && !(S.rows && S.rowSig === stpRowSig(m, S))) {
       const rows = [];
       for (const P of pats) { await tick(); const e = stpEval(P, d); rows.push(Object.assign(e, { label: P.label, miss: P.miss, missRows: P.missRows, colors: P.colors, learned: simcLearnedList(P.mm) })); put("stppats", stpPatsHtml(m, rows, pats.length)); }
       S.rows = rows; S.rowSig = stpRowSig(m, S); put("stppats", stpPatsHtml(m, rows, rows.length));
@@ -2854,6 +2859,14 @@ const ATK_FX = [   // ランダム発動の時限効果。kind: p = 物理 / m =
   { id: "spl", name: "根源への到達", kind: "m", text: "10秒: SPL+100(魔法のダメージが上がる特性ステータス)", fx: [[ATK_SP, 4, 100]] },
   { id: "con", name: "蒼穹の覇者", kind: "b", text: "10秒: CON+100", fx: [[ATK_SP, 5, 100]] },
   { id: "crt", name: "天与の才", kind: "p", text: "10秒: CRT+100(クリティカル系の特性ステータス)", fx: [[ATK_SP, 6, 100]] }];
+const stpExtraV = (v) => Math.floor((v || 0) / 10) + ((v || 0) >= 110 ? 5 : 0);
+ATK_FX.push(
+  { id: "extstr", name: "ExtraStr", kind: "p", text: "素STR 10ごとに物理ダメージ+1%・STR110以上でさらに+5%（常時）", cards: ["ExtraStr"], dyn: (st) => [[ATK_AT, 5, stpExtraV(st.str)]] },
+  { id: "extagi", name: "ExtraAgi", kind: "p", text: "素AGI 10ごとに必中攻撃+1%・AGI110以上でさらに+5%（常時）", cards: ["ExtraAgi"], dyn: (st) => [[ATK_AT, 11, stpExtraV(st.agi)]] },
+  { id: "extvit", name: "ExtraVit", kind: "b", text: "素VIT 10ごとに回復量+1%・VIT110以上でさらに+5%（ダメージには関係なし）", cards: ["ExtraVit"], dyn: () => [] },
+  { id: "extint", name: "ExtraInt", kind: "m", text: "素INT 10ごとに魔法ダメージ+1%・INT110以上でさらに+5%（常時）", cards: ["ExtraInt"], dyn: (st) => [[ATK_AT, 14, stpExtraV(st.int)]] },
+  { id: "extdex", name: "ExtraDex", kind: "p", text: "素DEX 10ごとに遠距離ダメージ+1%・DEX110以上でさらに+5%（常時。目安）", cards: ["ExtraDex"], dyn: (st) => [[ATK_AT, 9, stpExtraV(st.dex)]] },
+  { id: "extluk", name: "ExtraLuk", kind: "p", text: "素LUK 10ごとにクリティカルダメージ+1%・LUK110以上でさらに+5%（常時。目安）", cards: ["ExtraLuk"], dyn: (st) => [[ATK_AT, 10, stpExtraV(st.luk)]] });
 const ATK = { mobQ: "", mons: null, rank: null, rankBy: "per", msg: "", fxForm: { name: "", kind: "b", rows: [[0, 0]] } };
 const ATKS = (() => { try { return Object.assign({ mob: 0, full: "", vals: [], recent: [] }, JSON.parse(store.get("md_atk") || "{}")); } catch (e) { return { mob: 0, full: "", vals: [], recent: [] }; } })();
 const atkSave = () => store.set("md_atk", JSON.stringify(ATKS));
@@ -2867,10 +2880,17 @@ async function atkMons() {
   return ATK.mons;
 }
 const atkMobDesc = (x) => `Lv${x.lv}・HP ${fmtN(x.hp)}・DEF ${x.def}/MDEF ${x.mdef}・${x.boss ? "BOSS" : "一般"}・${SB_RACES[x.race] ?? "?"}・${SB_ELES[Math.floor(x.ele / 10)] ?? "?"}${x.ele % 10}・${SB_SIZES[x.size] ?? "?"}`;
-function atkFxApplied(fxIds, boss) {                                   // 選んだ効果の [欄, 番号, 足す値] を全部。4つ目が "B" のものは、敵がボスのときだけ(ラトリオの欄は「ボス／一般」の区別なく全部に効くため)
+function atkFxApplied(fxIds, boss, st) {                              // 選んだ効果の [欄, 番号, 足す値] を全部。4つ目が "B" のものは、敵がボスのときだけ(ラトリオの欄は「ボス／一般」の区別なく全部に効くため)。dyn は素のステータス st で値が変わる効果(Extra系)
   const all = atkFxAll(), out = [];
-  for (const id of fxIds) { const e = all.find((x) => x.id === id); if (e) out.push(...e.fx.filter((f) => f[3] !== "B" || boss)); }
+  for (const id of fxIds) { const e = all.find((x) => x.id === id); if (e) out.push(...(e.dyn ? e.dyn(st || {}) : e.fx).filter((f) => f[3] !== "B" || boss)); }
   return out;
+}
+// 効果の装備・カード・エンチャントがいまの装備に付いているか(付いていなければ、選べるけれど文字をグレーに)。見分けがつかない効果(自分で追加したもの)は「付いている」扱い
+function atkOwnedNames(m) { try { return new Set(Object.values(m.card || {}).filter(Boolean).map((v) => simcCardName(v))); } catch (e) { return null; } }
+function atkFxOwned(names, e) {
+  if (!names || e.custom) return true;
+  const keys = e.cards || (e.id === "xstr" ? ["S-OverPower", "X-OverPower"] : e.id === "xagi" ? ["S-FatalFlash", "X-FatalFlash"] : e.id === "xdex" ? ["S-FiringShot", "X-FiringShot"] : e.id === "xint" ? ["S-SpellBuster", "X-SpellBuster"] : e.id === "xluk" ? ["S-LuckyStrike", "X-LuckyStrike"] : [e.name.replace(/[（(].*$/, "")]);
+  return keys.some((k) => [...names].some((n) => String(n || "").includes(k)));
 }
 // オンにしている効果のうち、この技(kind: p/m/b)に関係あるもの。kind が null なら全部
 function atkActiveIds(kind) {
@@ -2900,7 +2920,7 @@ function atkRank(m, mobId, boss) {                                            //
     try {
       const vals = []; if (it.tree && it.tree.type === 0 && it.tree.opts.length) vals[0] = it.tree.opts[it.tree.opts.length - 1][0];
       const chain = sbChain(it.tree, vals), mt = { skill: it.skill, src: it.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: it.name };
-      const kind = atkKind(m, mobId, mt), use = atkFxApplied(atkActiveIds(kind), boss);
+      const kind = atkKind(m, mobId, mt), use = atkFxApplied(atkActiveIds(kind), boss, m.status);
       const r = engSandbag(m, { mobId }, Object.assign({}, mt, { fx: use }));
       if (r && r.per.avg > 0) rows.push({ full: it.full, name: `${it.name} Lv${mt.lv}`, kind, per: r.per.avg, sec: r.perSec || 0, interval: r.interval });
     } catch (e) { /* 計算できない技は飛ばす */ }
@@ -2945,9 +2965,9 @@ function renderAtkTab() {
       <span class="tag">${kind === "p" ? "物理" : kind === "m" ? "魔法" : "物理・魔法"}</span></div></div>`;
   }
   // --- 時限効果 ---
-  const FX = atkFxSet(), on = FX.on, grp = (k, t) => `<div class="atkfxg"><div class="muted atkfxt">${t}</div><div class="atkfxl">${atkFxAll().filter((e) => e.kind === k).map((e) => {
+  const FX = atkFxSet(), on = FX.on, owned = atkOwnedNames(m), grp = (k, t) => `<div class="atkfxg"><div class="muted atkfxt">${t}</div><div class="atkfxl">${atkFxAll().filter((e) => e.kind === k).map((e) => {
     const rel = kind === "b" || k === "b" || k === kind;
-    return `<label class="afx${on[e.id] ? " on" : ""}${rel ? "" : " off"}" title="${esc(e.text)}${e.custom ? "" : "\n(ラトリオの説明文から。目安)"}${rel ? "" : "\nこの技には関係しないので、計算には入りません"}"><input type="checkbox" data-afx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}${e.custom ? `<a data-afxdel="${esc(e.id)}" title="この効果を消す">×</a>` : ""}</label>`;
+    return `<label class="afx${on[e.id] ? " on" : ""}${rel ? "" : " off"}${atkFxOwned(owned, e) ? "" : " dim"}" title="${esc(e.text)}${e.custom ? "" : "\n(ラトリオの説明文から。目安)"}${rel ? "" : "\nこの技には関係しないので、計算には入りません"}${atkFxOwned(owned, e) ? "" : "\nいまの装備には付いていません（試したいときは選べます）"}"><input type="checkbox" data-afx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}${e.custom ? `<a data-afxdel="${esc(e.id)}" title="この効果を消す">×</a>` : ""}</label>`;
   }).join("") || `<span class="muted">なし</span>`}</div></div>`;
   const nOn = atkActiveIds(null).length;
   h += simcFold("atkfx", "ランダム発動の時限効果", `<div class="muted" style="font-size:12px;margin-bottom:6px">装備のエンチャントなどで一定確率で数秒〜数十秒かかる効果です。ラトリオにはオンオフが無いので、ここで「かかっている」ことにして計算します（毎回かかるわけではないので、あくまで「かかったとき」の数字）。技に関係しない効果（物理の技に魔法用など）は薄くなり、計算に入りません。マウスを乗せると中身が出ます。</div>
@@ -2959,7 +2979,7 @@ function renderAtkTab() {
     ` <span class="muted">オン ${nOn} 個${nOn ? ": " + atkActiveIds(null).map((id) => (atkFxAll().find((e) => e.id === id) || {}).name).slice(0, 6).join("、") : ""}</span>`, false);
   // --- 結果 ---
   if (M) {
-    const use = atkFxApplied(atkActiveIds(kind), mob.boss);
+    const use = atkFxApplied(atkActiveIds(kind), mob.boss, m.status);
     try { res = engSandbag(m, { mobId: mob.id }, Object.assign({}, M.mt, { fx: use })); } catch (e) { err = "計算できませんでした: " + e.message; }
     if (!res && !err) err = "このスキルは、この敵に対して計算できませんでした";
   }
@@ -2969,7 +2989,7 @@ function renderAtkTab() {
     const need = avg ? Math.ceil(mob.hp / avg) : 0, secs = need && res.interval ? need * res.interval : 0;
     const act = atkActiveIds(kind);
     const contrib = act.map((id) => {
-      const rest = atkFxApplied(act.filter((x) => x !== id), mob.boss), r2 = engSandbag(m, { mobId: mob.id }, Object.assign({}, M.mt, { fx: rest }));
+      const rest = atkFxApplied(act.filter((x) => x !== id), mob.boss, m.status), r2 = engSandbag(m, { mobId: mob.id }, Object.assign({}, M.mt, { fx: rest }));
       const e = atkFxAll().find((x) => x.id === id); return { label: e.name, v: avg - (r2 ? r2.per.avg || 0 : 0), note: r2 && r2.per.avg ? `無しだと ${n(r2.per.avg)}` : "" };
     }).filter((r) => r.v !== 0);
     h += `<div class="panel simbox"><div class="atkbig"><div><div class="muted">1回の使用（平均）</div><b>${n(avg)}</b><div class="muted">最小 ${n(res.per.min)} ／ 最大 ${n(res.per.max)}</div></div>
@@ -3505,7 +3525,7 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    foldBind(V, (el) => { if ((el.dataset.fold === "opt" || el.dataset.fold === "stpeff" || el.dataset.fold === "stpsw") && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    foldBind(V, (el) => { if ((el.dataset.fold === "opt" || el.dataset.fold === "stppat" || el.dataset.fold === "stpeff" || el.dataset.fold === "stpsw") && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
     if (g("stp")) stpKick(m);
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
