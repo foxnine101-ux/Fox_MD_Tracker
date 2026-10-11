@@ -449,10 +449,10 @@ class CharCore(object):
                 x[k] = x.get(k, 0) + v
         return {"armor": armor, "res": {e: res[e] for e in ELES if res.get(e)}, "x": {k: v for k, v in x.items() if v}}
 
-    def _auto_names(self, sets, bits=(2, 16, 4)):
-        """装備セットの自動の名前「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+7ｽﾃﾗ聖念50」
-        (武器+武器の属性 / 鎧+鎧の属性 / 肩+いちばん高い耐性)。同じになったら (2) など。
-        シャドウセットは シャドウ武器 / シャドウ鎧 / シャドウ盾 で同じように作る。"""
+    def _auto_names(self, sets, bits=(2, 16, 32, 4)):
+        """装備セットの自動の名前「+10ｾﾚｽ聖/+10ﾖﾙｽ毒/+4ﾃﾞｲｳﾞ地・聖念50/+7ｽﾃﾗ聖念50」
+        (武器+武器の属性 / 鎧+鎧の属性 / 盾+盾の属性と、いちばん高い耐性の両方 / 肩+いちばん高い耐性)。同じになったら (2) など。
+        シャドウセットは シャドウ武器 / シャドウ鎧 / シャドウ盾 で同じように作る(盾は同じく属性と耐性の両方)。"""
         used = {}
         for sid in sorted(sets, key=lambda k: sets[k].get("first", 0)):
             items = sets[sid].get("items") or []
@@ -462,7 +462,10 @@ class CharCore(object):
                 if not i:
                     continue
                 ae, de, res = self.item_attrs(i)
-                tag = ae if bit in (2, 131072) else (de if de and de != "無" else top_res(res)) if bit in (16, 65536) else top_res(res)
+                if bit in (32, 262144):         # 盾: 属性(鎧の属性が変わるもの)と、いちばん高い耐性の両方。片方だけならその片方
+                    tag = "・".join(x for x in (de if de and de != "無" else "", top_res(res)) if x)
+                else:
+                    tag = ae if bit in (2, 131072) else (de if de and de != "無" else top_res(res)) if bit in (16, 65536) else top_res(res)
                 parts.append(short_item(i.get("name"), i.get("refine", 0)) + tag)
             base = "/".join(parts) or "装備セット"
             used[base] = used.get(base, 0) + 1

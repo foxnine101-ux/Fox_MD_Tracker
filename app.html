@@ -1238,7 +1238,7 @@ function simNav() {
   return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="atk" class="${SIMV === "atk" ? "on" : ""}">与ダメシミュ</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button><button data-simv="sb" class="${SIMV === "sb" ? "on" : ""}">サンドバックマン</button></div>`;
 }
 function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) => b.onclick = () => { SIMV = b.dataset.simv; store.set("md_simv", SIMV); render(); }); }
-function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : SIMV === "atk" ? renderAtkTab() : SIMV === "sb" ? renderSandbagTab() : renderSimChara(); }
+function renderSim(chars) { simcFollowBoxes(); return SIMV === "dmg" ? renderSimDmg(chars) : SIMV === "atk" ? renderAtkTab() : SIMV === "sb" ? renderSandbagTab() : renderSimChara(); }
 
 const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
 // ラトリオのファイルは /ratorio/v-<取り込んだ版>/… で読む。この形の URL はブラウザが覚えるので、2回目からは読み直さない(約440ファイル)。
@@ -1759,6 +1759,31 @@ function simcEquipHtml(m, shadow) {
 const simcGrad = (cs) => !cs.length ? "" : cs.length === 1 ? `linear-gradient(${cs[0]},${cs[0]})` : `linear-gradient(135deg, ${cs.map((c, i) => `${c} ${Math.round(i * 100 / cs.length)}% ${Math.round((i + 1) * 100 / cs.length)}%`).join(", ")})`;
 const simcSetColor = (shadow, sid) => { const st = (((DATA.equip || {})[shadow ? "shadows" : "sets"]) || {})[sid]; return st && st.tag ? tagColor(st) : ""; };
 const simcFrameColors = (m) => [simcSetColor(false, m.foxSet), simcSetColor(true, m.foxShadow)].filter(Boolean);
+// ---- 装備スロット(A・B…)は「箱」: 箱の中身が変わったら(上書き・ゲームの装備の登録など)、その箱を使っている全部のキャラスロットに自動で反映する(「反映」を押さなくてよい) ----
+// 箱の中身は「装備セット(中身のハッシュの ID)」で、上書きすると記号(A)が新しい ID に移る → キャラスロットは ID の他に記号(foxSetTag / foxShadowTag)を覚えておいて、記号が指す最新の中身に追従する。
+// 未保存の変更(＊)があるキャラスロットは、作業中の内容を守るため追従しない(装備欄に「更新されています」と出す。記号を押せば最新にできる)。ENG が使えるとき(装備を着せるのに必要)だけ
+function simcBoxLatest(m, shadow) {      // [記号, 最新の中身の ID, その中身] / 追従する箱が無ければ null
+  const sk = shadow ? "foxShadow" : "foxSet", T = (DATA.equip || {})[shadow ? "shadows" : "sets"] || {}, tag = m[sk + "Tag"]; if (!tag) return null;
+  const hit = Object.entries(T).find(([, st]) => st.tag === tag); return hit ? [tag, hit[0], hit[1]] : null;
+}
+const simcPutSlot = (id) => { const c = (SIMC.chars || {})[id]; if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: c.name, model: c.model, saved: c.saved }) }); };
+function simcFollowBoxes() {
+  if (!ENG.ready || !SIMC.chars || !DATA.equip) return;
+  for (const [id, c] of Object.entries(SIMC.chars)) {
+    const m = c.model, wasDirty = simcDirtySlot(c); let any = false;
+    for (const shadow of [false, true]) {
+      const sk = shadow ? "foxShadow" : "foxSet", T = (DATA.equip || {})[shadow ? "shadows" : "sets"] || {}, cur = m[sk];
+      if (cur && T[cur] && T[cur].tag && m[sk + "Tag"] !== T[cur].tag) { m[sk + "Tag"] = T[cur].tag; any = true; }      // いまの箱の記号を覚える
+      const L = simcBoxLatest(m, shadow); if (!L || L[1] === cur || simcDirty(m, shadow)) continue;
+      try { if (L[2].sim) simcApplyFrag(m, L[2].sim, shadow); else simcWear(m, L[2].items || [], shadow); } catch (e) { console.warn("follow", e); continue; }
+      m[sk] = L[1]; m[sk + "Sig"] = simcFragSig(m, shadow); any = true;
+    }
+    if (!any) continue;
+    if (!wasDirty) c.saved = simcClone(m);                 // 追従は「変更」に数えない(＊を付けない)
+    SIMC.res = null;
+    if (id === SIMC.cur) simcSave(); else simcPutSlot(id);
+  }
+}
 function simcSetList(m, shadow) {
   const EQ = DATA.equip || {}, T = EQ[shadow ? "shadows" : "sets"] || {}, cur = shadow ? m.foxShadow : m.foxSet;
   const all = Object.entries(T).map(([sid, st]) => ({ sid, st }));
@@ -1803,7 +1828,8 @@ const simcDirty = (m, shadow) => { const sig = shadow ? m.foxShadowSig : m.foxSe
 function simcSetTabs(m, shadow) {         // 装備スロット: 記号を押すとメニュー(反映 = 計算機に入れる / 上書き = いまの計算機の装備を保存 / 名前 / 登録を外す)
   const L = simcSetList(m, shadow), dirty = simcDirty(m, shadow), sh = shadow ? 1 : 0, nc = lastChar(), E = (DATA.equip || {}).chars || {};
   const hasNow = nc && (E[nc].now || []).some((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
-  return `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
+  const SL = simcBoxLatest(m, shadow), stale = SL && SL[1] !== L.cur && dirty ? `<span class="warn" title="未保存の変更があるので、自動では入れ替えていません。記号を押すと、最新の中身に切りかわります">「${esc(SL[0])}」の中身が更新されています</span> ` : "";
+  return stale + `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
     + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備に切りかえます。右クリックで、上書き・名前の変更など）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
     + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しいスロットに保存します">＋新しいスロットに保存</button>`
     + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `${esc(charWho())}「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインして装備を読み込むと使えます"}">いま着ている装備を反映</button>`
