@@ -1843,17 +1843,8 @@ function simcBuffListHtml(m) {
     return `<label class="bfi${on ? " on" : ""}">${pre}<span class="bfl">${esc(it.label)}</span><select data-bf="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 && o[1].replace(/\s*なし$/, "").replace(/^■/, "") === it.label ? "なし" : o[1])}</option>`).join("")}</select></label>`;
   }).join("") + `</div>`;
 }
-// よく使う支援(画面の上): 濃縮サラマインジュース(ASPD)・ブレッシング・速度増加。「支援・アイテム・スキル」の枠と同じ値を動かす
+// よく使う支援: 濃縮サラマインジュース(ASPD)・ブレッシング・速度増加。「ASPD・詠唱・ディレイに効く支援」の一覧で先頭に出す(画面の上の専用の枠は、利用者の指示で削除)
 const SIMC_QUICK = [["buff7", 22], ["confIchizi", 0], ["confIchizi", 1]];
-function simcQuickBuffHtml(m) {
-  const sc = simcSchema(m); if (!sc) return "";
-  const items = SIMC_QUICK.map(([f, i]) => sc.find((it) => it.f === f && it.i === i)).filter(Boolean); if (!items.length) return "";
-  return `<div class="panel simbox"><div class="opts"><b>よく使う支援</b><div class="bfgrid">${items.map((it) => {
-    const k = simcBuffKey(it), v = simcBuffVal(m, it), on = simcBuffOn(m, it);
-    return it.type === "c" ? `<label class="bfi sw${on ? " on" : ""}"><input type="checkbox" data-qb="${k}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span></label>`
-      : `<label class="bfi sw${on ? " on" : ""}"><input type="checkbox" data-qbs="${k}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span><select data-qb="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 ? "なし" : o[1])}</option>`).join("")}</select></label>`;
-  }).join("")}</div><span class="muted">下の「支援・アイテム・スキル」の枠と同じものです。</span></div></div>`;
-}
 function simcBuffHtml(m) {
   const sc = simcSchema(m);
   if (!sc) { simcSchemaKick(m); return `<div class="muted" style="padding:6px">${SIMC.bfErr ? esc(SIMC.bfErr) : "支援・アイテム・スキルの一覧を読み込んでいます…"}</div>`; }
@@ -3043,7 +3034,6 @@ function renderSimChara() {
     const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
     const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
-    h += simcQuickBuffHtml(m);
     h += `<div class="simc simc2" id="sccmain">
       <div class="simrow2">${simcFold("base", "基本ステータス", `<table>
           <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
@@ -3201,8 +3191,6 @@ function renderSimChara() {
       V.querySelectorAll("[data-bfs]").forEach((el) => el.onclick = nav((b) => { B.sub = b.dataset.bfs; }));
       if (g("sccbon")) g("sccbon").onchange = nav((b) => { B.onOnly = b.checked; });
       if (g("sccbq")) { g("sccbq").oninput = (e) => { B.q = e.target.value; relist(); }; g("sccbq").onkeydown = (e) => { if (e.key === "Escape") { B.q = ""; e.target.blur(); render(); } }; }
-      V.querySelectorAll("[data-qbs]").forEach((el) => el.onchange = () => { const it = byKey[el.dataset.qbs]; if (!it) return; simcBuffSet(m, it, el.checked ? it.opts[it.opts.length - 1][0] : 0); changed(); });
-      V.querySelectorAll("[data-qb]").forEach((el) => el.onchange = () => { const it = byKey[el.dataset.qb]; if (!it) return; simcBuffSet(m, it, el.type === "checkbox" ? el.checked : el.value); changed(); });
       if (g("sccbuffs")) g("sccbuffs").onchange = (e) => {
         const el = e.target.closest("[data-bf]"), it = el && byKey[el.dataset.bf]; if (!it) return;
         simcBuffSet(m, it, el.type === "checkbox" ? el.checked : el.value);
