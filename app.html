@@ -1806,6 +1806,17 @@ function simcBuffListHtml(m) {
     return `<label class="bfi${on ? " on" : ""}">${pre}<span class="bfl">${esc(it.label)}</span><select data-bf="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 && o[1].replace(/\s*なし$/, "").replace(/^■/, "") === it.label ? "なし" : o[1])}</option>`).join("")}</select></label>`;
   }).join("") + `</div>`;
 }
+// よく使う支援(画面の上): 濃縮サラマインジュース(ASPD)・ブレッシング・速度増加。「支援・アイテム・スキル」の枠と同じ値を動かす
+const SIMC_QUICK = [["buff7", 22], ["confIchizi", 0], ["confIchizi", 1]];
+function simcQuickBuffHtml(m) {
+  const sc = simcSchema(m); if (!sc) return "";
+  const items = SIMC_QUICK.map(([f, i]) => sc.find((it) => it.f === f && it.i === i)).filter(Boolean); if (!items.length) return "";
+  return `<div class="panel simbox"><div class="opts"><b>よく使う支援</b><div class="bfgrid">${items.map((it) => {
+    const k = simcBuffKey(it), v = simcBuffVal(m, it), on = simcBuffOn(m, it);
+    return it.type === "c" ? `<label class="bfi${on ? " on" : ""}"><input type="checkbox" data-qb="${k}" ${on ? "checked" : ""}><span class="bfl">${esc(it.label)}</span></label>`
+      : `<label class="bfi${on ? " on" : ""}"><span class="bfl">${esc(it.label)}</span><select data-qb="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 ? "なし" : o[1])}</option>`).join("")}</select></label>`;
+  }).join("")}</div><span class="muted">下の「支援・アイテム・スキル」の枠と同じものです。</span></div></div>`;
+}
 function simcBuffHtml(m) {
   const sc = simcSchema(m);
   if (!sc) { simcSchemaKick(m); return `<div class="muted" style="padding:6px">${SIMC.bfErr ? esc(SIMC.bfErr) : "支援・アイテム・スキルの一覧を読み込んでいます…"}</div>`; }
@@ -1878,62 +1889,45 @@ async function simcTagKick(m) {
   const el = $("#sccbprog"); if (el) el.textContent = "";
   render();
 }
-// ---- 装備セットごとの確認: 登録した装備セットを1つずつ着せて、ASPD・詠唱を並べる。「全部のセットで 193 / 無詠唱」に要る値も出す ----
-// ステータス・シャドウ装備・支援はいまのまま。AGI・DEX の必要な値は、片方だけ動かした場合(1セットにつき 20回ほど計算するので、裏で少しずつ)
-const simcMultiSig = (m) => JSON.stringify(m) + "|" + simcSetList(m, false).tabs.map((x) => x.sid).join(",");
-async function simcMinStat(base, k, alive) {
-  const cur = base.status[k] || 1;
-  const at = async (v) => { await sleep(0); if (!alive()) throw new Error("changed"); const mm = JSON.parse(JSON.stringify(base)); mm.status[k] = v; return engCalc(mm).c[37] >= SIMC_ASPD; };
-  let top = Math.max(SIMC_STMAX, cur);
-  if (!(await at(top))) { top = SIMC_STTOP; if (!(await at(top))) return null; }
-  let lo = 1, hi = top;
-  while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
-  return lo;
-}
-function simcMultiKick(m) {
-  const sig = simcMultiSig(m);
-  if ((SIMC.multi && SIMC.multi.sig === sig) || SIMC.multiBusy === sig) return;
-  SIMC.multiBusy = sig;
-  const alive = () => { const c = simcCur(); return !!c && SIMC.multiBusy === sig && simcMultiSig(c.model) === sig; };
+// ---- ASPD・無詠唱の維持(旧「ステ振りの相談」と「装備セットごとの確認」を1つにまとめたもの) ----
+// 選んだ装備スロット × シャドウのスロットの全部を、いまのキャラ(ステータス・支援・習得スキルは「いまのまま」)に着せて、ラトリオの計算で ASPD・詠唱を並べる。
+// ラトリオの計算なので、装備の ASPD・変動詠唱の効果、セット効果、エンチャント、カード、ランダムオプション、精錬も、実際に着ているときと同じ状態で入る
+const simcKeepSig = (m) => JSON.stringify(m) + "|" + JSON.stringify([SIMC.opt.mainSel, SIMC.opt.shSel]);
+function simcKeepKick(m) {
+  const sig = simcKeepSig(m);
+  if ((SIMC.keep && SIMC.keep.sig === sig) || SIMC.keepBusy === sig) return;
+  SIMC.keepBusy = sig;
+  const alive = () => { const c = simcCur(); return !!c && SIMC.keepBusy === sig && simcKeepSig(c.model) === sig; };
   (async () => {
-    const rows = [], list = [{ label: "いまの装備", cur: true }].concat(simcSetList(m, false).tabs.map(({ sid, st }) => ({ label: st.tag, sid, st })));
+    const rows = []; let total = 0;
     try {
-      for (const e of list) {
-        const mm = JSON.parse(JSON.stringify(m)); let miss = 0;
-        if (e.st) { if (e.st.sim) simcApplyFrag(mm, e.st.sim, false); else miss = simcWear(mm, e.st.items || [], false).length; }
+      const sets = simcOptSets(m); total = sets.length;
+      for (const S of sets) {
         await sleep(0); if (!alive()) return;
-        const r = engCalc(mm);
-        rows.push({ label: e.label, st: e.st, cur: !!e.cur, miss, aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23],
-          agi: await simcMinStat(mm, "agi", alive), dex: await simcMinStat(mm, "dex", alive) });
-        const el = $("#sccmulti"); if (el) el.innerHTML = simcMultiTable(m, rows, list.length);
+        const r = engCalc(S.mm);
+        rows.push({ label: S.label, miss: S.miss, aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23] });
+        const el = $("#scckeep"); if (el) el.innerHTML = simcKeepTable(m, rows, total);
       }
-      SIMC.multi = { sig, rows };
-    } catch (err) { if (err.message !== "changed") console.warn("multi", err); }
-    finally { if (SIMC.multiBusy === sig) SIMC.multiBusy = ""; }
-    const el = $("#sccmulti"); if (el && SIMC.multi && SIMC.multi.sig === sig) el.innerHTML = simcMultiTable(m, rows, rows.length);
+      SIMC.keep = { sig, rows };
+    } catch (err) { if (err.message !== "changed") console.warn("keep", err); }
+    finally { if (SIMC.keepBusy === sig) SIMC.keepBusy = ""; }
+    const el = $("#scckeep"); if (el && SIMC.keep && SIMC.keep.sig === sig) el.innerHTML = simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length);
   })();
 }
-function simcMultiTable(m, rows, total) {
-  const n = simcNum, st = m.status;
-  const need = (v, cur) => v === null || v === undefined ? `<span class="warn">届かない</span>` : v > SIMC_STMAX ? `<b class="warn">${v}</b> <span class="muted">（+${v - cur}・上限超え）</span>` : v <= cur ? `<span class="good">${v}</span> <span class="muted">（${v - cur || "±0"}）</span>` : `<b>${v}</b> <span class="muted">（+${v - cur}）</span>`;
-  let h = `<table class="multi"><tr><th>セット</th><th>ASPD</th><th>193 に要る AGI</th><th>193 に要る DEX</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th></tr>`
-    + rows.map((x) => `<tr><td>${x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span> <span class="muted">${esc(x.st.name || x.st.auto || "")}</span>` : esc(x.label)}${x.miss ? ` <span class="warn" title="ラトリオの候補に同じ名前が無くて、装備できなかったものがあります（未装備）">（未装備 ${x.miss}）</span>` : ""}</td>
-      <td class="v"><span class="${x.aspd >= SIMC_ASPD ? "good" : ""}">${n(x.aspd, 1)}</span></td><td>${need(x.agi, st.agi)}</td><td>${need(x.dex, st.dex)}</td>
-      <td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td><td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td></tr>`).join("") + `</table>`;
+function simcKeepTable(m, rows, total) {
+  const n = simcNum, O = SIMC.opt, TG = Math.max(100, Math.min(193, +O.target || 193));
+  let h = `<table class="multi"><tr><th>装備パターン</th><th>ASPD</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th><th>判定</th></tr>`
+    + rows.map((x) => {
+      const okA = !O.aspd || x.aspd >= TG, okC = !O.cast || x.castP >= 530;
+      return `<tr><td>${esc(x.label)}${x.miss ? ` <span class="warn" title="ラトリオの候補に同じ名前が無くて、装備できなかったものがあります（未装備）">（未装備 ${x.miss}）</span>` : ""}</td>
+        <td class="v"><span class="${x.aspd >= TG ? "good" : ""}">${n(x.aspd, 1)}</span></td><td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td>
+        <td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td>
+        <td>${okA && okC ? `<span class="good">維持できる</span>` : `<span class="warn">${[!okA ? "ASPD あと " + n(TG - x.aspd, 1) : "", !okC ? "詠唱 DEX+" + Math.ceil((530 - x.castP) / 2) + " か INT+" + (530 - x.castP) : ""].filter(Boolean).join(" ／ ")}</span>`}</td></tr>`;
+    }).join("") + `</table>`;
   if (rows.length < total) return h + `<div class="spin">計算中… ${rows.length} / ${total}</div>`;
-  const all = (k) => (rows.some((x) => x[k] === null || x[k] === undefined) ? null : Math.max(...rows.map((x) => x[k])));
-  const agi = all("agi"), dex = all("dex"), minCast = Math.min(...rows.map((x) => x.castP));
-  h += `<div class="multisum"><b>全部のセットで ASPD 193</b>: ${agi === null ? "AGI だけでは届かないセットがあります" : `AGI ${st.agi}→<b>${agi}</b>（${agi > st.agi ? "+" : agi < st.agi ? "−" : "±"}${Math.abs(agi - st.agi)}）`} <span class="muted">または</span> ${dex === null ? "DEX だけでは届かないセットがあります" : `DEX ${st.dex}→<b>${dex}</b>（${dex > st.dex ? "+" : dex < st.dex ? "−" : "±"}${Math.abs(dex - st.dex)}）`}<br>
-    <b>全部のセットで変動詠唱なし</b>（詠唱の値 530 以上）: ${minCast >= 530 ? `<span class="good">届いています</span>。削れるのは DEX ${Math.floor((minCast - 530) / 2)} または INT ${minCast - 530}` : `DEX +${Math.ceil((530 - minCast) / 2)} または INT +${530 - minCast}`}
-    <span class="muted">（いちばん低いセットで ${n(minCast)}）</span></div>`;
+  const bad = rows.filter((x) => (O.aspd && x.aspd < TG) || (O.cast && x.castP < 530));
+  h += `<div class="multisum">${bad.length ? `<span class="warn">いまのステータスでは、${bad.length} / ${rows.length} パターンで条件を満たせません。</span> 下の「いちばん安い振り方を探す」で、全部のパターンで満たせる AGI・DEX・INT を探せます。` : `<span class="good">選んだ ${rows.length} パターンの全部で、いまのステータス・支援のまま条件を満たしています。</span>`}</div>`;
   return h;
-}
-function simcMultiHtml(m) {
-  const tabs = simcSetList(m, false).tabs;
-  if (!tabs.length) return `<div class="muted">装備セットを登録すると、セットごとの ASPD・詠唱を並べて見られます（装備欄の右上の「＋登録」）。</div>`;
-  const ok = SIMC.multi && SIMC.multi.sig === simcMultiSig(m);
-  return `<div id="sccmulti">${ok ? simcMultiTable(m, SIMC.multi.rows, SIMC.multi.rows.length) : `<div class="spin">計算中…</div>`}</div>
-    <div class="muted" style="font-size:12px;margin-top:4px">登録した装備セットを1つずつ着せた場合です。ステータス・シャドウ装備・支援は、いまのままで計算しています。AGI・DEX は、片方だけ動かした場合の値です。</div>`;
 }
 // ---- ステータスポイント ----
 // 使うポイント = ラトリオの GetStatusTotalCost(値) の合計。もらえるポイント = 48(転生職は 100。養子は 48) + Lv ごとの GetEarningStatusPoint
@@ -1959,15 +1953,15 @@ function simcOptSel(m) {
 }
 function simcOptSets(m) {
   const sel = simcOptSel(m), tabM = Object.fromEntries(simcSetList(m, false).tabs.map((x) => [x.sid, x.st])), tabS = Object.fromEntries(simcSetList(m, true).tabs.map((x) => [x.sid, x.st]));
-  const apply = (mm, st, shadow) => { if (st.sim) simcApplyFrag(mm, st.sim, shadow); else simcWear(mm, st.items || [], shadow); };
+  const apply = (mm, st, shadow) => { if (st.sim) { simcApplyFrag(mm, st.sim, shadow); return 0; } return simcWear(mm, st.items || [], shadow).length; };
   const out = [];
   for (const a of sel.main) for (const s of sel.sh) {
     if (out.length >= SIMC_OPT_COMBO_MAX) break;
-    const mm = simcClone(m);
-    if (a !== "now") apply(mm, tabM[a], false);
-    if (s !== "now") apply(mm, tabS[s], true);
+    const mm = simcClone(m); let miss = 0;
+    if (a !== "now") miss += apply(mm, tabM[a], false);
+    if (s !== "now") miss += apply(mm, tabS[s], true);
     const la = a === "now" ? "いまの装備" : tabM[a].tag, ls = s === "now" ? "" : tabS[s].tag;
-    out.push({ label: a === "now" && s === "now" ? "いまの装備" : ls ? (a === "now" ? "いまの装備" : la) + "・" + ls : la, mm });
+    out.push({ label: a === "now" && s === "now" ? "いまの装備" : ls ? (a === "now" ? "いまの装備" : la) + "・" + ls : la, mm, miss });
   }
   return out;
 }
@@ -1991,6 +1985,16 @@ async function simcOptShort(sets, TG, tick, O) {
     rows.push(row);
   }
   return rows;
+}
+function simcSbAvg(m, over) {                // サンドバックマンの設定のメインスキルで、ステータスを over にしたときの1回のダメージ(平均)。INT を下げた影響を測る用
+  try {
+    if (!ENG.sb) return null;
+    const cfg = simcSbCfg(m), methods = engAttackMethods(m), item = methods.find((x) => x.full === cfg.full) || methods.find((x) => x.skill !== 0) || methods[0];
+    if (!item) return null;
+    const chain = sbChain(item.tree, cfg.vals), mt = { skill: item.skill, src: item.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: item.name };
+    const mm = simcClone(m); Object.assign(mm.status, over || {});
+    const r = engSandbag(mm, cfg, mt); return r ? { avg: r.per.avg, name: item.name } : null;
+  } catch (e) { return null; }
 }
 async function simcOptRun(m) {
   const O = SIMC.opt, sig = JSON.stringify(m), st = m.status, MAX = SIMC_STMAX, cost = (v) => ENG.hm.GetStatusTotalCost(v);
@@ -2038,7 +2042,9 @@ async function simcOptRun(m) {
     }
     const alts = [];
     for (const c of cands.slice(1)) { if ([best].concat(alts).every((x) => Math.abs(x.dex - c.dex) >= 4)) alts.push(c); if (alts.length >= 4) break; }
-    O.res = { sig, best, alts, target: TG, sets: sets.map((S) => S.label), calcs: n, aspd: O.aspd, cast: O.cast };
+    const d0 = simcSbAvg(sets[0].mm, {});                      // メインスキル(サンドバックマンの設定)のダメージが、振り方でどれだけ変わるか
+    if (d0 && d0.avg) { d0.cur = d0.avg; for (const c of [best].concat(alts)) { const d = simcSbAvg(sets[0].mm, { agi: c.agi, dex: c.dex, int: c.int }); c.dmg = d ? d.avg : null; } }
+    O.res = { sig, best, alts, target: TG, sets: sets.map((S) => S.label), calcs: n, aspd: O.aspd, cast: O.cast, dmg0: d0 && d0.avg ? d0 : null };
   } catch (e) { if (e.message !== "changed") { console.warn("opt", e); O.res = { sig, fail: "計算できませんでした: " + e.message }; } }
   finally { O.busy = false; O.prog = ""; render(); }
 }
@@ -2047,12 +2053,14 @@ function simcOptHtml(m) {
   const combos = sel.main.length * sel.sh.length;
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
   let h = `<div class="bfbar"><span class="muted">条件</span>
-      <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
+      <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
       <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
       <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
     <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid), s2)).join("")}</div>
       <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid), s2)).join("")}</div>
       <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ調べます）</span>` : ""}</span></div>
+    <div class="muted" style="font-size:12px;margin:4px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（上の「よく使う支援」と「支援・アイテム・スキル」の枠のオンのもの。ステータス・習得スキルも、いまのまま）。装備の ASPD・詠唱の効果、セット効果、エンチャント、カード、ランダムオプションも入れて、実際に着ているときと同じ状態で計算します。</div>
+    <div id="scckeep">${SIMC.keep && SIMC.keep.sig === simcKeepSig(m) ? simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length) : `<div class="spin">計算中…</div>`}</div>
     <div class="bfbar"><button id="sogo" ${O.busy || !(O.aspd || O.cast) ? "disabled" : ""}>${O.busy ? "計算中…" : "いちばん安い振り方を探す"}</button><span class="muted" id="sccoprog">${esc(O.prog || "")}</span></div>`;
   const R = O.res;
   if (!R) return h + `<div class="muted">AGI・DEX・INT の振り方のうち、条件を満たして、使うステータスポイントがいちばん少ないものを探します。ほかのステータス・支援は、いまのままで計算します。シャドウ装備も計算に入っています（「いまのシャドウ」= 計算機にいま入っているもの）。選んだ装備スロット × シャドウのスロットの全部で条件を満たす振り方を探します（1通りにつき30秒ほどかかります）。</div>`;
@@ -2066,8 +2074,9 @@ function simcOptHtml(m) {
       <table class="multi"><tr><th>対象</th>${R.aspd ? `<th>ASPD（AGI・DEX ${MAXV}）</th><th>目標 ${esc(R.target)} まで</th><th>AGI だけなら</th><th>DEX だけなら</th>` : ""}${R.cast ? `<th>詠唱の値（DEX・INT ${MAXV}）</th><th>530 まで</th><th>DEX だけなら</th><th>INT だけなら</th>` : ""}</tr>${rows}</table>` : "");
   }
   const cost = (v) => ENG.hm.GetStatusTotalCost(v), curCost = cost(st.agi) + cost(st.dex) + cost(st.int);
-  const row = (label, c, i) => { const d = c.cost - curCost; return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost}</td><td>${d === 0 ? "同じ" : d < 0 ? `<span class="good">${-d} ポイント浮く</span>` : `<span class="warn">${d} ポイント多く要る</span>`}</td><td>${i === undefined ? "" : `<button class="ghost" data-optapply="${i}">この振り方にする</button>`}</td></tr>`; };
-  h += `<table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>この3つに使うポイント</th><th>いまと比べて</th><th></th></tr>
+  const D = R.dmg0, dcell = (c) => { if (!D) return ""; const v = c === null ? D.avg : c.dmg; if (v === null || v === undefined) return `<td class="muted">-</td>`; const pc = D.avg ? (v / D.avg - 1) * 100 : 0; return `<td class="v">${simcNum(v)} ${c === null ? "" : `<span class="${pc < -0.05 ? "warn" : pc > 0.05 ? "good" : "muted"}">(${pc > 0 ? "+" : ""}${simcNum(pc, 1)}%)</span>`}</td>`; };
+  const row = (label, c, i) => { const d = c.cost - curCost; return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost}</td><td>${d === 0 ? "同じ" : d < 0 ? `<span class="good">${-d} ポイント浮く</span>` : `<span class="warn">${d} ポイント多く要る</span>`}</td>${dcell(i === undefined ? null : c)}<td>${i === undefined ? "" : `<button class="ghost" data-optapply="${i}">この振り方にする</button>`}</td></tr>`; };
+  h += `<table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>この3つに使うポイント</th><th>いまと比べて</th>${D ? `<th title="サンドバックマンの枠で選んでいるメインスキル（${esc(D.name)}）を、サンドバックマンの設定で使ったときの1回のダメージ。INT を下げると MATK が下がる影響を測ります">${esc(D.name)}のダメージ</th>` : ""}<th></th></tr>
     ${row("いま", { agi: st.agi, dex: st.dex, int: st.int, cost: curCost })}${row("<b>いちばん安い</b>", R.best, 0)}${R.alts.map((c, i) => row("ほかの候補", c, i + 1)).join("")}</table>`;
   if (P) {
     const after = P.remain - (R.best.cost - curCost), room = (k) => { let v = st[k] || 1; while (v < SIMC_STMAX && cost(v + 1) - cost(st[k] || 1) <= after) v++; return v; };
@@ -2974,6 +2983,7 @@ function renderSimChara() {
     const bon = (k, base) => r.tot[k] !== undefined && r.tot[k] !== null ? `<span class="bon" data-bon="${k}">+${(r.tot[k] || 0) - (base || 0)}</span>` : "";
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
     const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
+    h += simcQuickBuffHtml(m);
     h += `<div class="simc simc2" id="sccmain">
       <div class="simrow2">${simcFold("base", "基本ステータス", `<table>
           <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
@@ -2983,8 +2993,7 @@ function renderSimChara() {
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
       ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>${simcRelHtml(m, "ac", "relkey", "ASPD・詠唱・ディレイに効く支援・アイテム・スキル")}<div id="scckeycmp" class="cmpbox">${simcCmpKeyHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccksum">${esc(simcKeySum(r))}</span>${simcCmpChips(m)}`)}
-      ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（目標の ASPD・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
-      ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
+      ${simcFold("opt", "ASPD・無詠唱の維持（装備パターン × ステ振り）", simcOptHtml(m), ` <span class="muted">（選んだ全部の装備パターンで目標を満たせるか・満たす最も安い AGI・DEX・INT）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
@@ -3088,7 +3097,7 @@ function renderSimChara() {
       if (g("sccksum")) g("sccksum").textContent = simcKeySum(SIMC.res);
       simcCmpFill(ch.model); simcCmpKick(ch.model);
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick(); if (g("sccpt")) g("sccpt").innerHTML = simcPointsHtml(ch.model);
-      { const mf = $("#view").querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(ch.model); }
+      { const mf = $("#view").querySelector('details[data-fold="opt"]'); if (mf && mf.open && g("scckeep")) simcKeepKick(ch.model); }
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
       $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });
@@ -3131,6 +3140,7 @@ function renderSimChara() {
       V.querySelectorAll("[data-bfs]").forEach((el) => el.onclick = nav((b) => { B.sub = b.dataset.bfs; }));
       if (g("sccbon")) g("sccbon").onchange = nav((b) => { B.onOnly = b.checked; });
       if (g("sccbq")) { g("sccbq").oninput = (e) => { B.q = e.target.value; relist(); }; g("sccbq").onkeydown = (e) => { if (e.key === "Escape") { B.q = ""; e.target.blur(); render(); } }; }
+      V.querySelectorAll("[data-qb]").forEach((el) => el.onchange = () => { const it = byKey[el.dataset.qb]; if (!it) return; simcBuffSet(m, it, el.type === "checkbox" ? el.checked : el.value); changed(); });
       if (g("sccbuffs")) g("sccbuffs").onchange = (e) => {
         const el = e.target.closest("[data-bf]"), it = el && byKey[el.dataset.bf]; if (!it) return;
         simcBuffSet(m, it, el.type === "checkbox" ? el.checked : el.value);
@@ -3167,8 +3177,8 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    foldBind(V, (el) => { if (el.dataset.fold === "multi" && el.open && g("sccmulti")) simcMultiKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
-    { const mf = V.querySelector('details[data-fold="multi"]'); if (mf && mf.open && g("sccmulti")) simcMultiKick(m); }
+    foldBind(V, (el) => { if (el.dataset.fold === "opt" && el.open && g("scckeep")) simcKeepKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    { const mf = V.querySelector('details[data-fold="opt"]'); if (mf && mf.open && g("scckeep")) simcKeepKick(m); }
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
     V.querySelectorAll("[data-slot]").forEach((el) => {
