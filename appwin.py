@@ -10,10 +10,12 @@ import json
 import os
 import threading
 
+IMPORT_ERR = ""
 try:
     import webview
-except Exception:            # 部品が無い → ブラウザで開く
+except Exception as _e:      # 部品が無い → ブラウザで開く
     webview = None
+    IMPORT_ERR = "{}: {}".format(type(_e).__name__, _e)      # 理由を動作ログに残す(「勝手にブラウザが開く」の調査用)
 
 
 class AppWindow(object):

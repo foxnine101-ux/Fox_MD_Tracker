@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.51.4"
+VERSION = "2.51.5"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1195,8 +1195,11 @@ def main():
                 if appwin.AppWindow.available():
                     app = appwin.AppWindow(local_url(), HERE, show=not args.hidden, log=print,
                                            on_hide=lambda: TRAY and TRAY.notify("右下のアイコンに隠れました。ダブルクリックでまた開けます。終了は右クリックから。", "Fox_MD_Tracker"))
+                else:
+                    print("[窓] 専用の窓の部品(pywebview)が使えないので、画面はブラウザで開きます。理由:", getattr(appwin, "IMPORT_ERR", "") or "不明")
             except Exception as e:
                 print("[窓] 使えません:", e)
+            auto_open = (not args.hidden) and cfg.get("起動時にブラウザで開く", True) is not False      # 専用の窓が使えないときだけ関係する。設定.json に "起動時にブラウザで開く": false と書くと、自動では開かない
 
             def quit_all():
                 stop.set()
@@ -1276,12 +1279,14 @@ def main():
                         save_chars()
                     return
                 TRAY.open_main = lambda: open_browser()
-                if not args.hidden:
+                print("[窓] 専用の窓を開けなかったので、ブラウザで開きます" if auto_open else "[窓] 専用の窓を開けませんでした。右下のアイコンから画面を開けます")
+                if auto_open:
                     open_browser()
                 while not stop.wait(1):    # トレイ(別の流れ)の「終了」を待つ
                     pass
             else:
-                if local_only and not args.hidden:
+                if local_only and auto_open:
+                    print("[窓] ブラウザで画面を開きます")
                     open_browser()
                 threading.Timer(2, lambda: TRAY.notify("右下のアイコンから画面を開けます。終了もここから。", "Fox_MD_Trackerを起動しました")).start()
                 TRAY.run()                 # 「終了」が押されるまでここで待つ
