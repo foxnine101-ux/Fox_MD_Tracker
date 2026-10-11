@@ -32,6 +32,9 @@
   button:not(:disabled):active { filter: brightness(.7); transform: translateY(1px); }
   .clickflash { position: fixed; z-index: 99999; pointer-events: none; border-radius: 8px; border: 3px solid #ffd54a; background: rgba(255,213,74,.35); animation: clickflash .9s ease-out forwards; }
   @keyframes clickflash { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.15); } }
+  .whochar { font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--chip); white-space: nowrap; }
+  .whochar.on::before { content: "●"; color: #3ecf6e; margin-right: 5px; }
+  .whochar.off { color: var(--muted); }
   .busybar { display: flex; align-items: center; gap: 8px; margin: 6px 0; padding: 7px 12px; border-radius: 8px; background: #ffd54a; color: #3a2d00; font-weight: 700; }
   .busybar::before { content: ""; width: 14px; height: 14px; border: 3px solid #3a2d00; border-top-color: transparent; border-radius: 50%; animation: busyspin .8s linear infinite; flex: none; }
   @keyframes busyspin { to { transform: rotate(360deg); } }
@@ -147,6 +150,7 @@
       <h1>Fox_MD_Tracker</h1>
       <span class="sub" id="upd"></span>
       <span class="srvtabs" id="srvtabs"></span>
+      <span class="whochar" id="whochar"></span>
       <span style="flex:1"></span>
       <button class="ghost" id="reload">更新</button>
       <button class="ghost gear" id="gear" title="イベント・入場履歴・設定">⚙</button>
@@ -260,7 +264,16 @@ const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).
 const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
+function renderWhoChar() {      // 画面上部: いまログインしているキャラ(いなければ、最後にログインしていたキャラ)
+  const el = $("#whochar"); if (!el) return;
+  const c = lastChar(), live = !!nowChar(), st = c ? ((((DATA.equip || {}).chars || {})[c] || {}).status || {}) : {};
+  const t = c ? `${cn(c)}${st.jobName ? "　" + (SIMC_JOBABBR[st.jobName] || st.jobName) : ""}${st.lv ? " Lv" + st.lv : ""}` : "";
+  const h = c ? `${live ? "" : "最後: "}${esc(t)}` : "ログインなし";
+  el.className = "whochar " + (live ? "on" : "off"); el.title = live ? "いまログインしているキャラ" : c ? "いまはログインしていません（キャラ選択画面など）。最後にログインしていたキャラです" : "ゲームにログインすると、ここにキャラが出ます";
+  if (el.dataset.h !== h) { el.innerHTML = h; el.dataset.h = h; }
+}
 function renderServerTabs() {
+  renderWhoChar();
   // 見出しのワールドのプルダウン。ふだんは最新ログインのワールド、選ぶとほかのワールドも見られる
   const L = serverList(), cur = curServer(), latest = latestServer();
   const box = $("#srvtabs");
