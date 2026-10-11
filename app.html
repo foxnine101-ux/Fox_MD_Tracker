@@ -2189,10 +2189,12 @@ function stpEffHtml(m, S) {
 const stpSugSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([SIMC.opt.aspd, SIMC.opt.cast, SIMC.opt.target, SIMC.opt.min, S.d.vit, S.d.str, S.d.luk]);
 const stpEffSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
 // よく使う支援(濃縮サラマインジュース・ブレッシング・速度増加)のスイッチ。「支援・アイテム・スキル」の枠と同じ値を動かす(同期)
+const STP_POTS = ["なし", "攻撃速度増加ポーション", "ハイスピードポーション", "バーサークポーション"];      // ラトリオの SpeedPotName(スピードアップ・ハイスピード・バーサーク)。ASPD が 10 / 15 / 20 % 増える。どれか1つ(排他)
 function stpBuffHtml(m) {
-  const sc = simcSchema(m); if (!sc) return "";
-  const items = SIMC_QUICK.map(([f, i]) => sc.find((it) => it.f === f && it.i === i)).filter(Boolean); if (!items.length) return "";
-  return `<div class="opts"><b>支援</b><div class="bfgrid" style="flex:1;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${items.map((it) => {
+  const pot = `<div class="settabs" style="margin:4px 0"><span class="muted">ポーション（どれか1つ）</span>${STP_POTS.map((t, i) => `<button class="settab${(m.status.speedPot || 0) === i ? " on" : ""}" data-stpot="${i}" title="${i ? ["", "ASPD +10%", "ASPD +15%（Lv40以上・使える職）", "ASPD +20%（Lv85以上・使える職）"][i] : "ポーションを使わない"}">${t}</button>`).join("")}</div>`;
+  const sc = simcSchema(m); if (!sc) return pot;
+  const items = SIMC_QUICK.map(([f, i]) => sc.find((it) => it.f === f && it.i === i)).filter(Boolean); if (!items.length) return pot;
+  return pot + `<div class="opts"><b>支援</b><div class="bfgrid" style="flex:1;grid-template-columns:repeat(auto-fill,minmax(220px,1fr))">${items.map((it) => {
     const k = simcBuffKey(it), v = simcBuffVal(m, it), on = simcBuffOn(m, it);
     return it.type === "c" ? `<label class="bfi sw${on ? " on" : ""}"><input type="checkbox" data-qb="${k}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span></label>`
       : `<label class="bfi sw${on ? " on" : ""}"><input type="checkbox" data-qbs="${k}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span><select data-qb="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 ? "なし" : o[1])}</option>`).join("")}</select></label>`;
@@ -3326,6 +3328,7 @@ function renderSimChara() {
       const setV = (k, v) => { S.d[k] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+v || 1))); S.touched = true; me(); };
       g("stp").onclick = (e) => {
         const b = e.target.closest("[data-stpd]"); if (b) { const [k, dv] = b.dataset.stpd.split(":"); setV(k, S.d[k] + (+dv)); return; }
+        const po = e.target.closest("[data-stpot]"); if (po) { m.status.speedPot = +po.dataset.stpot; changed(); return; }
         const a = e.target.closest("[data-stpapply]"); if (a) { const key = a.dataset.stpapply, c = key[0] === "b" ? (S.sug && S.sug.best || [])[+key.slice(1)] : (S.sug && S.sug.list || [])[+key]; if (c) { S.d.agi = c.agi; S.d.dex = c.dex; S.d.int = c.int; S.touched = true; render(); } return; }
         if (e.target.closest("#stpreflect")) { Object.assign(m.status, S.d); S.touched = false; SIMC.msg = "試算のステータスを、基本ステータスに入れました。"; changed(); return; }
         if (e.target.closest("#stpreset")) { S.touched = false; render(); }
