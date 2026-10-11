@@ -285,13 +285,12 @@ function renderServerTabs() {
   const L = serverList(), cur = curServer(), latest = latestServer();
   const box = $("#srvtabs");
   const h = L.length > 1 ? `<select id="srvsel" title="表示するワールド（ふだんは、いちばん最近ログインしたワールド）">${L.map((ip) => {
-    const n = Object.keys(DATA.chars || {}).filter((k) => srvOf(k) === ip).length;
-    return `<option value="${esc(ip)}" ${ip === cur ? "selected" : ""}>${esc(serverLabel(ip))}${ip === latest ? "（最新ログイン）" : ""}　${n}キャラ</option>`;
+    return `<option value="${esc(ip)}" ${ip === cur ? "selected" : ""}>${esc(serverLabel(ip))}${ip === latest ? "（最新）" : ""}</option>`;
   }).join("")}</select>` : "";
   // アカウントのプルダウン(2つ以上のアカウントが分かっているときだけ)
   const accs = accKnown(), here = Object.keys(DATA.chars || {}).filter((k) => inServer(k)), unk = here.filter((k) => !accOfChar(k)).length;
   const ACC = curAcc();
-  const ah = accs.length > 1 ? `<select id="accsel" title="表示するアカウント（キャラを右クリック →「アカウント」で、キャラのアカウントを手で決められます）"><option value="" ${ACC === "" ? "selected" : ""}>すべてのアカウント　${here.length}キャラ</option>${accs.map((a) => `<option value="${esc(a)}" ${ACC === a ? "selected" : ""}>${esc(accLabel(a))}　${here.filter((k) => String(accOfChar(k)) === a).length}キャラ</option>`).join("")}${unk ? `<option value="?" ${ACC === "?" ? "selected" : ""}>アカウント不明　${unk}キャラ</option>` : ""}</select>` : "";
+  const ah = accs.length > 1 ? `<select id="accsel" title="表示するアカウント（キャラを右クリック →「アカウント」で、キャラのアカウントを手で決められます）"><option value="" ${ACC === "" ? "selected" : ""}>すべて</option>${accs.map((a) => `<option value="${esc(a)}" ${ACC === a ? "selected" : ""}>${esc(accLabel(a))}</option>`).join("")}${unk ? `<option value="?" ${ACC === "?" ? "selected" : ""}>不明</option>` : ""}</select>` : "";
   const hh = ah + h;          // アカウントはワールドの左側
   if (box.dataset.h !== hh) { box.innerHTML = hh; box.dataset.h = hh; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
   const sel = $("#srvsel");
