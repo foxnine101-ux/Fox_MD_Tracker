@@ -2309,7 +2309,7 @@ function stpGameCmp(m) {
   const aspdG = g.ASPD !== undefined ? Math.round((200 - g.ASPD / 10) * 10) / 10 : null;          // ゲームの ASPD = 200 − amotion/10
   const rows = [["ASPD", aspdG, c[37], 1, 37], ...["STR", "AGI", "VIT", "INT", "DEX", "LUK"].map((k) => [k + "（合計）", gt(k), tot[k], 0, -1]), ["最大HP", g.MaxHP, c[23], 0, 23], ["最大SP", g.MaxSP, c[24], 0, 24],
     ["ATK（ステータス分）", g.ATK, c[25], 0, 25], ["ATK（装備分）", g.ATK2, c[26], 0, 26], ["MATK（大）", g.MATKmax, c[27], 0, 27], ["MATK（小）", g.MATKmin, c[28], 0, 28], ["DEF", g.DEF, c[29], 0, 29], ["DEF（装備分）", g.DEF2, c[30], 0, 30], ["MDEF", g.MDEF, c[31], 0, 31], ["MDEF（装備分）", g.MDEF2, c[32], 0, 32],
-    ["HIT", g.HIT, c[33], 0, 33], ["FLEE", g.FLEE, c[34], 0, 34], ["CRI", g.CRIT, c[36], 1, 36]].filter((x) => x[1] !== null && x[1] !== undefined);
+    ["HIT", g.HIT, c[33], 0, 33], ["FLEE", g.FLEE, c[34], 0, 34], ["CRI", g.CRIT, c[35], 1, 35]].filter((x) => x[1] !== null && x[1] !== undefined);
   const n = simcNum, diff = rows.filter((x) => Math.abs((x[2] || 0) - (x[1] || 0)) > (x[3] ? 0.15 : 0.5));
   // ASPD の差は、ポーションの違いで説明できることが多い(4通りを試す)
   let hint = "";
