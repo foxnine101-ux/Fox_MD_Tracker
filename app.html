@@ -1945,7 +1945,7 @@ function simcKeepRun(m) {
       for (const S of sets) {
         await sleep(0); if (!alive()) return;
         const r = engCalcCached(S.mm);
-        rows.push({ label: S.label, miss: S.miss, missRows: S.missRows, colors: S.colors, aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23] });
+        rows.push({ label: S.label, miss: S.miss, missRows: S.missRows, colors: S.colors, learned: simcLearnedList(S.mm), aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23] });
         const el = $("#scckeep"); if (el) el.innerHTML = simcKeepTable(m, rows, total);
       }
       SIMC.keep = { sig, rows };
@@ -1954,6 +1954,21 @@ function simcKeepRun(m) {
     const el = $("#scckeep"); if (el && SIMC.keep && SIMC.keep.sig === sig) el.innerHTML = simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length);
   })();
 }
+// 【習】= 習得スキルのレベルで効果が変わる装備・カード(ラトリオが候補の名前の先頭に付ける)。着せ替えても習得スキルは「いまのキャラのもの」がそのまま使われる(装備セットには入っていない)ので、
+// 習得スキルが入っていないと効果が出ない → 維持の確認で、どの装備が【習】か・習得スキルが何個入っているかを出す
+function simcLearnedList(m) {
+  const out = [], job = m.status.jobId;
+  try {
+    for (const [r, l] of SIMC_REGIONS) {
+      const id = m.equip[r]; if (!id || simcIsNone(r, id)) continue;
+      const o = simcItemOpts(job, r, true).find((x) => x.v === id); if (o && /^【習】/.test(o.t || "")) out.push(`${l} ${simcItemName(id)}`);
+      const copts = simcCardOpts(r, id); SIMC_CARD[r].forEach((cr, i) => { const v = m.card[cr]; if (!v) return; const o2 = (copts[i] || []).find((x) => x.v === v); if (o2 && /^【習】/.test(o2.t || "")) out.push(`${l} ${simcCardName(v)}`); });
+    }
+    for (const [r, l] of SIMC_SHADOW) { const id = (m.shadowEquip.itemId || [])[r]; if (!id) continue; const o = simcItemOpts(job, r, true).find((x) => x.v === id); if (o && /^【習】/.test(o.t || "")) out.push(`${l} ${simcItemName(id)}`); }
+  } catch (e) { /* 判定できなければ出さない */ }
+  return out;
+}
+const simcLearnedCount = (m) => { const sc = simcSchema(m); return sc ? sc.filter((it) => it.g === "learn" && Number((m[it.f] || [])[it.i]) > 0).length : null; };
 // 入らなかった装備・カードの一覧(どれが入らなかったか)。「選ぶ」でラトリオの候補に結びつけると、次から入る
 const simcMissHtml = (rows, ri) => rows && rows.length ? `<div class="missdet" title="ラトリオの候補に同じ名前が無くて、計算に入っていません（その分、数字が実際と違います）。「選ぶ」で候補に結びつけると、次から入ります">入らなかった: ${rows.slice(0, 5).map((x, j) => `${esc(x.slot || "")} ${esc(x.name)}${ri === undefined ? "" : ` <button class="ghost" data-kfix="${ri}:${j}">選ぶ</button>`}`).join("、")}${rows.length > 5 ? ` ほか ${rows.length - 5} 件` : ""}</div>` : "";
 function simcKeepTable(m, rows, total) {
@@ -1962,7 +1977,7 @@ function simcKeepTable(m, rows, total) {
   let h = `<table class="multi"><tr><th>装備パターン</th><th>ASPD</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th><th>判定</th></tr>`
     + rows.map((x, ri) => {
       const okA = !O.aspd || x.aspd >= TG, okC = !O.cast || x.castP >= 530;
-      return `<tr><td>${x.colors && x.colors.length ? `<span class="setdot" style="background:${simcGrad(x.colors)}"></span>` : ""}${esc(x.label)}${simcMissHtml(x.missRows, ri)}</td>
+      return `<tr><td>${x.colors && x.colors.length ? `<span class="setdot" style="background:${simcGrad(x.colors)}"></span>` : ""}${esc(x.label)}${x.learned && x.learned.length ? ` <span class="tag" title="【習】の装備・カード（習得スキルのレベルで効果が変わる）: ${esc(x.learned.join("、"))}">習 ${x.learned.length}</span>` : ""}${simcMissHtml(x.missRows, ri)}</td>
         <td class="v"><span class="${x.aspd >= TG ? "good" : ""}">${n(x.aspd, 1)}</span></td><td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td>
         <td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td>
         <td>${okA && okC ? `<span class="good">維持できる</span>` : `<span class="warn">${[!okA ? "ASPD あと " + n(TG - x.aspd, 1) : "", !okC ? "詠唱 DEX+" + Math.ceil((530 - x.castP) / 2) + " か INT+" + (530 - x.castP) : ""].filter(Boolean).join(" ／ ")}</span>`}</td></tr>`;
@@ -2108,6 +2123,7 @@ function simcOptHtml(m) {
       <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid), s2)).join("")}</div>
       <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ調べます）</span>` : ""}</span></div>
     <div class="muted" style="font-size:12px;margin:4px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（上の「よく使う支援」と「支援・アイテム・スキル」の枠のオンのもの。ステータス・習得スキルも、いまのまま）。装備の ASPD・詠唱の効果、セット効果、エンチャント、カード、ランダムオプションも入れて、実際に着ているときと同じ状態で計算します。</div>
+    ${(() => { const L = simcLearnedList(m), n = simcLearnedCount(m); return L.length || n === 0 ? `<div class="muted" style="font-size:12px;margin:4px 0">【習】の装備（習得スキルのレベルで効果が変わる）: <b>${L.length ? esc(L.join("、")) : "いまの装備には無し"}</b>。習得スキルは、いまのキャラのものを使います（${n === null ? "確認中" : n === 0 ? `<span class="warn">入っていません。【習】の効果が出ません。「現在のキャラを反映」で入れてください</span>` : n + " 個入っています"}）。</div>` : ""; })()}
     <div id="scckeep" class="${simcOptColors(m).length ? "setframe" : ""}" style="--fc:${simcGrad(simcOptColors(m))}">${SIMC.keep && SIMC.keep.sig === simcKeepSig(m) ? simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length) : `<div class="spin">計算中…</div>`}</div>
     <div class="bfbar"><button id="sogo" ${O.busy || !(O.aspd || O.cast) ? "disabled" : ""}>${O.busy ? "計算中…" : "いちばん余る振り方を探す"}</button><span class="muted" id="sccoprog">${esc(O.prog || "")}</span></div>`;
   const R = O.res;
