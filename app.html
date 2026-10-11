@@ -2549,12 +2549,12 @@ const ATK_FX = [   // ランダム発動の時限効果。kind: p = 物理 / m =
   { id: "xdex", name: "S-/X-FiringShot", kind: "b", text: "4秒: DEX+50", fx: [[ATK_ST, 11, 50]] },
   { id: "xint", name: "S-/X-SpellBuster", kind: "b", text: "4秒: INT+50", fx: [[ATK_ST, 10, 50]] },
   { id: "xluk", name: "S-/X-LuckyStrike", kind: "b", text: "4秒: LUK+50", fx: [[ATK_ST, 12, 50]] },
-  { id: "pow", name: "魔獣の爪牙", kind: "b", text: "10秒: POW+100", fx: [[ATK_SP, 1, 100]] },
+  { id: "pow", name: "魔獣の爪牙", kind: "p", text: "10秒: POW+100(物理のダメージが上がる特性ステータス)", fx: [[ATK_SP, 1, 100]] },
   { id: "sta", name: "不滅の肉体", kind: "b", text: "10秒: STA+100", fx: [[ATK_SP, 2, 100]] },
   { id: "wis", name: "叡知の王冠", kind: "b", text: "10秒: WIS+100", fx: [[ATK_SP, 3, 100]] },
-  { id: "spl", name: "根源への到達", kind: "b", text: "10秒: SPL+100", fx: [[ATK_SP, 4, 100]] },
+  { id: "spl", name: "根源への到達", kind: "m", text: "10秒: SPL+100(魔法のダメージが上がる特性ステータス)", fx: [[ATK_SP, 4, 100]] },
   { id: "con", name: "蒼穹の覇者", kind: "b", text: "10秒: CON+100", fx: [[ATK_SP, 5, 100]] },
-  { id: "crt", name: "天与の才", kind: "b", text: "10秒: CRT+100", fx: [[ATK_SP, 6, 100]] }];
+  { id: "crt", name: "天与の才", kind: "p", text: "10秒: CRT+100(クリティカル系の特性ステータス)", fx: [[ATK_SP, 6, 100]] }];
 const ATK = { mobQ: "", mons: null, rank: null, rankBy: "per", msg: "", fxForm: { name: "", kind: "b", rows: [[0, 0]] } };
 const ATKS = (() => { try { return Object.assign({ mob: 0, full: "", vals: [], recent: [] }, JSON.parse(store.get("md_atk") || "{}")); } catch (e) { return { mob: 0, full: "", vals: [], recent: [] }; } })();
 const atkSave = () => store.set("md_atk", JSON.stringify(ATKS));
