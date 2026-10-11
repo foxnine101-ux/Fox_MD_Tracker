@@ -4215,7 +4215,7 @@ let LOAD_SIG = "";
 async function load(quiet) {      // quiet = 自動の読み直し。前と同じ内容なら画面を描き直さない(開いている枠・入力中の内容がそのまま残る)
   try {
     const j = await api("GET");
-    const sig = JSON.stringify(j.data);
+    const sig = JSON.stringify([Object.assign({}, j.data, { updated: 0 }), j.settings || {}]);    // updated は毎回変わる(現在時刻)ので比べない。設定も含める
     const same = quiet && DATA && sig === LOAD_SIG;
     LOAD_SIG = sig;
     DATA = j.data;
@@ -4223,6 +4223,7 @@ async function load(quiet) {      // quiet = 自動の読み直し。前と同�
     $("#login").hidden = true; $("#app").hidden = false;
     store.set("md_pw", PW);
     if (!same) render();
+    else if ($("#upd")) $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
   } catch (e) {
     if (e.message === "401") { showLogin(PW ? "合言葉が違います" : ""); PW = ""; store.del("md_pw"); }
     else if (typeof LOCAL !== "undefined" && LOCAL) { if (DATA) $("#upd").textContent = "ツールが止まっているみたい（Fox_MD_Trackerを起動してね）"; else showLogin("Fox_MD_Trackerが起動していません"); }
