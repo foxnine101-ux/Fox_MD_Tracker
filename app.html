@@ -2995,19 +2995,20 @@ function simcExtraBody(r) {               // 「比べる」で装備スロッ�
 function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履歴)の ID、または "now:キャラ名"(いまゲームで着ている装備)
   const ch = simcCur(), EQ = DATA.equip || {}; if (!ch) return;
   const m = ch.model, old = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report.rows.filter((x) => (x.region >= 14) !== shadow) : [];
-  let rows = [], link = sid, rnd = false;
+  let rows = [], link = sid;
+  SIMC.rndMiss = []; SIMC.rndOk = 0;
   if (sid.startsWith("now:")) {
     const e = (EQ.chars || {})[sid.slice(4)]; if (!e) return;
     const items = (e.now || []).filter((i) => (shadow ? i.wear >= 65536 : i.wear & 1023));
-    rows = simcWear(m, items, shadow); link = (shadow ? e.shadow : e.cur) || ""; rnd = items.some((i) => (i.options || []).length);
+    rows = simcWear(m, items, shadow); link = (shadow ? e.shadow : e.cur) || "";
   } else {
     const st = (EQ[shadow ? "shadows" : "sets"] || {})[sid]; if (!st) return;
     if (st.sim) simcApplyFrag(m, st.sim, shadow);
-    else { rows = simcWear(m, st.items || [], shadow); rnd = (st.items || []).some((i) => (i.options || []).length); }
+    else rows = simcWear(m, st.items || [], shadow);
   }
   if (shadow) { m.foxShadow = link; m.foxShadowSig = simcFragSig(m, true); } else { m.foxSet = link; m.foxSetSig = simcFragSig(m, false); }
   if (sid.startsWith("now:") && !shadow) { const e = (EQ.chars || {})[sid.slice(4)], st = e && e.status || {}; ch.name = simcSlotName(sid.slice(4), { lv: m.status.baseLv || st.lv, jobName: (ENG.jobs.find(([v]) => String(v) === String(m.status.jobId)) || [])[1] || st.jobName }, ((EQ.sets || {})[e && e.cur] || {}).tag); }
-  SIMC.report = { id: SIMC.cur, rows: old.concat(rows), rnd };
+  SIMC.report = { id: SIMC.cur, rows: old.concat(rows), rnd: SIMC.rndMiss.length, rndOk: SIMC.rndOk, rndMiss: SIMC.rndMiss.slice(0, 12) };
   SIMC.res = null; simcSave(); render();
 }
 async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
@@ -3165,7 +3166,7 @@ function renderSimChara() {
         <label>装備スロット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
         <label>シャドウのスロット <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
         <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>このキャラで新しいスロットを作る</button></div>
-        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションは、まだ入りません。いまログインしているキャラは、上の「現在のキャラを反映」でも入れられます。</div>`;
+        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションも入ります（ラトリオに無い効果は、入らなかったものとして出ます）。いまログインしているキャラは、上の「現在のキャラを反映」でも入れられます。</div>`;
     }
     const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
@@ -3186,7 +3187,7 @@ function renderSimChara() {
   const rep = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report : null;
   if (rep && (rep.rows.length || rep.rnd || rep.rndOk)) {
     h += `<div class="panel simbox"><div><b>${rep.rows.length ? `取り込めなかったもの（${rep.rows.length} 件）` : "取り込みました"}</b>
-      <span class="muted">${rep.rows.length ? "ラトリオの候補に、同じ名前が見つかりませんでした。「選ぶ」で結びつけると、次からは自動で入ります。" : ""}${rep.rnd ? ` ランダムオプションは ${rep.rndOk || 0} 件入りました。入らなかった ${rep.rnd} 件（ラトリオに無い効果か、この装備で選べない効果）: ${esc(rep.rndMiss.join(" ／ "))}${rep.rnd > rep.rndMiss.length ? " …" : ""}` : ""}</span>
+      <span class="muted">${rep.rows.length ? "ラトリオの候補に、同じ名前が見つかりませんでした。「選ぶ」で結びつけると、次からは自動で入ります。" : ""}${rep.rnd ? ` ランダムオプションは ${rep.rndOk || 0} 件入りました。入らなかった ${rep.rnd} 件（ラトリオに無い効果か、この装備で選べない効果）: ${esc((rep.rndMiss || []).join(" ／ "))}${rep.rnd > (rep.rndMiss || []).length ? " …" : ""}` : ""}</span>
       <button class="ghost" id="sfrclose">閉じる</button></div>
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
