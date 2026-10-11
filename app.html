@@ -2598,6 +2598,27 @@ function simcWearCards(m, region, it) {   // Fox は空の枠を詰めて覚え�
   }
   return rows;
 }
+// Fox のランダムオプション(ゲームの番号)を、装備の枠のラトリオの選択肢に入れる。対応表は calc_data.json の rndopt(tools/make_rndopt_map.py):
+// ゲームの番号 → 効果の種類(SPID)。ラトリオは同じ SPID でも値の範囲ごとに別の選択肢なので、枠の候補のうち「SPID が同じで、値が範囲に入る」ものを選ぶ
+function simcWearRnd(m, region, it) {
+  const R = (DATA.calc || {}).rndopt, ops = (it.options || []).filter((o) => o.index), miss = SIMC.rndMiss = SIMC.rndMiss || [];
+  if (!ops.length) return;
+  const id = region >= 14 ? (m.shadowEquip.itemId || [])[region] : m.equip[region], lists = id ? simcRndLists(id) : [];
+  const arr = R && lists.length ? simcRndArr(m, region) : null, used = new Set();
+  for (const o of ops) {
+    const spid = R && R.game[o.index]; let hit = null;
+    if (arr && spid !== undefined) {
+      for (let i = 0; i < lists.length && !hit; i++) {
+        if (used.has(i)) continue;
+        const c = simcRndKinds(lists[i]).map((k) => ({ k: k.v, r: R.rat[k.v] })).filter((x) => x.r && x.r[0] === spid && o.value >= x.r[1] && o.value <= x.r[2] && (o.value - x.r[1]) % (x.r[3] || 1) === 0)
+          .sort((x, y) => x.r[2] - y.r[2])[0];
+        if (c) { arr[i] = [c.k, o.value]; used.add(i); hit = c; }
+      }
+    }
+    if (hit) SIMC.rndOk = (SIMC.rndOk || 0) + 1;
+    else miss.push(`${it.slot || ""} ${o.text || ("番号" + o.index)}`);
+  }
+}
 function simcWear(m, items, shadow) {     // 装備セットを着せる。つながらなかったものを返す
   const rows = [], used = new Set();
   for (const [bit, region] of shadow ? SIMC_FOXSH : SIMC_FOXBITS) {
@@ -2608,6 +2629,7 @@ function simcWear(m, items, shadow) {     // 装備セットを着せる。つ�
     const o = simcFind(simcItemOpts(m.status.jobId, region), it.name, it.itemId, false) || simcFind(simcItemOpts(m.status.jobId, region, true), it.name, it.itemId, false);      // 職業に合うものに無ければ、制限を外して探す
     if (!o) { rows.push({ slot: it.slot || "", name: (it.refine ? `+${it.refine} ` : "") + it.name, region, gameId: it.itemId, refine: it.refine || 0, grade: it.grade || 0, cards: it.cards || [] }); continue; }
     simcSetItem(m, region, o.v); simcSetRefine(m, region, it.refine || 0, it.grade || 0);
+    try { simcWearRnd(m, region, it); } catch (err) { engLog("ランダムオプションを入れられませんでした: " + err.message); }
     if (!shadow) rows.push(...simcWearCards(m, region, it));
   }
   return rows;
@@ -2646,9 +2668,10 @@ async function simcFromFox(asNew, src) {    // src = {char, set, shadow, full}�
     }
     if (!ch) throw new Error("着せる先のキャラがありません");
     const main = mainSet ? mainSet.items : now.filter((i) => i.wear & 1023), shadow = shSet ? shSet.items : now.filter((i) => i.wear >= 65536), rows = [];
+    SIMC.rndMiss = []; SIMC.rndOk = 0;
     if (main.length) { rows.push(...simcWear(ch.model, main, false)); ch.model.foxSet = mainSet ? F.set : (e.cur || ""); }
     if (shadow.length) { rows.push(...simcWear(ch.model, shadow, true)); ch.model.foxShadow = shSet ? F.shadow : (e.shadow || ""); }
-    SIMC.report = { id, rows, rnd: main.concat(shadow).some((i) => (i.options || []).length) };
+    SIMC.report = { id, rows, rnd: SIMC.rndMiss.length, rndOk: SIMC.rndOk, rndMiss: SIMC.rndMiss.slice(0, 12) };
     simcSelect(id); await simcPut(id);
     SIMC.msg = asNew ? "新しいスロットを作りました。" : F.full ? `「${cn(F.char)}」を反映しました。` : "装備を反映しました。";
   } catch (err) { SIMC.msg = "取り込めませんでした: " + err.message; }
@@ -2711,9 +2734,9 @@ function renderSimChara() {
       <div class="opts"><button id="scpgo" ${on ? "" : "disabled"}>選んだ ${on} 件を読み込む</button><button class="ghost" id="scpall">すべて選ぶ／外す</button><button class="ghost" id="scpno">やめる</button></div></div>`;
   }
   const rep = SIMC.report && SIMC.report.id === SIMC.cur ? SIMC.report : null;
-  if (rep && (rep.rows.length || rep.rnd)) {
+  if (rep && (rep.rows.length || rep.rnd || rep.rndOk)) {
     h += `<div class="panel simbox"><div><b>${rep.rows.length ? `取り込めなかったもの（${rep.rows.length} 件）` : "取り込みました"}</b>
-      <span class="muted">${rep.rows.length ? "ラトリオの候補に、同じ名前が見つかりませんでした。「選ぶ」で結びつけると、次からは自動で入ります。" : ""}${rep.rnd ? " ランダムオプションは入っていません（装備欄で選んでください）。" : ""}</span>
+      <span class="muted">${rep.rows.length ? "ラトリオの候補に、同じ名前が見つかりませんでした。「選ぶ」で結びつけると、次からは自動で入ります。" : ""}${rep.rnd ? ` ランダムオプションは ${rep.rndOk || 0} 件入りました。入らなかった ${rep.rnd} 件（ラトリオに無い効果か、この装備で選べない効果）: ${esc(rep.rndMiss.join(" ／ "))}${rep.rnd > rep.rndMiss.length ? " …" : ""}` : ""}</span>
       <button class="ghost" id="sfrclose">閉じる</button></div>
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
