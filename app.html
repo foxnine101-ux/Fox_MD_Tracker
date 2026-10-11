@@ -2212,6 +2212,8 @@ function stpBuffHtml(m) {
       : `<label class="bfi sw${on ? " on" : ""}"><input type="checkbox" data-qbs="${k}" ${on ? "checked" : ""}><span class="swt"></span><span class="bfl">${esc(it.label)}</span><select data-qb="${k}">${it.opts.map((o) => `<option value="${o[0]}" ${o[0] === (Number(v) || 0) ? "selected" : ""}>${esc(o[0] === 0 ? "なし" : o[1])}</option>`).join("")}</select></label>`;
   }).join("")}</div><span class="muted">「支援・アイテム・スキル」の枠と同じものです</span></div>`;
 }
+// いま着ている装備スロット(記号つきで登録ずみ・手を加えていない)の ID。「いまの装備」はこれと同じ中身なので、この記号のチップも選択済みに見せる
+function stpNowSid(m, shadow) { const sid = shadow ? m.foxShadow : m.foxSet; return sid && !simcDirty(m, shadow) && simcSetList(m, shadow).tabs.some((x) => x.sid === sid) ? sid : ""; }
 function stpHtml(m) {
   const S = stpState(), O = SIMC.opt, sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs, combos = sel.main.length * sel.sh.length;
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
@@ -2220,8 +2222,8 @@ function stpHtml(m) {
       <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
       <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
       <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
-    <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid), s2)).join("")}</div>
-      <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid), s2)).join("")}</div>
+    <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid) || (sid === stpNowSid(m, false) && sel.main.includes("now")), s2)).join("")}</div>
+      <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid) || (sid === stpNowSid(m, true) && sel.sh.includes("now")), s2)).join("")}</div>
       <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ）</span>` : ""}</span></div>
     ${stpBuffHtml(m)}
     <div class="muted" style="font-size:12px;margin:2px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（「支援・アイテム・スキル」の枠のオンのもの）</div>
@@ -3342,8 +3344,10 @@ function renderSimChara() {
       g("soc").onchange = (e) => { O.cast = e.target.checked; rr(); };
       g("sotg").onchange = (e) => { O.target = Math.max(100, Math.min(193, Math.round((+e.target.value || 193) * 10) / 10)); rr(); };
       const tog = (arr, id) => { const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id); rr(); };
-      V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog(O.mainSel, el.dataset.optm));
-      V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog(O.shSel, el.dataset.opts));
+      // 枠に色が付いている(= いま着ている装備スロット)チップは、「いまの装備」を選んでいるあいだ選択済みに見える。押すと、「いまの装備」の代わりにこの記号を選ぶ(同じ中身を2回数えない)
+      const tog2 = (arr, id, shadow) => { if (id !== "now" && id === stpNowSid(m, shadow) && arr.includes("now") && !arr.includes(id)) { arr.splice(arr.indexOf("now"), 1, id); rr(); } else tog(arr, id); };
+      V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog2(O.mainSel, el.dataset.optm, false));
+      V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog2(O.shSel, el.dataset.opts, true));
       const S = stpState(), me = () => { stpRefreshMain(m); stpKick(m); };
       const setV = (k, v) => { S.d[k] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+v || 1))); S.touched = true; me(); };
       g("stp").onclick = (e) => {

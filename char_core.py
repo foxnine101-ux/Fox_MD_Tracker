@@ -19,6 +19,7 @@ MDトラッカー(md_tracker.py)に相乗りする前提。向こうはもう常
 鎧の属性と耐性は通信に無いので、着ている装備・カード・エンチャ・ランダムOP から
 gear_info.json(ラトリオ=jRO 準拠のアイテムデータ。無いものは rAthena)で出した目安。
 """
+import copy
 import hashlib
 import unicodedata
 import json
@@ -246,6 +247,7 @@ class CharCore(object):
             self.shadows = data.get("shadows") or {}
             self.sim_links = data.get("sim_links") or {}
             self._migrate_sets()
+            self.repair_sets()
             self.resolve_sim_all()
             self._refresh_names()
 
@@ -289,7 +291,7 @@ class CharCore(object):
         now = int(time.time())
         s = table.get(sid)
         if s is None:
-            s = table[sid] = {"items": [self._item_view(i) if "slot" not in i else i for i in sorted(items, key=slot_key)],
+            s = table[sid] = {"items": [self._snapshot(i) for i in sorted(items, key=slot_key)],
                               "name": "", "tag": "", "first": (src or {}).get("first") or now,
                               "last": 0, "worn": 0, "chars": {}}
             if src is None:
@@ -303,6 +305,55 @@ class CharCore(object):
             if (src.get("last") or 0) >= (c.get("last") or 0):
                 c.update({"last": src.get("last") or 0, "status": src.get("status")})
         return sid
+
+    def _snapshot(self, i):
+        """装備セットに入れる1件。**着ている装備(ch["equips"])そのものを入れると、あとで外した/付け替えたとき(_wear が wear=0 に書きかえる)にセットの中身も書きかわる** → 必ずコピーを入れる。"""
+        if "slot" not in i:
+            return self._item_view(i)
+        x = copy.deepcopy(i)
+        x.pop("inventoryIndex", None)
+        return x
+
+    def repair_sets(self):
+        """上の書きかわりで「場所なし(wear=0)」になってしまった、保存ずみの装備セットの装備を直す。
+        同じアイテムが別のところ(ほかのセット・着ている装備)で場所つきで見つかればそれを使う。見つからなくて、セットの中で空いている場所が1つ・場所なしの装備が1つなら、そこへ。"""
+        known = {}
+        def see(it):
+            w = it.get("wear", 0) & MAIN_BITS
+            if w and not w & (w - 1) and it.get("itemId") is not None:
+                known.setdefault(it["itemId"], set()).add(w)
+        for t in (self.sets, self.shadows):
+            for st in t.values():
+                for it in st.get("items") or []:
+                    see(it)
+        for ch in self.chars.values():
+            for it in ch.get("equips") or []:
+                see(it)
+        fixed = 0
+        for st in self.sets.values():
+            items = st.get("items") or []
+            for it in items:
+                if it.pop("inventoryIndex", None) is not None:
+                    self.changed = True
+            zero = [it for it in items if not it.get("wear", 0) and it.get("itemId") is not None and "sim" not in st]
+            for it in list(zero):
+                ws = known.get(it.get("itemId")) or set()
+                if len(ws) == 1:
+                    w = next(iter(ws))
+                    it["wear"], it["slot"] = w, LOC_NAMES.get(w, "")
+                    zero.remove(it)
+                    fixed += 1
+            have = 0
+            for it in items:
+                have |= it.get("wear", 0)
+            miss = [b for b, _ in MAIN_SLOTS if not have & b]
+            if len(zero) == 1 and len(miss) == 1:
+                zero[0]["wear"], zero[0]["slot"] = miss[0], LOC_NAMES.get(miss[0], "")
+                fixed += 1
+        if fixed:
+            self.changed = True
+            self.log("[キャラ] 装備セットの壊れていた装備の場所を {}個 直しました".format(fixed))
+        return fixed
 
     def rename_char(self, old, new):
         """キャラの名前を付けかえる(サーバーを分ける前の記録を「名前@サーバー」へ引き継ぐ用)。"""
