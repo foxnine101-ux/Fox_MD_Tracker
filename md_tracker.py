@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.52.3"
+VERSION = "2.52.4"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1321,6 +1321,9 @@ def fail(msg):
         input("Enter で終了")
 
 
+_EQ_WATCH, _EQ_LOGGED = {}, set()
+
+
 def run_loop(core, lock, cfg, stop):
     last_up = 0
     dirty_since = None
@@ -1341,6 +1344,21 @@ def run_loop(core, lock, cfg, stop):
                         DMG.changed = True
                 except Exception as e:
                     print("[被ダメ] 名前の自動の紐付けでエラー:", e)
+        if CHARS is not None:
+            # ログインして12秒たっても装備の一覧(0B39)が届いていない接続を、マップの名前つきで動作ログに残す(「イズルードだと取れない」などの原因調べ用)
+            with lock:
+                for key, c in list(core.conn.items()):
+                    n = c.get("name")
+                    if not n:
+                        continue
+                    k = (key, n)
+                    t0 = _EQ_WATCH.setdefault(k, time.time())
+                    if k not in _EQ_LOGGED and time.time() - t0 > 12:
+                        _EQ_LOGGED.add(k)
+                        if key not in CHARS._synced:
+                            print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} (この接続でそれまでに読んだ通信: {}件)".format(n, c.get("map") or "不明", c.get("n", "?")))
+                        else:
+                            print("[装備] 装備の一覧を受け取っています: {} マップ={}".format(n, c.get("map") or "不明"))
         if time.time() - last_stat > 60:
             last_stat = time.time()
             ops = ", ".join("{:04X}×{}".format(k, v) for k, v in sorted(STATS["ops"].items()))
