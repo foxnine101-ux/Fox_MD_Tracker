@@ -421,9 +421,19 @@ const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "その
 const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
+// 画面の描き直しでエラーが出たとき: 古い画面が残ったまま「ツールが止まっているみたい」と出ないように、エラーの中身をその場に出して、エラーログ(exe の隣の エラーログ.txt)にも記録する
+let JSERR_N = 0;
+function reportJsError(msg, stack) {
+  try { if (!(typeof LOCAL !== "undefined" && LOCAL) || JSERR_N++ >= 30) return; fetch("/api/jslog", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ m: String(msg).slice(0, 300), s: String(stack || "").slice(0, 1800), tab: TAB, simv: typeof SIMV === "undefined" ? "" : SIMV }) }); } catch (e) { /* 記録できなくても続ける */ }
+}
+window.addEventListener("error", (e) => reportJsError(e.message, e.error && e.error.stack));
+window.addEventListener("unhandledrejection", (e) => reportJsError((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
 function render() {
   const y = window.scrollY;
-  renderNow();
+  try { renderNow(); } catch (e) {
+    console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
+    const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
+  }
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
 }
 function renderNow() {
@@ -1770,7 +1780,7 @@ function simcBoxLatest(m, shadow) {      // [記号, 最新の中身の ID, そ�
 const simcPutSlot = (id) => { const c = (SIMC.chars || {})[id]; if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: c.name, model: c.model, saved: c.saved }) }); };
 function simcFollowBoxes() {
   if (!ENG.ready || !SIMC.chars || !DATA.equip) return;
-  for (const [id, c] of Object.entries(SIMC.chars)) {
+  for (const [id, c] of Object.entries(SIMC.chars)) try {      // 1つのスロットでエラーが出ても、ほかを巻き込まない
     const m = c.model, wasDirty = simcDirtySlot(c); let any = false;
     for (const shadow of [false, true]) {
       const sk = shadow ? "foxShadow" : "foxSet", T = (DATA.equip || {})[shadow ? "shadows" : "sets"] || {}, cur = m[sk];
@@ -1783,7 +1793,7 @@ function simcFollowBoxes() {
     if (!wasDirty) c.saved = simcClone(m);                 // 追従は「変更」に数えない(＊を付けない)
     SIMC.res = null;
     if (id === SIMC.cur) simcSave(); else simcPutSlot(id);
-  }
+  } catch (e) { console.warn("follow", id, e); reportJsError("箱の追従: " + e.message, e.stack); }
 }
 function simcSetList(m, shadow) {
   const EQ = DATA.equip || {}, T = EQ[shadow ? "shadows" : "sets"] || {}, cur = shadow ? m.foxShadow : m.foxSet;

@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.44.1"
+VERSION = "2.44.2"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -594,6 +594,16 @@ def start_live_server(core, lock, cfg):
             if self.path.split("?")[0] == "/api/ratorio" and self._local_only():
                 # 計算機(ROラトリオHub)をフォークから取り込む・更新する
                 return self._send(200, json.dumps(RATORIO.update(), ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/jslog" and self._local_only():
+                # 画面(JavaScript)のエラーを エラーログ.txt に残す(原因を調べる用): {m: メッセージ, s: スタック, tab, simv}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 6000)).decode("utf-8"))
+                    print("[画面のエラー] {} タブ={} {} | {}".format(time.strftime("%m/%d %H:%M:%S"), b.get("tab"), b.get("simv"), str(b.get("m"))[:300]), flush=True)
+                    print("    " + str(b.get("s") or "").replace("\n", "\n    ")[:1800], flush=True)
+                except Exception:
+                    pass
+                return self._send(200, "{}", "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/ocr" and self._local_only():
                 # スクリーンショット(画像そのもの)から文字を読む → {"name": 1行目から出した名前, "lines": 読めた行}
                 try:
