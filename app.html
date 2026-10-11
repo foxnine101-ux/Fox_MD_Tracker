@@ -2391,6 +2391,50 @@ const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
 // ASPD が効くのはモーションだけ。モーション(秒) = (200 − ASPD) × 0.02(ASPD 175 = 0.50 … 193 = 0.14)。ほかの待ち(ディレイ・クールタイム)のほうが長ければ、ASPD を上げても周期は縮まない ----
 const STP_MOT = (aspd) => Math.max(0, (200 - aspd) * 0.02);
 const stpAsSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([S.d, simcSbCfg(m)]);
+// ---- ローテーション(複数のスキルを順に撃つ): 別のスキルのクールタイムは待たなくてよい。待ちは、モーション・そのスキルのディレイだけ(同じスキルをまた撃つときは、そのクールタイムが明けるまで)。
+// 1周の時間を、周期が落ち着くまで何周かシミュレーションして出す。items = [{cast, delay, cool, dmg}] ----
+function stpRotSim(items, aspd) {
+  let t = 0, len = 0; const ready = items.map(() => 0), mot = STP_MOT(aspd);
+  for (let loop = 0; loop < 14; loop++) {
+    const t0 = t;
+    items.forEach((x, i) => { const st = Math.max(t, ready[i]), fin = st + x.cast; ready[i] = fin + x.cool; t = fin + Math.max(mot, x.delay); });
+    len = t - t0;
+  }
+  return len;
+}
+function stpRotCalc(m, S, R) {
+  const T = stpSbMt(m); if (!T || !(S.rot || []).length) return null;
+  const mm = R && !R.err ? stpAsVirtualModel(m, S, R) : stpAsBase(m, S), items = [];
+  for (const e of S.rot) {
+    const it = T.methods.find((x) => x.full === e.full); if (!it) continue;
+    const ch = sbChain(it.tree, [e.lv]), r = engSandbag(mm, T.cfg, { skill: it.skill, src: it.src, lv: +ch[0].v, opts: ch.slice(1).map((c) => +c.v) });
+    if (!r) continue;
+    const ticks = r.ground && r.dmgIv > 0 && r.life > 0 ? r.life / r.dmgIv : 1;           // 設置スキルは、置いてある間のダメージ(ティック×回数)を1回の使用として数える
+    items.push({ name: it.name, lv: +ch[0].v, cast: (r.castVary || 0) + (r.castFixed || 0), delay: r.delaySkill || 0, cool: r.coolT || 0, dmg: (r.per.avg || 0) * ticks, ground: !!r.ground });
+  }
+  if (!items.length) return null;
+  const rows = [193, 190, 185, 180, 175, 170, 160, 150].map((a) => { const len = stpRotSim(items, a); return { a, len, dps: items.reduce((q, x) => q + x.dmg, 0) / len }; });
+  const L0 = stpRotSim(items, 193); let thr = 193; for (let a = 192; a >= 100; a--) { if (stpRotSim(items, a) <= L0 + 1e-6) thr = a; else break; }
+  return { items, rows, thr, L0, aspd: stpAsCore(mm, T) ? null : null };
+}
+function stpRotHtml(m, S, ok) {
+  const T = stpSbMt(m); if (!T) return "";
+  const rot = S.rot || [], n2 = (v) => (Math.round(v * 100) / 100).toFixed(2), Rt = S.asRot;
+  const lvOpts = (full) => { const it = T.methods.find((x) => x.full === full); return it && it.tree && it.tree.type === 0 ? it.tree.opts.map((o) => o[0]) : [1]; };
+  const rowH = rot.map((e, i) => `<div class="opts"><span class="muted">${i + 1}.</span><select data-stprot="${i}:full">${T.methods.filter((x) => x.skill !== 0).map((x) => `<option value="${esc(x.full)}" ${x.full === e.full ? "selected" : ""}>${esc(atkMethodLabel(x))}</option>`).join("")}</select>
+    <label>Lv <select data-stprot="${i}:lv">${lvOpts(e.full).map((v) => `<option value="${v}" ${+v === +e.lv ? "selected" : ""}>${v}</option>`).join("")}</select></label><button class="ghost" data-stprotdel="${i}" title="このスキルをはずす">×</button></div>`).join("");
+  let h = `<div class="stph" style="margin-top:10px">ローテーション（複数のスキルを順に撃つ）</div><div class="muted" style="font-size:12px;margin:2px 0">別のスキルのクールタイムは待たなくてよいので、順に撃つときの待ちは「モーション・そのスキルのディレイ」だけです（同じスキルをまた撃つときは、そのクールタイムが明けるまで）。この場合 ASPD は、連打のときより効きます。</div>${rowH}
+    <div class="opts"><button class="ghost" data-stprotadd="1">＋ スキルを足す</button>${T.item ? `<button class="ghost" data-stprotadd="cur" title="サンドバックマンの枠で選んでいるスキルを足します">＋ いまのスキル</button>` : ""}</div>`;
+  if (rot.length && Rt && !Rt.err) {
+    h += `<div style="${ok ? "" : "opacity:.5"}"><div style="margin:4px 0">${Rt.thr >= 193 ? `<b>ASPD 193 でも、周期が縮み続けます</b>（待ちがモーションだけのスキルがあります）。` : `<b>ASPD ${Rt.thr} 以上あれば、これ以上上げても1周の時間は変わりません。</b>`}
+      <button class="ghost" data-stpastarget="${Rt.thr}" title="「ASPD を維持」の目標を、この境目にします">目標 ASPD を ${Rt.thr} にする</button></div>
+      <table class="multi"><tr><th>スキル</th><th>詠唱（変動＋固定）</th><th>ディレイ</th><th>クールタイム</th><th>1回のダメージ</th></tr>${Rt.items.map((x) => `<tr><td>${esc(x.name)} Lv${x.lv}</td><td class="v">${n2(x.cast)}秒</td><td class="v">${n2(x.delay)}秒</td><td class="v">${n2(x.cool)}秒</td><td class="v">${stpKM(x.dmg)}${x.ground ? ' <span class="muted" title="設置スキルは、置いてある間のダメージの合計">（設置）</span>' : ""}</td></tr>`).join("")}</table>
+      <table class="multi" style="margin-top:6px"><tr><th>ASPD</th><th>モーション</th><th>1周の時間</th><th>撃つ速さ（ASPD 193 を 100%）</th><th>DPS（目安）</th></tr>
+      ${Rt.rows.map((x) => `<tr${x.a === Rt.thr ? ' style="font-weight:700"' : ""}><td>${x.a}</td><td class="v">${n2(STP_MOT(x.a))}秒</td><td class="v">${n2(x.len)}秒</td><td class="v">${Math.round(Rt.L0 / x.len * 100)}%</td><td class="v">${stpKM(x.dps)}</td></tr>`).join("")}</table>
+      <div class="muted" style="font-size:12px">1周の DPS = 1周のダメージの合計 ÷ 1周の時間。設置スキル（ライトニングランドなど）は、置いてある間のダメージを全部当てた数字で、重なって積み上がる前提の目安です。時限効果は入れていません。</div></div>`;
+  }
+  return h;
+}
 // 1つの構成(mm = ステータス込みの model)の、このスキルの詠唱・待ち・ASPD の境目
 function stpAsCore(mm, T) {
   const c = engCalc(mm).c, r = engSandbag(mm, T.cfg, Object.assign({}, T.mt));
@@ -2453,7 +2497,7 @@ function stpAsHtml(m, S) {
       <button class="ghost" data-stpastarget="${V.need}" title="「ASPD を維持」の目標を、この境目にします">目標 ASPD を ${V.need} にする</button></div>
     <table class="multi" style="margin-top:6px"><tr><th>ASPD</th><th>モーション</th><th>1回の周期</th><th>撃つ速さ（ASPD 193 を 100%）</th></tr>
       ${V.rows.map((x) => `<tr${x.a === V.need ? ' style="font-weight:700"' : ""}><td>${x.a}</td><td class="v">${fx(x.mot)}</td><td class="v">${fx(x.cyc)}</td><td class="v">${Math.round(x.rel * 100)}%</td></tr>`).join("")}</table>
-    <div class="muted" style="font-size:12px">ラトリオの計算と資料の表に基づく目安です。潜在解放は、装備の枠にそのまま入れたときの効果です（切りかえは、この比較の中だけで、キャラの装備は変わりません）。設置系や押してすぐ出るスキルはモーションが固定で ASPD の影響を受けない、という情報もあります（ラトリオは全スキルを ASPD で変わるとして数えます）。変身中（真理の解放など）のモーションは別です。時限効果は入れていません。</div></div>`;
+    <div class="muted" style="font-size:12px">ラトリオの計算と資料の表に基づく目安です。潜在解放は、装備の枠にそのまま入れたときの効果です（切りかえは、この比較の中だけで、キャラの装備は変わりません）。設置系や押してすぐ出るスキルはモーションが固定で ASPD の影響を受けない、という情報もあります（ラトリオは全スキルを ASPD で変わるとして数えます）。変身中（真理の解放など）のモーションは別です。時限効果は入れていません。</div>${stpRotHtml(m, S, ok)}</div>`;
 }
 function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && el) el.innerHTML = stpMainHtml(m, S); }
 function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
@@ -3721,18 +3765,30 @@ function renderSimChara() {
           Object.keys(ENG.cache).filter((k) => /^(sbd:|stpk:|atkk:)/.test(k)).forEach((k) => delete ENG.cache[k]); if (ENG.calcCache && ENG.calcCache.clear) ENG.calcCache.clear();
           S.rowSig = ""; S.sugSig = ""; S.effSig = ""; S.swSig = ""; S.rows = null; S.sug = null; S.eff = null; S.swR = null; render(); return;
         }
-        const as = e.target.closest("[data-stpas]"); if (as) { as.disabled = true; as.textContent = "計算中…"; setTimeout(() => { try { S.asOn = {}; S.as = stpAsCalc(m, S); } catch (err) { S.as = { err: "計算できませんでした: " + err.message }; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); }, 30); return; }
+        const as = e.target.closest("[data-stpas]"); if (as) { as.disabled = true; as.textContent = "計算中…"; setTimeout(() => { try { S.asOn = {}; S.as = stpAsCalc(m, S); S.asRot = stpRotCalc(m, S, S.as); } catch (err) { S.as = { err: "計算できませんでした: " + err.message }; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); }, 30); return; }
         const ac = e.target.closest("[data-stpasc]"); if (ac && S.as && !S.as.err) {      // 潜在解放の切りかえ(同じ枠のものは1つだけ)
           const v = +ac.dataset.stpasc, c = S.as.senzai.find((x) => x.v === v); if (!c) return;
           const cur = (x) => (S.asOn && S.asOn[x.v] !== undefined ? S.asOn[x.v] : stpAsBase(m, S).card[x.slot] === x.v), was = cur(c);
           S.asOn = S.asOn || {}; S.as.senzai.filter((x) => x.slot === c.slot).forEach((x) => { S.asOn[x.v] = false; }); S.asOn[v] = !was;
-          const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return;
+          try { S.asRot = stpRotCalc(m, S, S.as); } catch (err) { S.asRot = null; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return;
         }
+        const ra = e.target.closest("[data-stprotadd]"); if (ra) {          // ローテーションにスキルを足す・はずす
+          const T = stpSbMt(m); if (!T) return; S.rot = S.rot || [];
+          const pick = ra.dataset.stprotadd === "cur" ? T.item : T.methods.find((x) => x.skill !== 0 && !S.rot.some((y) => y.full === x.full)) || T.methods.find((x) => x.skill !== 0);
+          if (pick) { const lvs = pick.tree && pick.tree.type === 0 ? pick.tree.opts.map((o) => o[0]) : [1]; S.rot.push({ full: pick.full, lv: ra.dataset.stprotadd === "cur" ? T.mt.lv : lvs[lvs.length - 1] }); }
+          try { S.asRot = stpRotCalc(m, S, S.as); } catch (err) { S.asRot = null; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return;
+        }
+        const rd = e.target.closest("[data-stprotdel]"); if (rd) { S.rot.splice(+rd.dataset.stprotdel, 1); try { S.asRot = stpRotCalc(m, S, S.as); } catch (err) { S.asRot = null; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return; }
         const at = e.target.closest("[data-stpastarget]"); if (at) { SIMC.opt.aspd = true; SIMC.opt.target = +at.dataset.stpastarget; render(); return; }
         if (e.target.closest("#stpreset")) { S.touched = false; render(); }
       };
       g("stp").onchange = (e) => {
         const i = e.target.closest("[data-stpv]"); if (i) { setV(i.dataset.stpv, i.value); return; }
+        const rs = e.target.closest("[data-stprot]"); if (rs) {                // ローテーションのスキル・Lv の変更
+          const [ix, k] = rs.dataset.stprot.split(":"), row = (S.rot || [])[+ix]; if (!row) return;
+          if (k === "full") { row.full = rs.value; const T = stpSbMt(m), it = T && T.methods.find((x) => x.full === rs.value), lvs = it && it.tree && it.tree.type === 0 ? it.tree.opts.map((o) => o[0]) : [1]; row.lv = lvs[lvs.length - 1]; } else row.lv = +rs.value;
+          try { S.asRot = stpRotCalc(m, S, S.as); } catch (err) { S.asRot = null; } const el = $("#stpas"); if (el) el.innerHTML = stpAsHtml(m, S); return;
+        }
         const sb = e.target.closest("[data-stpsb]"); if (sb) {               // 小型サンドバックマン(サンドバックマンの枠と同じ設定 m.foxSb)
           const k = sb.dataset.stpsb, cfg = simcSbCfg(m);
           if (k === "full") { cfg.full = sb.value; cfg.vals = []; }
