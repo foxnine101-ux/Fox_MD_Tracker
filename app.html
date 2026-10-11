@@ -2580,6 +2580,13 @@ function simcWear(m, items, shadow) {     // 装備セットを着せる。つ�
   }
   return rows;
 }
+// ゲームのキャラが覚えているスキル(Fox の {番号: Lv})を、ラトリオの「習得スキル」に入れる(名前でつなぐ)。パッシブや習得Lvがダメージ・詠唱に効くので、入れないと実測より低く出る
+async function simcApplySkills(model, skills) {
+  const sc = await engSchema(model.status.jobId), N = DATA.skill_names || {}; if (!sc) return 0;
+  const byName = Object.fromEntries(sc.filter((it) => it.g === "learn").map((it) => [it.label, it])); let n = 0;
+  for (const [id, lv] of Object.entries(skills || {})) { const it = byName[N[id]]; if (it && lv > 0) { simcBuffSet(model, it, lv); n++; } }
+  return n;
+}
 const SIMC_JOBABBR = { "エレメンタルマスター": "EM", "インペリアルガード": "IG", "ドラゴンナイト": "DK", "シャドウクロス": "SX", "カーディナル": "CD", "ウィンドホーク": "WH", "アークメイジ": "AM", "マイスター": "MT", "アビスチェイサー": "AC", "インクイジター": "IQ", "トルバドゥール": "TR", "トルヴェール": "TV", "バイオロ": "BI", "ソウルアセティック": "SA", "ナイトウォッチ": "NW", "ハイパーノービス": "HN", "スピリットハンドラー": "SH", "ソウルリーパー": "SR", "サモナー": "SM", "リベリオン": "RB", "ルーンナイト": "RK", "ギロチンクロス": "GX", "アークビショップ": "AB", "レンジャー": "RA", "ウォーロック": "WL", "メカニック": "MC", "ロイヤルガード": "RG", "シャドウチェイサー": "SC", "ミンストレル": "MI", "ワンダラー": "WA", "ソーサラー": "SO", "ジェネティック": "GE" };
 // スロットの名前: キャラ名_Lv_職業の略称_装備スロットの記号(例: Fox_Thirteen_Lv267_EM_A)。記号が無い(登録していない装備)ときは「いま」
 const simcSlotName = (char, st, tag) => `${cn(char)}_Lv${(st && st.lv) || "?"}_${SIMC_JOBABBR[st && st.jobName] || (st && st.jobName) || "?"}_${tag || "いま"}`;
@@ -2601,6 +2608,7 @@ async function simcFromFox(asNew, src) {    // src = {char, set, shadow, full}�
       ["str", "agi", "vit", "int", "dex", "luk"].forEach((k) => { const v = (st.stats || {})[k.toUpperCase()]; model.status[k] = v && v.base !== undefined ? v.base : 1; });
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { const v = (st.stats || {})[k]; model.pureStatus[6 + i] = v && v.base !== undefined ? v.base : 0; });
       const nm = simcSlotName(F.char, st, mainSet ? mainSet.tag : ((EQ.sets || {})[e.cur] || {}).tag);
+      try { await simcApplySkills(model, e.skills); } catch (err) { engLog("習得スキルを入れられませんでした: " + err.message); }
       if (asNew) { id = "c" + Date.now().toString(36); ch = SIMC.chars[id] = { name: nm, model }; }
       else if (ch) { ch.model = model; ch.name = nm; SIMC.res = null; }
     }
