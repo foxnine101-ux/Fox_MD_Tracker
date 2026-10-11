@@ -4236,7 +4236,7 @@ function nowGearHtml(chars) {       // いま着ている装備 = いまログ�
   const tagOf = (st) => `${tagChip(st)} ${esc(st.name || st.auto)}`;
   const miss = (shadow) => esc((e.missing || []).filter((x) => x.startsWith("シャドウ") === shadow).join("・") || "-");
   const reg = (sid, T, sh) => (T[sid] && !T[sid].tag ? ` <button class="ghost" data-reg="${esc(sid)}" data-sh="${sh}" title="いま着ている${sh ? "シャドウ装備" : "装備"}を、新しいスロットに登録するか、登録ずみのスロットに上書きします">スロットに登録</button>` : "");
-  return `<h2>いま着ている装備 <span class="muted" style="font-weight:400;font-size:13px">（いまログインしている ${esc(cn(c))}）</span></h2><div class="panel eq-box"><div class="eq-h">
+  return `<h2>いま着ている装備 <span class="muted" style="font-weight:400;font-size:13px">（いまログインしている ${esc(cn(c))}）</span></h2>${e.stale ? `<div class="warn" style="margin:4px 0">このログインでは装備の一覧（ログイン時に届く通信）を受け取れていないので、着替えが反映されていません。表示は前の記録のままです。ゲームでログインし直す（キャラ選択に戻って入り直す）と取り直します。</div>` : ""}<div class="panel eq-box"><div class="eq-h">
       <span>${S[e.cur] ? `<span class="muted">装備</span> ${tagOf(S[e.cur])}${reg(e.cur, S, 0)}` : `<span class="muted">装備がそろっていません（あいている場所: ${miss(false)}）</span>`}</span>
       <span>${SH[e.shadow] ? `<span class="muted">シャドウ</span> ${tagOf(SH[e.shadow])}${reg(e.shadow, SH, 1)}` : `<span class="muted">シャドウ装備がそろっていません（あいている場所: ${miss(true)}）</span>`}</span>
       <span class="eq-btns"><button class="ghost" id="gsnow">${GS_NOW ? "とじる" : "中身"}</button></span></div>

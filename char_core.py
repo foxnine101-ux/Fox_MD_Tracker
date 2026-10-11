@@ -215,6 +215,7 @@ class CharCore(object):
         self.sim_links = {}    # 計算機(ラトリオ)の名前 -> ゲームのアイテム番号。手で結びつけたもの(0 = わざと結びつけない)
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
+        self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
 
     # ---------- 外から呼ぶ ----------
     def feed(self, conn_key, pkt):
@@ -534,7 +535,7 @@ class CharCore(object):
             if name == UNKNOWN or not (ch.get("equips") or ch.get("stats") or ch.get("skills")):
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
-                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")),
+                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")),
                            "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch),
                            "skills": ch.get("skills") or {}, "updated": ch.get("updated") or 0}
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
@@ -820,6 +821,8 @@ class CharCore(object):
             if not worn:
                 return
             ch = self._ch()
+            self._synced.add(getattr(self, "_key", None))
+            ch["eq_stale"] = False
             ch["equips"] = worn
             ch["bag"] = [e for e in items if not e["wear"]]
             ch["updated"] = int(time.time())
@@ -829,6 +832,12 @@ class CharCore(object):
     def _wear(self, idx, loc, on):
         """装備した/外した。0x0B39 の一覧(equips と bag)の中で入れかえる。"""
         ch = self._ch()
+        if getattr(self, "_key", None) not in self._synced:
+            if not ch.get("eq_stale"):
+                self.log("[装備] この接続では装備の一覧(ログイン時に届く)を受け取っていないので、持ち物の番号が合わず、装備の変更を反映できません。ログインし直すと取り直します")
+            ch["eq_stale"] = True
+            self.changed = True
+            return
         eq, bag = ch.setdefault("equips", []), ch.setdefault("bag", [])
         item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
         if item is None:
