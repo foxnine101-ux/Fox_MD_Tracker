@@ -886,6 +886,13 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.abar{display:flex;align-items:center;gap:8px;padding:2px 4px;border-radius:6px;font-size:13px}
+.abar[data-apick]{cursor:pointer}.abar[data-apick]:hover,.abar.cur{background:var(--chip)}
+.abar .an{flex:0 0 14em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.abar .aw{flex:1;height:10px;background:var(--chip);border-radius:5px;overflow:hidden}
+.abar .aw i{display:block;height:100%;background:var(--accent);border-radius:5px}.abar .av{flex:0 0 7em;text-align:right;font-variant-numeric:tabular-nums}.abar .an2{flex:0 0 10em;font-size:12px}
+.atkbig{display:flex;flex-wrap:wrap;gap:24px}.atkbig b{font-size:24px}.atkmres{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}.atkmob{margin-top:4px}
+.atkfxg{margin:6px 0}.atkfxl{display:flex;flex-wrap:wrap;gap:6px}.afx{border:1px solid var(--line);border-radius:8px;padding:3px 9px;font-size:13px;background:var(--panel);cursor:pointer;display:inline-flex;gap:4px;align-items:center}
+.afx.on{background:var(--accent);color:#fff;border-color:var(--accent)}.afx.off{opacity:.45}.afx input{display:none}.afx a{margin-left:4px;opacity:.7}.atkadd{margin-top:8px}
 .sbres{margin:6px 0}
 .sbrec{margin-top:10px}
 .sbdet{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line)}
@@ -1218,10 +1225,10 @@ function statusHtmlEq(st) {
 // (本家が更新されたら「ラトリオを更新」で取り込むだけ)。キャラはこの PC に保存する(計算機のキャラ.json)
 let SIMV = store.get("md_simv") || "chara";
 function simNav() {
-  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button><button data-simv="sb" class="${SIMV === "sb" ? "on" : ""}">サンドバックマン</button></div>`;
+  return `<div class="simnav"><button data-simv="chara" class="${SIMV === "chara" ? "on" : ""}">キャラシミュレーター</button><button data-simv="atk" class="${SIMV === "atk" ? "on" : ""}">与ダメシミュ</button><button data-simv="dmg" class="${SIMV === "dmg" ? "on" : ""}">被ダメシミュ</button><button data-simv="sb" class="${SIMV === "sb" ? "on" : ""}">サンドバックマン</button></div>`;
 }
 function bindSimNav() { $("#view").querySelectorAll("[data-simv]").forEach((b) => b.onclick = () => { SIMV = b.dataset.simv; store.set("md_simv", SIMV); render(); }); }
-function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : SIMV === "sb" ? renderSandbagTab() : renderSimChara(); }
+function renderSim(chars) { return SIMV === "dmg" ? renderSimDmg(chars) : SIMV === "atk" ? renderAtkTab() : SIMV === "sb" ? renderSandbagTab() : renderSimChara(); }
 
 const ENG = { frame: null, ready: false, loading: null, reg: null, state: null, items: null, jobs: [], err: "" };
 // ラトリオのファイルは /ratorio/v-<取り込んだ版>/… で読む。この形の URL はブラウザが覚えるので、2回目からは読み直さない(約440ファイル)。
@@ -2368,14 +2375,16 @@ function engSandbag(model, cfg, mt, dbg) {                     // {per:{min,avg,
   const dm = ENG.xinfo && ENG.xinfo.dispDataMap, dmSnap = dm ? new Map(dm) : null;
   const set = { LV: SB_FIXED.lv, HP: SB_FIXED.hp, STR: 1, INT: 1, VIT: 1, DEX: 1, AGI: 1, LUK: 1, ATK: 1, MATK: 1, RANGE: 1, DEF: SB_FIXED.def, MDEF: SB_FIXED.mdef, BASE_EXP: 1, JOB_EXP: 1,
     SIZE: cfg.size, ELEMENT: cfg.ele * 10 + cfg.lv, RACE: cfg.race, BOSS_TYPE: cfg.kind ? 1 : 0, GRASS_TYPE: 0, RES: 0, MRES: 0 };
+  const real = cfg.mobId !== undefined;                          // 与ダメシミュ: ラトリオの本物のモンスター(手入力の値は使わない)
   let r = null;
   try {
-    SB_MOB_KEYS.forEach((k) => S.MC.SetMobConfInput(mk(k), set[k]));
-    S.CM.GetMonsterId = () => S.mon;
+    if (!real) SB_MOB_KEYS.forEach((k) => S.MC.SetMobConfInput(mk(k), set[k]));
+    S.CM.GetMonsterId = () => (real ? cfg.mobId : S.mon);
     ENG.sw.forEach((x) => x.m[x.set](true));
     engRndReset(model.foxRnd);
     const mm = JSON.parse(JSON.stringify(model));
     mm.attackMethod = { skillId: mt.skill, sourceType: mt.src, skillLv: mt.lv, optionValueArray: mt.opts };
+    for (const [k, i, v] of (mt.fx || [])) { mm[k] = (mm[k] || []).slice(); mm[k][i] = (+mm[k][i] || 0) + v; }      // 時限効果(性能カスタマイズに足す)
     r = ENG.reg.calcFromModel(mm);
     const a = (r.activeResultArray || [])[0];
     if (!a) return null;
@@ -2499,6 +2508,220 @@ function renderSandbagTab() {
   V.querySelectorAll("[data-sbdel]").forEach((el) => el.onclick = async () => { if (await askOnce("sbdel", "この記録を削除します。", "削除")) { await sbPost({ delete: el.dataset.sbdel }); await sbxLoad(); render(); } });
   V.querySelectorAll("input.sbnote").forEach((el) => { el.onkeydown = (e) => { if (e.key === "Enter") el.blur(); }; el.onchange = async () => { await sbPost({ note: [el.dataset.sbn, el.value] }); const r = R.find((x) => x.id === el.dataset.sbn); if (r) r.note = el.value; }; });
   if (SBX.focus) { const el = V.querySelector(`[data-sbr="${CSS.escape(SBX.focus)}"]`); SBX.focus = ""; if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); setTimeout(() => el.classList.remove("mx-flash"), 2500); } }
+}
+// ==================== 与ダメシミュレーター(サブタブ「与ダメシミュ」) ====================
+// ラトリオの本物のモンスター(約2500体)に、メインスキルを使ったときのダメージを出す。ランダム発動の時限効果(豪傑・覇王・真理の解放・暴走した魔力 など)は、
+// ラトリオにオンオフが無いので、ここでオンオフにして足す(性能カスタマイズの欄 = model.confCustomStatus / confCustomAtk / confCustomSpecStatus に足して計算)。
+const ATK_ST = "confCustomStatus", ATK_AT = "confCustomAtk", ATK_SP = "confCustomSpecStatus";
+const ATK_FIELDS = [   // 「自分で追加」で選べる項目: [名前, 欄, 番号]
+  ["STR+", ATK_ST, 7], ["AGI+", ATK_ST, 8], ["VIT+", ATK_ST, 9], ["INT+", ATK_ST, 10], ["DEX+", ATK_ST, 11], ["LUK+", ATK_ST, 12], ["HIT+", ATK_ST, 13], ["FLEE+", ATK_ST, 14], ["CRI+", ATK_ST, 15],
+  ["ASPD+%", ATK_ST, 17], ["変動詠唱短縮%", ATK_ST, 19], ["固定詠唱短縮%", ATK_ST, 20], ["ディレイ短縮%", ATK_ST, 21],
+  ["ATK+", ATK_AT, 4], ["MATK+", ATK_AT, 13], ["物理ダメージ+%", ATK_AT, 5], ["魔法ダメージ+%", ATK_AT, 14], ["物理 ボス・一般へ +%", ATK_AT, 22], ["魔法 ボス・一般へ +%", ATK_AT, 23],
+  ["クリティカルダメージ+%", ATK_AT, 10], ["命中物理ダメージ+%", ATK_AT, 27], ["全種族DEF無視%", ATK_AT, 12], ["全種族MDEF無視%", ATK_AT, 19],
+  ["POW+", ATK_SP, 1], ["STA+", ATK_SP, 2], ["WIS+", ATK_SP, 3], ["SPL+", ATK_SP, 4], ["CON+", ATK_SP, 5], ["CRT+", ATK_SP, 6], ["P.ATK+", ATK_SP, 7], ["S.MATK+", ATK_SP, 8]];
+const ATK_FX = [   // ランダム発動の時限効果。kind: p = 物理 / m = 魔法 / b = どちらも。fx: [欄, 番号, 足す値]。数字はラトリオの説明文(card.dat.js)から。HP/SP が減る・変身などは計算に入らない
+  { id: "gouketsu", name: "豪傑", kind: "p", text: "物理攻撃命中で10秒: ボスへのダメージ+100%(敵がボスのときだけ計算に入れる)", fx: [[ATK_AT, 22, 100, "B"]] },
+  { id: "hao", name: "覇王", kind: "p", text: "物理攻撃命中で10秒: STR+200", fx: [[ATK_ST, 7, 200]] },
+  { id: "kuma", name: "熊の力", kind: "p", text: "被弾で5秒: STR+200(毎秒HP-500)", fx: [[ATK_ST, 7, 200]] },
+  { id: "washi", name: "大鷲の眼光", kind: "p", text: "物理攻撃命中で10秒: DEX+200(毎秒SP-50)", fx: [[ATK_ST, 11, 200]] },
+  { id: "kosoku", name: "光速", kind: "p", text: "物理攻撃命中で5秒: 攻撃速度+100%・FLEE+100(毎秒HP-400・SP-40)", fx: [[ATK_ST, 17, 100]] },
+  { id: "gouwan", name: "剛腕", kind: "p", text: "物理攻撃命中で5秒: ATK+100", fx: [[ATK_AT, 4, 100]] },
+  { id: "satk", name: "S-Atk(精錬7以上)", kind: "p", text: "物理攻撃命中で3秒: ATK+150", fx: [[ATK_AT, 4, 150]] },
+  { id: "tpow", name: "T-PowerBoost(精錬7以上)", kind: "p", text: "物理攻撃命中で3秒: ATK+100", fx: [[ATK_AT, 4, 100]] },
+  { id: "munen", name: "無念無想", kind: "p", text: "物理攻撃命中で10秒: CRI+100・クリティカルダメージ+100%", fx: [[ATK_ST, 15, 100], [ATK_AT, 10, 100]] },
+  { id: "yumi", name: "魔弓の弦音", kind: "p", text: "物理攻撃命中で10秒: HIT+150・攻撃速度+100%", fx: [[ATK_ST, 13, 150], [ATK_ST, 17, 100]] },
+  { id: "inu", name: "冥犬の共吠え", kind: "p", text: "物理攻撃命中で10秒: 命中物理ダメージ+50%", fx: [[ATK_AT, 27, 50]] },
+  { id: "shinri", name: "真理の解放", kind: "m", text: "魔法攻撃命中で10秒: ボスへの魔法ダメージ+100%(敵がボスのときだけ計算に入れる)", fx: [[ATK_AT, 23, 100, "B"]] },
+  { id: "boso", name: "暴走した魔力", kind: "m", text: "魔法攻撃命中で10秒: INT+200(毎秒SP-200)", fx: [[ATK_ST, 10, 200]] },
+  { id: "smatk", name: "S-Matk(精錬7以上)", kind: "m", text: "魔法攻撃命中で3秒: MATK+150", fx: [[ATK_AT, 13, 150]] },
+  { id: "tmagic", name: "T-MagicBoost(精錬7以上)", kind: "m", text: "魔法攻撃命中で3秒: MATK+100", fx: [[ATK_AT, 13, 100]] },
+  { id: "squick", name: "S-Quick(精錬7以上)", kind: "m", text: "魔法攻撃命中で3秒: 詠唱-100%・ディレイ-100%", fx: [[ATK_ST, 19, 100], [ATK_ST, 20, 100], [ATK_ST, 21, 100]] },
+  { id: "cutie", name: "CUTIE", kind: "m", text: "魔法攻撃命中で30秒: 攻撃速度+100%", fx: [[ATK_ST, 17, 100]] },
+  { id: "isira", name: "アイシラ", kind: "m", text: "魔法攻撃で5秒: 詠唱-50%・FLEE+30", fx: [[ATK_ST, 19, 50], [ATK_ST, 14, 30]] },
+  { id: "tenchi", name: "天地", kind: "b", text: "10秒: 詠唱-70%・ディレイ-70%・敵のDEF/MDEF 100%無視", fx: [[ATK_ST, 19, 70], [ATK_ST, 20, 70], [ATK_ST, 21, 70], [ATK_AT, 12, 100], [ATK_AT, 19, 100]] },
+  { id: "shippu", name: "疾風", kind: "b", text: "10秒: 攻撃速度+70%・詠唱-70%・ディレイ-70%", fx: [[ATK_ST, 17, 70], [ATK_ST, 19, 70], [ATK_ST, 20, 70], [ATK_ST, 21, 70]] },
+  { id: "kokuyoku", name: "黒翼の使徒", kind: "b", text: "10秒: 攻撃速度+100%・固定詠唱-100%", fx: [[ATK_ST, 17, 100], [ATK_ST, 20, 100]] },
+  { id: "suiten", name: "水天", kind: "b", text: "10秒: 詠唱-70%・ディレイ-70%(SP消費-70%は計算に入れない)", fx: [[ATK_ST, 19, 70], [ATK_ST, 20, 70], [ATK_ST, 21, 70]] },
+  { id: "hyakka", name: "百火", kind: "b", text: "10秒: 詠唱-70%・ディレイ-70%・全属性の敵へのダメージ+70%(目安)", fx: [[ATK_ST, 19, 70], [ATK_ST, 20, 70], [ATK_ST, 21, 70], [ATK_AT, 5, 70], [ATK_AT, 14, 70]] },
+  { id: "makui", name: "魔喰いの顎", kind: "b", text: "10秒: 詠唱-100%", fx: [[ATK_ST, 19, 100], [ATK_ST, 20, 100]] },
+  { id: "xstr", name: "S-/X-OverPower", kind: "b", text: "4秒: STR+50", fx: [[ATK_ST, 7, 50]] },
+  { id: "xagi", name: "S-/X-FatalFlash", kind: "b", text: "4秒: AGI+50", fx: [[ATK_ST, 8, 50]] },
+  { id: "xdex", name: "S-/X-FiringShot", kind: "b", text: "4秒: DEX+50", fx: [[ATK_ST, 11, 50]] },
+  { id: "xint", name: "S-/X-SpellBuster", kind: "b", text: "4秒: INT+50", fx: [[ATK_ST, 10, 50]] },
+  { id: "xluk", name: "S-/X-LuckyStrike", kind: "b", text: "4秒: LUK+50", fx: [[ATK_ST, 12, 50]] },
+  { id: "pow", name: "魔獣の爪牙", kind: "b", text: "10秒: POW+100", fx: [[ATK_SP, 1, 100]] },
+  { id: "sta", name: "不滅の肉体", kind: "b", text: "10秒: STA+100", fx: [[ATK_SP, 2, 100]] },
+  { id: "wis", name: "叡知の王冠", kind: "b", text: "10秒: WIS+100", fx: [[ATK_SP, 3, 100]] },
+  { id: "spl", name: "根源への到達", kind: "b", text: "10秒: SPL+100", fx: [[ATK_SP, 4, 100]] },
+  { id: "con", name: "蒼穹の覇者", kind: "b", text: "10秒: CON+100", fx: [[ATK_SP, 5, 100]] },
+  { id: "crt", name: "天与の才", kind: "b", text: "10秒: CRT+100", fx: [[ATK_SP, 6, 100]] }];
+const ATK = { mobQ: "", mons: null, rank: null, rankBy: "per", msg: "", fxForm: { name: "", kind: "b", rows: [[0, 0]] } };
+const ATKS = (() => { try { return Object.assign({ mob: 0, full: "", vals: [], recent: [] }, JSON.parse(store.get("md_atk") || "{}")); } catch (e) { return { mob: 0, full: "", vals: [], recent: [] }; } })();
+const atkSave = () => store.set("md_atk", JSON.stringify(ATKS));
+const atkFxSet = () => { SETTINGS.atkFx = SETTINGS.atkFx || { on: {}, custom: [] }; SETTINGS.atkFx.on = SETTINGS.atkFx.on || {}; SETTINGS.atkFx.custom = SETTINGS.atkFx.custom || []; return SETTINGS.atkFx; };
+const atkFxAll = () => ATK_FX.concat(atkFxSet().custom);
+async function atkMons() {
+  if (ATK.mons) return ATK.mons;
+  const w = ENG.frame.contentWindow, mod = await w.eval(`import("${engBase()}engine/monster/monster.dat.js")`);
+  ATK.mons = (mod.MonsterObjNew || []).filter(Boolean).map((r) => ({ id: r[0], name: String(r[1]), lv: r[2], hp: r[3], def: r[13], mdef: r[14], size: r[17], ele: r[18], race: r[19], boss: r[20], kana: String(r[23] || "") }));
+  ATK.byId = new Map(ATK.mons.map((x) => [x.id, x]));
+  return ATK.mons;
+}
+const atkMobDesc = (x) => `Lv${x.lv}・HP ${fmtN(x.hp)}・DEF ${x.def}/MDEF ${x.mdef}・${x.boss ? "BOSS" : "一般"}・${SB_RACES[x.race] ?? "?"}・${SB_ELES[Math.floor(x.ele / 10)] ?? "?"}${x.ele % 10}・${SB_SIZES[x.size] ?? "?"}`;
+function atkFxApplied(fxIds, boss) {                                   // 選んだ効果の [欄, 番号, 足す値] を全部。4つ目が "B" のものは、敵がボスのときだけ(ラトリオの欄は「ボス／一般」の区別なく全部に効くため)
+  const all = atkFxAll(), out = [];
+  for (const id of fxIds) { const e = all.find((x) => x.id === id); if (e) out.push(...e.fx.filter((f) => f[3] !== "B" || boss)); }
+  return out;
+}
+// オンにしている効果のうち、この技(kind: p/m/b)に関係あるもの。kind が null なら全部
+function atkActiveIds(kind) {
+  const on = atkFxSet().on;
+  return atkFxAll().filter((e) => on[e.id] && (!kind || kind === "b" || e.kind === "b" || e.kind === kind)).map((e) => e.id);
+}
+function atkKind(m, mobId, mt) {                                        // この技が物理か魔法か: 物理ダメージ+100% / 魔法ダメージ+100% を足して、数字が動くほうで判定
+  const key = "atkk:" + JSON.stringify([m.status.jobId, mt.skill, mt.src, mobId]);
+  if (ENG.cache[key]) return ENG.cache[key];
+  const base = engSandbag(m, { mobId }, mt), p = engSandbag(m, { mobId }, Object.assign({}, mt, { fx: [[ATK_AT, 5, 100]] })), q = engSandbag(m, { mobId }, Object.assign({}, mt, { fx: [[ATK_AT, 14, 100]] }));
+  const b = base ? base.per.avg || 0 : 0, ph = p && (p.per.avg || 0) > b * 1.001, ma = q && (q.per.avg || 0) > b * 1.001;
+  return ENG.cache[key] = ph && !ma ? "p" : ma && !ph ? "m" : "b";
+}
+function atkMethod(m) {                                                // 選んでいるスキルと、設定の鎖
+  const methods = engAttackMethods(m);
+  const item = methods.find((x) => x.full === ATKS.full) || methods.find((x) => x.skill !== 0) || methods[0];
+  if (!item) return null;
+  ATKS.full = item.full;
+  const chain = sbChain(item.tree, ATKS.vals); ATKS.vals = chain.map((c) => c.v);
+  const lv = chain[0] ? +chain[0].v : 1, opts = chain.slice(1).map((c) => +c.v);
+  return { methods, item, chain, mt: { skill: item.skill, src: item.src, lv, opts, name: item.name } };
+}
+function atkRank(m, mobId, boss) {                                            // 全スキルを、いまの敵・時限効果で比べる(各スキルは最大Lv・ほかの設定は初期値)
+  const methods = engAttackMethods(m), rows = [];
+  for (const it of methods) {
+    if (it.skill === 0) continue;
+    try {
+      const vals = []; if (it.tree && it.tree.type === 0 && it.tree.opts.length) vals[0] = it.tree.opts[it.tree.opts.length - 1][0];
+      const chain = sbChain(it.tree, vals), mt = { skill: it.skill, src: it.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: it.name };
+      const kind = atkKind(m, mobId, mt), use = atkFxApplied(atkActiveIds(kind), boss);
+      const r = engSandbag(m, { mobId }, Object.assign({}, mt, { fx: use }));
+      if (r && r.per.avg > 0) rows.push({ full: it.full, name: `${it.name} Lv${mt.lv}`, kind, per: r.per.avg, sec: r.perSec || 0, interval: r.interval });
+    } catch (e) { /* 計算できない技は飛ばす */ }
+  }
+  return rows;
+}
+function atkBars(rows, fmt, curKey) {
+  const mx = Math.max(1, ...rows.map((r) => r.v));
+  return rows.map((r) => `<div class="abar${r.key && r.key === curKey ? " cur" : ""}"${r.key ? ` data-apick="${esc(r.key)}"` : ""}><span class="an">${esc(r.label)}</span><span class="aw"><i style="width:${Math.max(1, Math.round(r.v / mx * 100))}%"></i></span><span class="av">${fmt(r.v)}</span>${r.note ? `<span class="muted an2">${esc(r.note)}</span>` : ""}</div>`).join("");
+}
+function renderAtkTab() {
+  const V = $("#view");
+  if (!(typeof LOCAL !== "undefined" && LOCAL)) { V.innerHTML = simNav() + `<div class="panel empty">与ダメシミュは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
+  if (!RAT) { V.innerHTML = simNav() + `<div class="panel empty"><span class="spin">確認中…</span></div>`; bindSimNav(); ratStatus().then(render); return; }
+  if (!RAT.installed) { V.innerHTML = simNav() + `<div class="panel empty">ラトリオの計算を使います。先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
+  if (!SIMC.chars) { V.innerHTML = simNav() + `<div class="panel empty"><span class="spin">読み込み中…</span></div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (ENG.err && !ENG.loading && !ENG.retried) { ENG.retried = true; ENG.err = ""; }
+  if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
+  const ids = Object.keys(SIMC.chars), ch = simcCur();
+  let h = simNav() + `<div class="panel simbox"><div class="opts"><b>与ダメシミュ</b>
+    <label>キャラ(スロット) <select id="atkslot">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}</option>`).join("") : `<option>（スロットがありません）</option>`}</select></label>
+    <span class="muted">${!ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…（初回は1分ほどかかります）") : "キャラ・装備は「キャラシミュレーター」で整えたものを使います。"}</span></div></div>`;
+  if (!ch) { V.innerHTML = h + `<div class="panel empty">キャラシミュレーターでスロットを作ってください(「現在のキャラで新しいスロットを作成」が早いです)。</div>`; bindSimNav(); atkBind(); return; }
+  if (!ENG.ready || !ENG.sb) { V.innerHTML = h + (ENG.ready ? `<div class="warn">計算の入口が見つかりません（ラトリオの更新で変わった可能性があります）。</div>` : ""); bindSimNav(); atkBind(); return; }
+  if (!ATK.mons) { V.innerHTML = h + `<div class="panel empty"><span class="spin">モンスターの一覧を読み込み中…</span></div>`; bindSimNav(); atkBind(); atkMons().then(render).catch((e) => { ATK.mons = []; ATK.byId = new Map(); ATK.msg = "モンスターの一覧を読めませんでした: " + e.message; render(); }); return; }
+  const m = ch.model, mob = (ATK.byId || new Map()).get(ATKS.mob);
+  // --- 敵 ---
+  h += `<div class="panel simbox"><div class="opts"><b>敵</b><input type="text" id="atkmq" placeholder="モンスター名で探す（例: ベルゼブブ）" value="${esc(ATK.mobQ)}" style="width:20em"> ${(ATKS.recent || []).map((id) => (ATK.byId.get(id) ? `<button class="ghost" data-amob="${id}">${esc(ATK.byId.get(id).name)}</button>` : "")).join("")}</div>
+    <div id="atkmres" class="atkmres"></div>
+    ${mob ? `<div class="atkmob"><b>${esc(mob.name)}</b> <span class="muted">${esc(atkMobDesc(mob))}</span></div>` : `<div class="muted">敵を選ぶと計算します。</div>`}</div>`;
+  if (ATK.msg) h += `<div class="warn">${esc(ATK.msg)}</div>`;
+  if (!mob) { V.innerHTML = h; bindSimNav(); atkBind(); atkMobList(); return; }
+  // --- スキル ---
+  let M = null, res = null, kind = "b", err = "";
+  try { M = atkMethod(m); } catch (e) { err = "攻撃方法の一覧を作れませんでした: " + e.message; }
+  if (M) {
+    kind = atkKind(m, mob.id, M.mt);
+    h += `<div class="panel simbox"><div class="bfbar"><label>スキル <select data-asel="full">${M.methods.filter((x) => x.skill !== 0 || M.methods.length === 1).map((x) => `<option value="${esc(x.full)}" ${x.full === ATKS.full ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+      ${M.chain.map((c, i) => c.ol.type === 0
+        ? `<label>${esc(i === 0 ? "Lv" : c.ol.label || "設定")} <select data-aopt="${i}">${c.ol.opts.map((o) => `<option value="${esc(o[0])}" ${o[0] === c.v ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></label>`
+        : `<label>${esc(c.ol.label || "設定")} <input type="number" data-aopt="${i}" value="${esc(c.v)}" style="width:6em"></label>`).join("")}
+      <span class="tag">${kind === "p" ? "物理" : kind === "m" ? "魔法" : "物理・魔法"}</span></div></div>`;
+  }
+  // --- 時限効果 ---
+  const FX = atkFxSet(), on = FX.on, grp = (k, t) => `<div class="atkfxg"><div class="muted atkfxt">${t}</div><div class="atkfxl">${atkFxAll().filter((e) => e.kind === k).map((e) => {
+    const rel = kind === "b" || k === "b" || k === kind;
+    return `<label class="afx${on[e.id] ? " on" : ""}${rel ? "" : " off"}" title="${esc(e.text)}${e.custom ? "" : "\n(ラトリオの説明文から。目安)"}${rel ? "" : "\nこの技には関係しないので、計算には入りません"}"><input type="checkbox" data-afx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}${e.custom ? `<a data-afxdel="${esc(e.id)}" title="この効果を消す">×</a>` : ""}</label>`;
+  }).join("") || `<span class="muted">なし</span>`}</div></div>`;
+  const nOn = atkActiveIds(null).length;
+  h += simcFold("atkfx", "ランダム発動の時限効果", `<div class="muted" style="font-size:12px;margin-bottom:6px">装備のエンチャントなどで一定確率で数秒〜数十秒かかる効果です。ラトリオにはオンオフが無いので、ここで「かかっている」ことにして計算します（毎回かかるわけではないので、あくまで「かかったとき」の数字）。技に関係しない効果（物理の技に魔法用など）は薄くなり、計算に入りません。マウスを乗せると中身が出ます。</div>
+    ${grp("p", "物理")}${grp("m", "魔法")}${grp("b", "どちらも")}
+    <details class="atkadd"><summary class="muted">＋ 自分で効果を追加（根源の魔力など、ここに無いもの）</summary>
+      <div class="opts"><input type="text" id="afxn" placeholder="名前" value="${esc(ATK.fxForm.name)}" style="width:12em"><select id="afxk">${[["p", "物理"], ["m", "魔法"], ["b", "どちらも"]].map(([k, t]) => `<option value="${k}" ${ATK.fxForm.kind === k ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+      ${ATK.fxForm.rows.map((r, i) => `<div class="opts"><select data-afxf="${i}">${ATK_FIELDS.map((f, j) => `<option value="${j}" ${r[0] === j ? "selected" : ""}>${esc(f[0])}</option>`).join("")}</select><input type="number" data-afxv="${i}" value="${r[1]}" style="width:6em"></div>`).join("")}
+      <div class="opts"><button class="ghost" id="afxrow">＋ 項目を足す</button><button id="afxadd">この効果を追加</button></div></details>`,
+    ` <span class="muted">オン ${nOn} 個${nOn ? ": " + atkActiveIds(null).map((id) => (atkFxAll().find((e) => e.id === id) || {}).name).slice(0, 6).join("、") : ""}</span>`, false);
+  // --- 結果 ---
+  if (M) {
+    const use = atkFxApplied(atkActiveIds(kind), mob.boss);
+    try { res = engSandbag(m, { mobId: mob.id }, Object.assign({}, M.mt, { fx: use })); } catch (e) { err = "計算できませんでした: " + e.message; }
+    if (!res && !err) err = "このスキルは、この敵に対して計算できませんでした";
+  }
+  if (err) h += `<div class="warn">${esc(err)}</div>`;
+  if (res) {
+    const avg = res.per.avg || 0, n = (v, f = 0) => simcNum(v, f);
+    const need = avg ? Math.ceil(mob.hp / avg) : 0, secs = need && res.interval ? need * res.interval : 0;
+    const act = atkActiveIds(kind);
+    const contrib = act.map((id) => {
+      const rest = atkFxApplied(act.filter((x) => x !== id), mob.boss), r2 = engSandbag(m, { mobId: mob.id }, Object.assign({}, M.mt, { fx: rest }));
+      const e = atkFxAll().find((x) => x.id === id); return { label: e.name, v: avg - (r2 ? r2.per.avg || 0 : 0), note: r2 && r2.per.avg ? `無しだと ${n(r2.per.avg)}` : "" };
+    }).filter((r) => r.v !== 0);
+    h += `<div class="panel simbox"><div class="atkbig"><div><div class="muted">1回の使用（平均）</div><b>${n(avg)}</b><div class="muted">最小 ${n(res.per.min)} ／ 最大 ${n(res.per.max)}</div></div>
+      <div><div class="muted">1秒あたり</div><b>${n(res.perSec)}</b><div class="muted">詠唱 ${n(res.cast, 2)} ／ ディレイ ${n(res.delay, 2)} ／ 間隔 ${n(res.interval, 2)} 秒</div></div>
+      <div><div class="muted">倒すまで（HP ${fmtN(mob.hp)}）</div><b>${avg ? n(need) + " 回" : "-"}</b><div class="muted">${secs ? "約 " + n(secs, 1) + " 秒" : ""}</div></div></div>
+      ${res.hits && res.hits[1] !== undefined ? `<div class="muted" style="font-size:12px">1ヒット ${n((res.unit || [])[1])}（ヒット数 ${n(res.hits[1])}）</div>` : ""}
+      ${res.per.avg === 0 && !res.noDmg ? `<div class="warn">ダメージが 0 です。属性の相性か、「自分のスキル」の設定（精霊の召喚など）が要る技かもしれません。</div>` : ""}</div>`;
+    h += simcFold("atkct", "時限効果ごとの上がり幅", contrib.length ? `<div class="atkbars">${atkBars(contrib, (v) => "+" + n(v), "")}</div><div class="muted" style="font-size:12px">それぞれを外したときと比べた、1回の使用あたりの差です。</div>` : `<div class="muted">オンにしている時限効果が、この技に効いていません。上の「ランダム発動の時限効果」でオンにしてください。</div>`, "", true);
+    const rk = ATK.rank && ATK.rank.sig === JSON.stringify([SIMC.cur, mob.id, atkActiveIds(null)]) ? ATK.rank : null;
+    let rb = `<div class="opts"><button id="atkrank">${rk ? "もう一度比べる" : "全スキルを比べる"}</button>
+      <label><input type="radio" name="atkrb" value="per" ${ATK.rankBy === "per" ? "checked" : ""}> 1回の使用</label><label><input type="radio" name="atkrb" value="sec" ${ATK.rankBy === "sec" ? "checked" : ""}> 1秒あたり</label>
+      <span class="muted">各スキルは最大Lv・ほかの設定は初期値で、いまの敵・時限効果で計算します。バーを押すとそのスキルに切りかえます。</span></div>`;
+    if (rk) { const rows = rk.rows.slice().sort((a, b) => (ATK.rankBy === "sec" ? b.sec - a.sec : b.per - a.per)).map((r) => ({ key: r.full, label: r.name, v: ATK.rankBy === "sec" ? r.sec : r.per, note: ATK.rankBy === "sec" ? `1回 ${n(r.per)}` : `1秒 ${n(r.sec)}` })); rb += `<div class="atkbars">${atkBars(rows, (v) => n(v), ATKS.full)}</div>`; }
+    h += simcFold("atkrk", "スキルの比較", rb, "", false);
+  }
+  V.innerHTML = h; bindSimNav(); atkBind(); atkMobList();
+}
+function atkMobList() {                                              // 検索の結果(入力のたびに、この一覧だけ作り直す)
+  const box = $("#atkmres"); if (!box || !ATK.mons) return;
+  const q = pickNorm(ATK.mobQ); if (!q) { box.innerHTML = ""; return; }
+  const hit = ATK.mons.filter((x) => pickNorm(x.name).includes(q) || pickNorm(x.kana).includes(q)).slice(0, 40);
+  box.innerHTML = hit.length ? hit.map((x) => `<button class="ghost" data-amob="${x.id}" title="${esc(atkMobDesc(x))}">${esc(x.name)} <span class="muted">Lv${x.lv}</span></button>`).join("") : `<span class="muted">見つかりません。</span>`;
+  box.querySelectorAll("[data-amob]").forEach((b) => b.onclick = () => atkPickMob(+b.dataset.amob));
+}
+function atkPickMob(id) { ATKS.mob = id; ATKS.recent = [id].concat((ATKS.recent || []).filter((x) => x !== id)).slice(0, 8); atkSave(); ATK.mobQ = ""; ATK.rank = null; render(); }
+function atkBind() {
+  const V = $("#view"), on = (sel, ev, fn) => V.querySelectorAll(sel).forEach((el) => el[ev] = () => fn(el));
+  on("#atkslot", "onchange", (el) => { simcSelect(el.value); ATK.rank = null; render(); });
+  const q = V.querySelector("#atkmq"); if (q) q.oninput = () => { ATK.mobQ = q.value; atkMobList(); };
+  on("[data-amob]", "onclick", (el) => atkPickMob(+el.dataset.amob));
+  on("[data-asel]", "onchange", (el) => { ATKS.full = el.value; ATKS.vals = []; atkSave(); render(); });
+  on("[data-aopt]", "onchange", (el) => { const i = +el.dataset.aopt; ATKS.vals[i] = isNaN(+el.value) ? el.value : +el.value; ATKS.vals.length = i + 1; atkSave(); render(); });
+  on("[data-afx]", "onchange", (el) => { const F = atkFxSet(); if (el.checked) F.on[el.dataset.afx] = 1; else delete F.on[el.dataset.afx]; saveSettings(); ATK.rank = null; render(); });
+  on("[data-afxdel]", "onclick", (el) => { const F = atkFxSet(); F.custom = F.custom.filter((e) => e.id !== el.dataset.afxdel); delete F.on[el.dataset.afxdel]; saveSettings(); render(); });
+  on("[data-apick]", "onclick", (el) => { ATKS.full = el.dataset.apick; ATKS.vals = []; atkSave(); render(); });
+  on("input[name=atkrb]", "onchange", (el) => { ATK.rankBy = el.value; render(); });
+  on("#atkrank", "onclick", (el) => {
+    el.disabled = true; el.textContent = "計算中…";
+    setTimeout(() => { try { const ch = simcCur(), mob = ATK.byId.get(ATKS.mob); ATK.rank = { sig: JSON.stringify([SIMC.cur, mob.id, atkActiveIds(null)]), rows: atkRank(ch.model, mob.id, mob.boss) }; } catch (e) { ATK.msg = "比べられませんでした: " + e.message; } render(); }, 30);
+  });
+  on("#afxn", "onchange", (el) => { ATK.fxForm.name = el.value; });
+  on("#afxk", "onchange", (el) => { ATK.fxForm.kind = el.value; });
+  on("[data-afxf]", "onchange", (el) => { ATK.fxForm.rows[+el.dataset.afxf][0] = +el.value; });
+  on("[data-afxv]", "onchange", (el) => { ATK.fxForm.rows[+el.dataset.afxv][1] = +el.value; });
+  on("#afxrow", "onclick", () => { ATK.fxForm.rows.push([0, 0]); render(); });
+  on("#afxadd", "onclick", () => {
+    const f = ATK.fxForm, name = f.name.trim(); if (!name) { ATK.msg = "効果の名前を入れてください"; render(); return; }
+    const fx = f.rows.filter((r) => r[1]).map((r) => [ATK_FIELDS[r[0]][1], ATK_FIELDS[r[0]][2], r[1]]); if (!fx.length) { ATK.msg = "値が 0 の項目しかありません"; render(); return; }
+    const F = atkFxSet(); F.custom.push({ id: "u" + Date.now().toString(36), name, kind: f.kind, fx, custom: true, text: fx.map((x) => (ATK_FIELDS.find((a) => a[1] === x[0] && a[2] === x[1]) || [x[0] + x[1]])[0] + " " + (x[2] > 0 ? "+" : "") + x[2]).join("・") });
+    ATK.fxForm = { name: "", kind: "b", rows: [[0, 0]] }; ATK.msg = ""; saveSettings(); render();
+  });
 }
 // 枠(details)の開け閉めを覚える。描き直した直後に勝手に飛んでくる toggle は、中身が変わっていないので無視する
 function foldBind(root, after) {
