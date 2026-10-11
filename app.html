@@ -263,6 +263,9 @@ function curServer() {
 const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).name || "";
 const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
+// 見出しのアカウントのプルダウン(ワールドの横)。"" = すべて、"?" = アカウント不明、そのほかはアカウントID
+let ACC = store.get("md_acc") || "";
+const inAccount = (k) => !ACC || (ACC === "?" ? !accOfChar(k) : String(accOfChar(k)) === ACC);
 const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
 function renderWhoChar() {      // 画面上部: いまログインしているキャラ(いなければ、最後にログインしていたキャラ)
   const el = $("#whochar"); if (!el) return;
@@ -281,9 +284,16 @@ function renderServerTabs() {
     const n = Object.keys(DATA.chars || {}).filter((k) => srvOf(k) === ip).length;
     return `<option value="${esc(ip)}" ${ip === cur ? "selected" : ""}>${esc(serverLabel(ip))}${ip === latest ? "（最新ログイン）" : ""}　${n}キャラ</option>`;
   }).join("")}</select>` : "";
-  if (box.dataset.h !== h) { box.innerHTML = h; box.dataset.h = h; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
+  // アカウントのプルダウン(2つ以上のアカウントが分かっているときだけ)
+  const accs = accKnown(), here = Object.keys(DATA.chars || {}).filter((k) => inServer(k)), unk = here.filter((k) => !accOfChar(k)).length;
+  if (ACC && ACC !== "?" && !accs.includes(ACC)) ACC = "";
+  const ah = accs.length > 1 ? `<select id="accsel" title="表示するアカウント（キャラを右クリック →「アカウント」で、キャラのアカウントを手で決められます）"><option value="">すべてのアカウント　${here.length}キャラ</option>${accs.map((a) => `<option value="${esc(a)}" ${ACC === a ? "selected" : ""}>${esc(accLabel(a))}　${here.filter((k) => String(accOfChar(k)) === a).length}キャラ</option>`).join("")}${unk ? `<option value="?" ${ACC === "?" ? "selected" : ""}>アカウント不明　${unk}キャラ</option>` : ""}</select>` : "";
+  const hh = h + ah;
+  if (box.dataset.h !== hh) { box.innerHTML = hh; box.dataset.h = hh; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
   const sel = $("#srvsel");
   if (sel) sel.onchange = () => { SERVER = sel.value === latest ? "" : sel.value; SEL.chars.clear(); render(); };
+  const asel = $("#accsel");
+  if (asel) asel.onchange = () => { ACC = asel.value; store.set("md_acc", ACC); SEL.chars.clear(); render(); };
 }
 
 // ---------- 複数選択(Ctrl/Shift + クリック) ----------
@@ -336,7 +346,7 @@ function charNames() {
   const all = Object.keys(DATA.chars || {});
   const hidden = new Set(SETTINGS.hiddenChars || []);
   const order = SETTINGS.charOrder || [];
-  return all.filter((n) => !isHiddenChar(n, hidden) && inServer(n))
+  return all.filter((n) => !isHiddenChar(n, hidden) && inServer(n) && inAccount(n))
     .sort((a, b) => (charIdx(order, a) - charIdx(order, b)) || cn(a).localeCompare(cn(b), "ja"));
 }
 const idx = (arr, v) => { const i = arr.indexOf(v); return i < 0 ? 1e9 : i; };
