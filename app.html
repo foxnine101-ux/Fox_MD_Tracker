@@ -264,8 +264,12 @@ const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).
 const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 // 見出しのアカウントのプルダウン(ワールドの横)。"" = すべて、"?" = アカウント不明、そのほかはアカウントID
-let ACC = store.get("md_acc") || "";
-const inAccount = (k) => !ACC || (ACC === "?" ? !accOfChar(k) : String(accOfChar(k)) === ACC);
+let ACC_SET = store.get("md_acc");          // null = 自分で選んでいない → いまログインしているキャラのアカウント(分からなければ すべて)。"" = すべて、"?" = アカウント不明
+function curAcc() {
+  if (ACC_SET !== null && ACC_SET !== undefined) return ACC_SET;
+  const c = nowChar() || lastChar(), a = c ? accOfChar(c) : null; return a ? String(a) : "";
+}
+const inAccount = (k) => { const A = curAcc(); return !A || (A === "?" ? !accOfChar(k) : String(accOfChar(k)) === A); };
 const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
 function renderWhoChar() {      // 画面上部: いまログインしているキャラ(いなければ、最後にログインしていたキャラ)
   const el = $("#whochar"); if (!el) return;
@@ -286,14 +290,14 @@ function renderServerTabs() {
   }).join("")}</select>` : "";
   // アカウントのプルダウン(2つ以上のアカウントが分かっているときだけ)
   const accs = accKnown(), here = Object.keys(DATA.chars || {}).filter((k) => inServer(k)), unk = here.filter((k) => !accOfChar(k)).length;
-  if (ACC && ACC !== "?" && !accs.includes(ACC)) ACC = "";
-  const ah = accs.length > 1 ? `<select id="accsel" title="表示するアカウント（キャラを右クリック →「アカウント」で、キャラのアカウントを手で決められます）"><option value="">すべてのアカウント　${here.length}キャラ</option>${accs.map((a) => `<option value="${esc(a)}" ${ACC === a ? "selected" : ""}>${esc(accLabel(a))}　${here.filter((k) => String(accOfChar(k)) === a).length}キャラ</option>`).join("")}${unk ? `<option value="?" ${ACC === "?" ? "selected" : ""}>アカウント不明　${unk}キャラ</option>` : ""}</select>` : "";
-  const hh = h + ah;
+  const ACC = curAcc();
+  const ah = accs.length > 1 ? `<select id="accsel" title="表示するアカウント（キャラを右クリック →「アカウント」で、キャラのアカウントを手で決められます）"><option value="" ${ACC === "" ? "selected" : ""}>すべてのアカウント　${here.length}キャラ</option>${accs.map((a) => `<option value="${esc(a)}" ${ACC === a ? "selected" : ""}>${esc(accLabel(a))}　${here.filter((k) => String(accOfChar(k)) === a).length}キャラ</option>`).join("")}${unk ? `<option value="?" ${ACC === "?" ? "selected" : ""}>アカウント不明　${unk}キャラ</option>` : ""}</select>` : "";
+  const hh = ah + h;          // アカウントはワールドの左側
   if (box.dataset.h !== hh) { box.innerHTML = hh; box.dataset.h = hh; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
   const sel = $("#srvsel");
   if (sel) sel.onchange = () => { SERVER = sel.value === latest ? "" : sel.value; SEL.chars.clear(); render(); };
   const asel = $("#accsel");
-  if (asel) asel.onchange = () => { ACC = asel.value; store.set("md_acc", ACC); SEL.chars.clear(); render(); };
+  if (asel) asel.onchange = () => { ACC_SET = asel.value; store.set("md_acc", ACC_SET); SEL.chars.clear(); render(); };
 }
 
 // ---------- 複数選択(Ctrl/Shift + クリック) ----------
@@ -321,11 +325,20 @@ function accKnown() {      // 知っているアカウントID(通信で見た�
 const accLabel = (a) => (a === "?" || !a ? "アカウント不明" : (SETTINGS.accNames || {})[a] || "アカウント（ID末尾 " + String(a).slice(-4) + "）");
 function setCharAcc(keys, a) { SETTINGS.charAcc = SETTINGS.charAcc || {}; keys.forEach((k) => { if (a) SETTINGS.charAcc[k] = a; else delete SETTINGS.charAcc[k]; }); saveSettings(); render(); }
 function nameAcc(a) { const cur = (SETTINGS.accNames || {})[a] || "", n = prompt(`このアカウント（ID末尾 ${String(a).slice(-4)}）の名前（空にすると、名前を消します）`, cur); if (n === null) return; SETTINGS.accNames = SETTINGS.accNames || {}; if (n.trim()) SETTINGS.accNames[a] = n.trim().slice(0, 20); else delete SETTINGS.accNames[a]; saveSettings(); render(); }
+const CHAR_COLORS = [["赤", "#e03131", "🟥"], ["オレンジ", "#f08c00", "🟧"], ["黄", "#fab005", "🟨"], ["緑", "#2f9e44", "🟩"], ["青", "#1c7ed6", "🟦"], ["紫", "#7048e8", "🟪"], ["茶", "#a0643c", "🟫"], ["灰", "#868e96", "⬜"]];
+function setCharColor(keys, col) { SETTINGS.charColor = SETTINGS.charColor || {}; keys.forEach((k) => { if (col) SETTINGS.charColor[k] = col; else delete SETTINGS.charColor[k]; }); saveSettings(); render(); }
+function applyCharColors() {          // キャラの行・列の左端に、手で付けた色の帯を出す(キャラを右クリック)
+  const cc = SETTINGS.charColor || {};
+  document.querySelectorAll("#view [data-char]").forEach((el) => { const t = el.querySelector("td.char, .nm"); if (t) t.style.boxShadow = cc[el.dataset.char] ? `inset 6px 0 0 ${cc[el.dataset.char]}` : ""; });
+}
 function charMenu(c) {
   const many = SEL.chars.size > 1 && SEL.chars.has(c);
   const keys = many ? [...SEL.chars] : [c];
   const items = [{ cap: many ? `選んだ${keys.length}人（${keys.map(cn).join("、")}）` : cn(c) }];
   items.push({ label: many ? `選んだ${keys.length}人を隠す` : "このキャラを隠す", act: () => hideChars(keys) });
+  items.push("-", { cap: "行の左端の色" });
+  CHAR_COLORS.forEach(([nm, col, sq]) => items.push({ label: `${sq} ${nm}${(SETTINGS.charColor || {})[c] === col ? "（いま）" : ""}`, act: () => setCharColor(keys, col) }));
+  items.push({ label: "色をはずす", act: () => setCharColor(keys, "") });
   const accs = accKnown();
   if (accs.length) {      // アカウントの設定(ニャル様の週の回数などが、アカウントごとに数えられる)
     items.push("-", { cap: "アカウント" });
@@ -464,6 +477,7 @@ function render() {
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
   }
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
+  try { applyCharColors(); } catch (e) { /* 色は飾りなので、失敗しても画面は出す */ }
   if (hs.tab === TAB && hs.v.some((x) => x > 0)) { const now = [...document.querySelectorAll(HSCROLL_SEL)]; if (now.length === hs.v.length) now.forEach((e, i) => { if (hs.v[i] > 0) e.scrollLeft = hs.v[i]; }); }      // 横の位置も戻す(同じタブで、枠の数が同じときだけ)
 }
 function renderNow() {
