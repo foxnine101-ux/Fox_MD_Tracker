@@ -57,6 +57,7 @@ jobs:
           New-Item -ItemType Directory -Force pkg\Fox_MD_Tracker | Out-Null
           Copy-Item dist\Fox_MD_Tracker.exe pkg\Fox_MD_Tracker\
           Copy-Item はじめに_配布版.txt pkg\Fox_MD_Tracker\はじめに.txt
+          Copy-Item ライセンス.txt pkg\Fox_MD_Tracker\ライセンス.txt
           Copy-Item dist\Fox_MD_Tracker.exe dist\MDTracker.exe   # 改名前の版(v2.1.x)がアップデートできるように同じものを旧名でも置く
           Compress-Archive -Path pkg\Fox_MD_Tracker -DestinationPath Fox_MD_Tracker.zip -Force
 
