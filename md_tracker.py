@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.51.6"
+VERSION = "2.52.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -270,7 +270,7 @@ def build_payload(core, history=100):
     titles = {str(q): core.title(q) for q in used}
     spans = {str(q): core.quest_meta.get(q, {}).get("span", 0) for q in used}
     return {"version": VERSION, "edition": EDITION, "updated": int(time.time()), "chars": chars,
-            "titles": titles, "spans": spans, "history": core.history[-history:]}
+            "titles": titles, "spans": spans, "history": core.history[-history:], "accounts": sorted(core.account_aids)}
 
 
 # ---------------------------------------------------------------

@@ -300,11 +300,29 @@ function showChars(keys) {
   keys.forEach((k) => { s.delete(k); s.delete(cn(k)); });
   SETTINGS.hiddenChars = [...s]; saveSettings(); render();
 }
+// ---- アカウント: ツールが通信で見分けたアカウント(キャラ選択のときに分かる)のほかに、手で決められる。名前も付けられる(SETTINGS.accNames = {アカウントID: 名前}・SETTINGS.charAcc = {キャラ: アカウントID}) ----
+const accOfChar = (c) => (SETTINGS.charAcc || {})[c] || ((DATA.chars || {})[c] || {}).account || null;
+function accKnown() {      // 知っているアカウントID(通信で見たもの・キャラについているもの・手で決めたもの)
+  const s = new Set((DATA.accounts || []).map(String));
+  Object.keys(DATA.chars || {}).forEach((c) => { const a = accOfChar(c); if (a) s.add(String(a)); });
+  Object.keys(SETTINGS.accNames || {}).forEach((a) => s.add(String(a)));
+  return [...s].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+const accLabel = (a) => (a === "?" || !a ? "アカウント不明" : (SETTINGS.accNames || {})[a] || "アカウント（ID末尾 " + String(a).slice(-4) + "）");
+function setCharAcc(keys, a) { SETTINGS.charAcc = SETTINGS.charAcc || {}; keys.forEach((k) => { if (a) SETTINGS.charAcc[k] = a; else delete SETTINGS.charAcc[k]; }); saveSettings(); render(); }
+function nameAcc(a) { const cur = (SETTINGS.accNames || {})[a] || "", n = prompt(`このアカウント（ID末尾 ${String(a).slice(-4)}）の名前（空にすると、名前を消します）`, cur); if (n === null) return; SETTINGS.accNames = SETTINGS.accNames || {}; if (n.trim()) SETTINGS.accNames[a] = n.trim().slice(0, 20); else delete SETTINGS.accNames[a]; saveSettings(); render(); }
 function charMenu(c) {
   const many = SEL.chars.size > 1 && SEL.chars.has(c);
   const keys = many ? [...SEL.chars] : [c];
   const items = [{ cap: many ? `選んだ${keys.length}人（${keys.map(cn).join("、")}）` : cn(c) }];
   items.push({ label: many ? `選んだ${keys.length}人を隠す` : "このキャラを隠す", act: () => hideChars(keys) });
+  const accs = accKnown();
+  if (accs.length) {      // アカウントの設定(ニャル様の週の回数などが、アカウントごとに数えられる)
+    items.push("-", { cap: "アカウント" });
+    accs.forEach((a) => items.push({ label: ((SETTINGS.charAcc || {})[c] === a ? "● " : "") + accLabel(a) + " にする", act: () => setCharAcc(keys, a) }));
+    items.push({ label: "手で決めたアカウントを消す(通信で見分けたものにもどす)", act: () => setCharAcc(keys, "") });
+    items.push({ label: "アカウントに名前を付ける…", act: () => { const a = accOfChar(c) || accs[0]; nameAcc(a); } });
+  }
   if (SEL.chars.size) items.push("-", { label: "選択を解除", act: () => { SEL.chars.clear(); render(); } });
   return items;
 }
@@ -4944,8 +4962,8 @@ function renderNyar(groups, chars, now) {
   const used = (c) => { const n = C[c].nyar; return n && n.week === ws ? n.count : 0; };
   // アカウントごとに合計(アカウント不明は1つにまとめる)
   const accs = new Map();
-  const known = [...new Set(chars.map((c) => C[c].account).filter(Boolean))];
-  const accOf = (c) => C[c].account || (known.length === 1 ? known[0] : "?");   // アカウントが1つしか分からなければ、不明なキャラもそれ
+  const known = [...new Set(chars.map((c) => accOfChar(c)).filter(Boolean))];
+  const accOf = (c) => accOfChar(c) || (known.length === 1 ? known[0] : "?");   // アカウントが1つしか分からなければ、不明なキャラもそれ
   for (const c of chars) {
     const a = accOf(c);
     if (!accs.has(a)) accs.set(a, { chars: [], used: 0 });
@@ -4962,7 +4980,7 @@ function renderNyar(groups, chars, now) {
   }
   for (const [a, A] of accs) {
     const pct = Math.min(100, A.used / NYAR.limit * 100);
-    h += `<div class="panel card"><span>${a === "?" ? "アカウント不明" : "アカウント（ID末尾 " + esc(String(a)).slice(-4) + "）"} の今週の報告回数</span>
+    h += `<div class="panel card"><span>${esc(accLabel(a))} の今週の報告回数</span>
       <b>${A.used} / ${NYAR.limit}</b><span>残り ${NYAR.limit - A.used} 回${A.official ? "・公式(" + when(A.official.t) + "にニャル様で確認)" : "・ツールの記録の合計"}</span><div class="bar"><i style="width:${pct}%"></i></div></div>`;
   }
   h += `</div>`;
@@ -5130,7 +5148,7 @@ function renderSettings(groups) {
     name: byName,
     lv: (a, b) => ((C[b].lv || 0) - (C[a].lv || 0)) || byName(a, b),
     job: (a, b) => ((C[a].job ?? 1e9) - (C[b].job ?? 1e9)) || ((C[b].lv || 0) - (C[a].lv || 0)) || byName(a, b),
-    account: (a, b) => String(C[a].account ?? "~").localeCompare(String(C[b].account ?? "~"), "ja", { numeric: true }) || all.indexOf(a) - all.indexOf(b),
+    account: (a, b) => String(accOfChar(a) ?? "~").localeCompare(String(accOfChar(b) ?? "~"), "ja", { numeric: true }) || all.indexOf(a) - all.indexOf(b),
     seen: (a, b) => ((C[b].seen || 0) - (C[a].seen || 0)) || byName(a, b),
   };
   document.querySelectorAll("[data-sort]").forEach((el) => el.onclick = () => saveCharOrder(all.slice().sort(SORTS[el.dataset.sort])));
