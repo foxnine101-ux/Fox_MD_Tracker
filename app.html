@@ -1292,7 +1292,7 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     ENG.x.jobh = await imp("data/mig.job.h.js");
     try { await engSbInit(); } catch (e) { ENG.sb = null; engLog("サンドバックマンの部品を読めませんでした(ほかの機能はふつうに使えます): " + e.message); }      // ラトリオの更新で入口の名前が変わっても、計算機は起動する
     try { ENG.xinfo = (await imp("ui/CExtraInfoAreaComponentManager.js")).CExtraInfoAreaComponentManager; } catch (e) { ENG.xinfo = null; }
-    ENG.cache = {};
+    ENG.cache = {}; ENG.calcCache = new Map();
     ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
     ENG.ready = true;
   })().catch((e) => { ENG.err = e.message; }).finally(() => { ENG.loading = null; });
@@ -1324,7 +1324,20 @@ function engExtra(raw, kinds) {
   inst.selectedInfoId = 0;
   return out;
 }
-function engCalc(model, xkinds) {         // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計, x: 拡張情報の表(頼んだときだけ)}
+// ラトリオの計算は1回 0.09秒ほどかかる(装備・カードの数にほぼ比例)。結果は覚えておく(最大 80 件。計算係を作り直すとき ENG.calcCache を空にする)。
+// engCalc は必ず計算して(計算係の中の状態も model に合わせる)覚える。engCalcCached は、同じ内容を覚えていればそれを返す(結果だけ読む探索・並べる表用。返した結果は書きかえない)
+function engCalc(model, xkinds) {
+  const r = engCalcRaw(model, xkinds), M = ENG.calcCache || (ENG.calcCache = new Map()), key = JSON.stringify(model);
+  M.delete(key); M.set(key, { want: (xkinds || []).slice().sort().join(","), r });
+  if (M.size > 80) M.delete(M.keys().next().value);
+  return r;
+}
+function engCalcCached(model, xkinds) {
+  const M = ENG.calcCache, key = JSON.stringify(model), want = (xkinds || []).slice().sort().join(","), hit = M && M.get(key);
+  if (hit && (!want || hit.want === want)) { M.delete(key); M.set(key, hit); return hit.r; }
+  return engCalc(model, xkinds);
+}
+function engCalcRaw(model, xkinds) {         // 画面なしの計算。{c: 計算結果, core, tot: ステータスの合計, x: 拡張情報の表(頼んだときだけ)}
   const before = ENG.sw.map((x) => x.m[x.get]);
   ENG.sw.forEach((x) => x.m[x.set](true));              // 計算の間だけ「欄を開いている」ことにする → model の支援・アイテムが必ず使われる
   engRndReset(model.foxRnd);
@@ -1516,22 +1529,32 @@ function simcNeedKick() {
   const sig = JSON.stringify(ch.model);
   if (SIMC.need && SIMC.need.sig === sig) return;
   clearTimeout(SIMC.needT);
-  SIMC.needT = setTimeout(async () => {
+  SIMC.needT = setTimeout(async () => {       // 入力が落ち着いてから(1秒)。1回の計算(0.09秒)ごとに画面の操作を通す
     const out = { sig };
     try {
       for (const k of ["agi", "dex"]) {
         const cur = ch.model.status[k] || 1;
-        const at = async (v) => { await sleep(0); const now = simcCur(); if (!now || JSON.stringify(now.model) !== sig) throw new Error("changed"); const m = JSON.parse(sig); m.status[k] = v; return engCalc(m).c[37] >= SIMC_ASPD; };
-        let top = Math.max(SIMC_STMAX, cur);
-        if (!(await at(top))) { top = SIMC_STTOP; if (!(await at(top))) { out[k] = null; continue; } }       // 130 まででは届かない → 400 まで探す
-        let lo = 1, hi = top;
-        while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
-        out[k] = lo;
+        const at = async (v) => { await sleep(0); const now = simcCur(); if (!now || JSON.stringify(now.model) !== sig) throw new Error("changed"); const m = JSON.parse(sig); m.status[k] = v; return engCalcCached(m).c[37] >= SIMC_ASPD; };
+        const top = Math.max(SIMC_STMAX, cur), prev = SIMC.need && k in SIMC.need ? SIMC.need[k] : undefined;      // 前の答えが手がかり(INT・VIT などを触っただけなら、答えは同じなので 2 回前後で済む)
+        if (prev === null && !(await at(SIMC_STTOP))) out[k] = null;                                         // 前も届かなかった → 400 でもう一度確かめるだけ
+        else if (typeof prev === "number" && prev <= top) out[k] = await simcGallop(at, prev, top);
+        else if (typeof prev === "number" && (await at(prev)) && !(await at(prev - 1))) out[k] = prev;      // 上限を超える答えも、同じなら 2 回
+        else if (await at(top)) out[k] = await simcGallop(at, cur, top);          // 上限までで届く → いまの値の近くから探す
+        else if (!(await at(SIMC_STTOP))) out[k] = null;                      // 400 まで振っても届かない
+        else { let lo = top, hi = SIMC_STTOP; while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid; } out[k] = hi; }      // 上限を超える分
       }
     } catch (e) { return; }                 // 途中で値が変わった → 新しい値でやり直しが走っている
     SIMC.need = out;
     const el = $("#sccaspd"); if (el) el.innerHTML = simcNeedText(ch.model);
-  }, 250);
+  }, 1000);
+}
+// ok(v) が「v が大きいほど true」になるとき、初めて true になる v(上限 top まで。届かなければ null)を、cur から広げて探す(近くにあれば少ない回数で済む)
+async function simcGallop(ok, cur, top) {
+  let lo, hi;
+  if (await ok(cur)) { hi = cur; let step = 1; lo = cur - 1; while (lo >= 1 && await ok(lo)) { hi = lo; step *= 2; lo = hi - step; } lo = Math.max(lo, 0); }
+  else { lo = cur; let step = 1; hi = cur + 1; while (hi < top && !(await ok(hi))) { lo = hi; step *= 2; hi = lo + step; } if (hi >= top) { hi = top; if (!(await ok(hi))) return null; } }
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (await ok(mid)) hi = mid; else lo = mid; }
+  return hi;
 }
 function simcNeedText(m) {
   const nd = SIMC.need;
@@ -1894,6 +1917,11 @@ async function simcTagKick(m) {
 // ラトリオの計算なので、装備の ASPD・変動詠唱の効果、セット効果、エンチャント、カード、ランダムオプション、精錬も、実際に着ているときと同じ状態で入る
 const simcKeepSig = (m) => JSON.stringify(m) + "|" + JSON.stringify([SIMC.opt.mainSel, SIMC.opt.shSel]);
 function simcKeepKick(m) {
+  if (SIMC.keep && SIMC.keep.sig === simcKeepSig(m)) return;
+  clearTimeout(SIMC.keepT);
+  SIMC.keepT = setTimeout(() => { const c = simcCur(); if (c) simcKeepRun(c.model); }, SIMC.keep ? 700 : 0);      // 数字を打っている最中は計算しない
+}
+function simcKeepRun(m) {
   const sig = simcKeepSig(m);
   if ((SIMC.keep && SIMC.keep.sig === sig) || SIMC.keepBusy === sig) return;
   SIMC.keepBusy = sig;
@@ -1904,7 +1932,7 @@ function simcKeepKick(m) {
       const sets = simcOptSets(m); total = sets.length;
       for (const S of sets) {
         await sleep(0); if (!alive()) return;
-        const r = engCalc(S.mm);
+        const r = engCalcCached(S.mm);
         rows.push({ label: S.label, miss: S.miss, aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23] });
         const el = $("#scckeep"); if (el) el.innerHTML = simcKeepTable(m, rows, total);
       }
@@ -1970,8 +1998,8 @@ async function simcOptShort(sets, TG, tick, O) {
   const MAX = SIMC_STMAX, rows = [], st0 = sets[0].mm.status, clone = simcClone;
   for (const S of sets) {
     const row = { label: S.label };
-    const at = async (k, v, other) => { await tick("足りない分を調べています…"); const t = clone(S.mm); t.status.agi = other.agi; t.status.dex = other.dex; t.status[k] = v; return engCalc(t).c[37] >= TG; };
-    const t0 = clone(S.mm); t0.status.agi = MAX; t0.status.dex = MAX; row.aspd = engCalc(t0).c[37];
+    const at = async (k, v, other) => { await tick("足りない分を調べています…"); const t = clone(S.mm); t.status.agi = other.agi; t.status.dex = other.dex; t.status[k] = v; return engCalcCached(t).c[37] >= TG; };
+    const t0 = clone(S.mm); t0.status.agi = MAX; t0.status.dex = MAX; row.aspd = engCalcCached(t0).c[37];
     if (O.aspd && row.aspd < TG) {
       for (const [k, o] of [["agi", { agi: 0, dex: MAX }], ["dex", { agi: MAX, dex: 0 }]]) {
         if (!(await at(k, SIMC_STTOP, o))) { row[k] = null; continue; }
@@ -1980,7 +2008,7 @@ async function simcOptShort(sets, TG, tick, O) {
         row[k] = lo;
       }
     }
-    const tc = clone(S.mm); tc.status.dex = MAX; tc.status.int = MAX; const rc = engCalc(tc); row.castP = (rc.tot.DEX || 0) * 2 + (rc.tot.INT || 0);
+    const tc = clone(S.mm); tc.status.dex = MAX; tc.status.int = MAX; const rc = engCalcCached(tc); row.castP = (rc.tot.DEX || 0) * 2 + (rc.tot.INT || 0);
     if (O.cast && row.castP < 530) { const gap = 530 - row.castP; row.dexC = MAX + Math.ceil(gap / 2); row.intC = MAX + gap; }
     rows.push(row);
   }
@@ -2006,7 +2034,7 @@ async function simcOptRun(m) {
   const tick = async (label) => { if (++n % 4 === 0) { await sleep(0); if (!alive()) throw new Error("changed"); O.prog = label; const el = $("#sccoprog"); if (el) el.textContent = label; } };
   try {
     const sets = simcOptSets(m);
-    for (const S of sets) { const r = engCalc(S.mm); S.bD = (r.tot.DEX || 0) - st.dex; S.bI = (r.tot.INT || 0) - st.int; }
+    for (const S of sets) { const r = engCalcCached(S.mm); S.bD = (r.tot.DEX || 0) - st.dex; S.bI = (r.tot.INT || 0) - st.int; }
     const lim = (k) => Math.max(1, Math.min(MAX, Math.round(+O.min[k] || 1)));     // 下限(「MATK のために INT は 120 以上」など)
     const dLo = Math.max(lim("dex"), O.cast ? Math.max(1, ...sets.map((S) => Math.ceil((530 - (MAX + S.bI)) / 2 - S.bD))) : 1);
     const intNeed = (d) => Math.max(lim("int"), O.cast ? Math.max(1, ...sets.map((S) => 530 - 2 * (d + S.bD) - S.bI)) : (lim("int") > 1 ? 1 : st.int));
@@ -2017,7 +2045,7 @@ async function simcOptRun(m) {
     if (O.aspd) {
       for (let k = 0; k < sets.length; k++) {
         const S = sets[k], label = `「${S.label}」を調べています（${k + 1} / ${sets.length}）…`;
-        const ok = async (a, d) => { await tick(label); const t = clone(S.mm); t.status.agi = a; t.status.dex = d; return engCalc(t).c[37] >= TG; };
+        const ok = async (a, d) => { await tick(label); const t = clone(S.mm); t.status.agi = a; t.status.dex = d; return engCalcCached(t).c[37] >= TG; };
         let a = null;
         if (!(await ok(MAX, MAX))) S.never = true;
         else { let lo = lim("agi"), hi = MAX; while (lo < hi) { const mid = (lo + hi) >> 1; if (await ok(mid, MAX)) hi = mid; else lo = mid + 1; } a = lo; }
@@ -2035,7 +2063,7 @@ async function simcOptRun(m) {
     const best = cands[0];
     for (let guard = 0; guard < 12; guard++) {
       let okA = true, okC = true;
-      for (const S of sets) { await tick("確かめています…"); const t = clone(S.mm); Object.assign(t.status, { agi: best.agi, dex: best.dex, int: best.int }); const r = engCalc(t); if (O.aspd && r.c[37] < TG) okA = false; if (O.cast && (r.tot.DEX || 0) * 2 + (r.tot.INT || 0) < 530) okC = false; }
+      for (const S of sets) { await tick("確かめています…"); const t = clone(S.mm); Object.assign(t.status, { agi: best.agi, dex: best.dex, int: best.int }); const r = engCalcCached(t); if (O.aspd && r.c[37] < TG) okA = false; if (O.cast && (r.tot.DEX || 0) * 2 + (r.tot.INT || 0) < 530) okC = false; }
       if (okA && okC) break;
       if (!okC && best.int < MAX) best.int++; else if (!okA && best.agi < MAX) best.agi++; else break;
       best.cost = cost(best.agi) + cost(best.dex) + cost(best.int);
