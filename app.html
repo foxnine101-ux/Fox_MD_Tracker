@@ -404,7 +404,7 @@ let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出�
 
 function render() {
   if (!DATA || DRAGGING) return;          // 並び替えの途中は描き直さない
-  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
+  if (document.activeElement && document.activeElement.matches("input.skfix, select.skattr, input.eqname, input.eqtag, input.eqcolor, input.srvname, input.unkname, input.ratpick, input.mglink, .simbox input, .simbox select, .simc input, .simc select")) return;   // 名前を入力中・選んでいる途中も
   const now = Date.now() / 1000;
   const groups = buildGroups();
   const chars = charNames();
@@ -862,6 +862,15 @@ td.dm-max{font-weight:700}
 .simc2 details>summary::-webkit-details-marker{display:none}
 .simc2 details[open]>summary{margin-bottom:6px}
 .settabs.right{margin-left:auto}
+.mgcard{border-top:1px solid var(--line);padding:8px 0}
+.mgcard:first-of-type{border-top:0}
+.mgsk{display:inline-block;margin:0 6px 2px 0;padding:0 8px;border-radius:99px;background:var(--chip);font-size:12px}
+.mgsk.dim{opacity:.55}
+.mgtabs{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.mgtab{font:inherit;padding:2px 10px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer}
+.mgtab.on{background:var(--accent,#5b8def);border-color:var(--accent,#5b8def);color:#fff}
+.mgtab small{opacity:.75;margin-left:4px}
+.mgtab.auto{border-style:dashed}
 .dm-gear{margin-top:10px}
 .dm-gh{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:2px}
 .slotmake{margin-top:8px}
@@ -3328,6 +3337,59 @@ function statusHtml(chars, where) {
   return h;
 }
 // 場所ごとの表を、攻撃を受けたときの装備セットごとに分ける(同じ装備セットのシャドウ違いはまとめる)。装備の記録が無い攻撃は「装備の記録なし」
+// ---- 公式モンスター情報(RO公式ツールから、この PC に集める) / 名前の分からない相手(ID○○)の紐付け ----
+function officialHtml() {
+  const O = DATA.official;
+  if (!O || !(typeof LOCAL !== "undefined" && LOCAL)) return "";
+  const st = O.state === "working" ? "調べています…" : O.state === "paused" ? `サイトの調子が悪いので休み中（${when(O.paused_until)} まで）` : O.enabled ? "待機中（アプリを開いてしばらくしたあと、30分おきに足りない分を調べます）" : "オフ";
+  return `<div class="panel simbox"><div class="opts"><b>公式モンスター情報</b>
+      <span class="muted">RO公式ツールから、入った MD で見かけたモンスターの情報（Lv・HP・属性・種族・サイズ・使うスキルなど）を、この PC に集めています。1件ずつ3秒以上あけて、サイトに負荷をかけないようにしています。集めたものは、この PC の中だけに置きます。</span></div>
+    <div class="opts"><span>集めた <b>${fmtN(O.mobs)}</b> 体（詳しい情報つき ${fmtN(O.details)}）／ これから調べる ${fmtN(O.pending)} 件 ／ ${esc(st)}</span>
+      <label><input type="checkbox" id="offon" ${O.enabled ? "checked" : ""}> 自動で集める</label>
+      <button class="ghost" id="offrun" ${O.state === "working" || !O.enabled ? "disabled" : ""}>今すぐ調べる</button>${O.error ? ` <span class="warn">${esc(O.error)}</span>` : ""}</div></div>`;
+}
+const MG_SEL = {};
+const mgKey = (g) => g.where + "|" + (g.named || []).join(",") + "|" + (g.skills.length ? "" : g.ids[0]);
+function mobGroupsHtml() {
+  const G = DATA.mob_groups || [];
+  if (!G.length || !(typeof LOCAL !== "undefined" && LOCAL)) return "";
+  const names = DATA.official_names || [];
+  return `<h2>名前が分からない攻撃者（${G.length} グループ）</h2><div class="panel simbox">
+    <div class="muted" style="margin-bottom:6px">通信で名前を受け取れなかった相手は「ID○○」と出ます（1体ごとの番号で、出会うたびに変わります）。同じ場所で同じ技を使う相手をまとめて、使われた技から候補を出しました。候補を選んで「紐付ける」を押すと、このグループ全部がその名前になります（元には戻せません）。「次からも自動」にチェックすると、この場所でこれらの技を使う相手は、次から自動でその名前にします。
+      ${names.length ? "" : "（公式モンスター情報がまだ集まっていないので、候補は少ないです。しばらくすると増えます）"}</div>
+    <datalist id="mgnames">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
+    ${G.map((g, i) => {
+      const k = mgKey(g), sel = MG_SEL[k] !== undefined ? MG_SEL[k] : (g.auto || (g.cands[0] && g.cands[0].total && g.cands[0].match ? g.cands[0].name : ""));
+      return `<div class="mgcard" data-mgi="${i}"><div class="opts"><span class="tag">${esc(g.where)}</span> <b>ID ${g.ids.length} 体</b><span class="muted">${fmtN(g.hits)} 回</span>
+        <span>${g.skills.map(([s, n]) => `<span class="mgsk${g.named.includes(s) ? "" : " dim"}">${esc(s)} ×${n}</span>`).join("")}</span></div>
+        <div class="mgtabs">${g.cands.length ? g.cands.map((c) => `<button class="mgtab${c.name === sel ? " on" : ""}${c.name === g.auto ? " auto" : ""}" data-mgi="${i}" data-name="${esc(c.name)}" title="${c.seen ? "この場所で見かけたモンスター" : "この場所の出現モンスター一覧にある"}${c.known ? "" : "（使うスキルの情報はまだ無い）"}">${esc(c.name)}<small>${c.total ? `技 ${c.match}/${c.total}` : ""}${c.seen ? " ・見かけた" : ""}</small></button>`).join("") : `<span class="muted">候補がありません（下の欄に名前を入れてください）</span>`}</div>
+        <div class="opts"><input class="mglink" data-mgi="${i}" list="mgnames" placeholder="ほかの名前を入れる" value="${esc(sel)}" style="width:18em">
+          ${g.named.length ? `<label><input type="checkbox" data-mgrem="${i}"> 次からも自動（この場所でこの技）</label>` : ""}
+          <button data-mgdo="${i}">紐付ける</button>${g.auto ? ` <span class="muted">（「${esc(g.auto)}」だけが全部の技に当てはまるので、自動で紐付けます）</span>` : ""}</div></div>`;
+    }).join("")}</div>`;
+}
+function bindMobGroups() {
+  const G = DATA.mob_groups || [], v = $("#view");
+  v.querySelectorAll(".mgtab").forEach((b) => b.onclick = () => {
+    const g = G[+b.dataset.mgi]; if (!g) return;
+    MG_SEL[mgKey(g)] = b.dataset.name;
+    const card = b.closest(".mgcard"); card.querySelectorAll(".mgtab").forEach((x) => x.classList.toggle("on", x === b));
+    card.querySelector("input.mglink").value = b.dataset.name;
+  });
+  v.querySelectorAll("input.mglink").forEach((el) => el.oninput = () => { const g = G[+el.dataset.mgi]; if (g) MG_SEL[mgKey(g)] = el.value; });
+  v.querySelectorAll("[data-mgdo]").forEach((b) => b.onclick = async () => {
+    const g = G[+b.dataset.mgdo]; if (!g) return;
+    const card = b.closest(".mgcard"), name = card.querySelector("input.mglink").value.trim();
+    if (!name) { card.querySelector("input.mglink").focus(); return; }
+    const rem = !!(card.querySelector("[data-mgrem]") || {}).checked;
+    if (!(await askOnce("moblink", `「${g.where}」の名前が分からない相手 ${g.ids.length} 体（${g.named.slice(0, 3).join("・") || "技の手がかりなし"}）を、「${name}」にします。\n記録の名前が書きかわるので、元には戻せません。`, "紐付ける"))) return;
+    await fetch("/api/moblink", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ where: g.where, ids: g.ids, name, remember: rem, skills: g.named }) });
+    delete MG_SEL[mgKey(g)]; load();
+  });
+  const on = $("#offon"), run = $("#offrun"), post = (b) => fetch("/api/official", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+  if (on) on.onchange = async () => { await post({ enabled: on.checked }); load(); };
+  if (run) run.onclick = async () => { run.disabled = true; await post({ run: 1 }); setTimeout(load, 1500); };
+}
 function dmgByGear(cs, w, W, G) {
   const groups = {};                      // 装備セットID -> {"相手|技": dmgMerge と同じ形の行, [10] = 最新のときの 装備+シャドウ の ID}
   for (const c of cs) for (const [id, d] of Object.entries(((DATA.chars[c] || {}).dmg_g || {})[w] || {})) {
@@ -3375,6 +3437,7 @@ function renderDmg(chars, now) {
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
     ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter, undefined, { numeric: true })).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(G[id].name ? G[id].name + "（" + gearText(G[id].p) + "）" : gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(cn(DMG_CHAR)) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
+  h = officialHtml() + mobGroupsHtml() + h;
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
     $("#view").innerHTML = h + skillFixHtml(); bindDmg(); return;
@@ -3454,6 +3517,7 @@ function bindSkillFix() {
 }
 function bindDmg() {
   bindSkillFix();
+  bindMobGroups();
   const c = $("#dmc"), m = $("#dmm"), x = $("#dmclear");
   if (c) c.onchange = () => { DMG_CHAR = c.value; DMG_CHAR_AUTO = false; render(); };
   if (m) m.onchange = () => { DMG_MD = m.value; render(); };

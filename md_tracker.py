@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.33.1"
+VERSION = "2.34.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -40,6 +40,7 @@ CONFIG_FILE = os.path.join(HERE, "設定.json")
 STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
+OFFICIAL_FILE = os.path.join(HERE, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
 SIM_CHARS_FILE = os.path.join(HERE, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
 ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
 SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
@@ -371,7 +372,12 @@ def start_live_server(core, lock, cfg):
                         data["dmg_skills"] = DMG.seen_list()
                         data["dmg_kinds"] = DMG.kinds()
                         data["dmg_sets"] = DMG.sets
-                        data["dmg_mobs"] = DMG.mob_view()   # 相手のモンスターの種族・サイズ・属性など
+                        data["dmg_mobs"] = DMG.mob_view()   # 相手のモンスターの種族・サイズ・属性など(公式サイトの情報があればそれ)
+                        data["mob_groups"] = DMG.unknown_groups()   # 名前の分からない相手(ID○○)を、使った技ごとにまとめたもの+候補
+                        if OFFICIAL is not None:
+                            data["official"] = OFFICIAL.status(OFFICIAL.pending(DMG.wanted()))
+                            with OFFICIAL.lock:                 # 裏の作業が書き足している最中に読まない
+                                data["official_names"] = sorted({r.get("jname") for r in OFFICIAL.mobs.values() if r.get("jname")})
                     data["servers"] = SERVERS.view()          # 見たことのあるサーバー(設定の「記録しない」用)
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
@@ -479,6 +485,42 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps(out), "application/json")
+            if self.path.split("?")[0] == "/api/moblink" and self._local_only():
+                # 名前の分からない相手をまとめて結びつける: {where, ids: ["ID123", …], name, remember: bool, skills: [...]}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 20000)).decode("utf-8"))
+                    if DMG is None:
+                        raise ValueError
+                    name = str(b.get("name") or "").strip()[:60]
+                    if not name:
+                        raise ValueError
+                    with lock:
+                        k = DMG.link_ids(str(b.get("where") or ""), [str(x) for x in (b.get("ids") or [])][:500], name,
+                                         remember=bool(b.get("remember")), skills=[str(x) for x in (b.get("skills") or [])][:30])
+                        DMG.changed = True
+                        save_dmg()
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/official" and self._local_only():
+                # 公式サイトからの収集: {enabled: bool} で入り切り、{run: 1} で「今すぐ調べる」(休み中でなければ)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 2000)).decode("utf-8"))
+                    if OFFICIAL is None or DMG is None:
+                        raise ValueError
+                    started = False
+                    if "enabled" in b:
+                        OFFICIAL.enabled = bool(b["enabled"])
+                        OFFICIAL.save()
+                    if b.get("run"):
+                        with lock:
+                            w = DMG.wanted()
+                        started = OFFICIAL.kick(w)
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps({"ok": True, "started": started}), "application/json")
             if self.path.split("?")[0] == "/api/log" and self._local_only():
                 # 画面側の状況を動作ログに残す(計算係の起動にかかった時間・失敗したときの様子など)
                 try:
@@ -692,6 +734,7 @@ STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 CHARS = None   # char_core.CharCore (あれば)
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
+OFFICIAL = None  # ro_official.Official (公式サイトから集めたモンスター情報)
 
 
 def _write_json(path, obj, indent=None):
@@ -975,6 +1018,14 @@ def main():
             with open(DMG_FILE, "r", encoding="utf-8") as f:
                 DMG.restore(json.load(f))
         print("被ダメの記録: スキル名 {}件 (手直し {}件) / モンスター {}件".format(len(DMG.skills), len(DMG.fix), len(DMG.mobs)))
+        try:
+            import ro_official
+            global OFFICIAL
+            OFFICIAL = ro_official.Official(OFFICIAL_FILE, log=print)
+            DMG.official = OFFICIAL
+            print("公式モンスター情報(この PC に集めたもの): {}件".format(len(OFFICIAL.mobs)))
+        except Exception as e:
+            print("公式モンスター情報が使えません:", e)
         if CHARS is not None:
             DMG.gear = CHARS.gear_profile              # 当たったときの装備(鎧の属性・耐性・DEF・MDEF)も覚える
             if CHARS.set_map:                          # 前の版の装備セットIDを、共通の 装備セット+シャドウセット に付けかえ
@@ -1036,6 +1087,11 @@ def main():
 
     lock = threading.Lock()
     start_live_server(core, lock, cfg)   # 画面は先に出す(Npcapが無くても見られるように)
+    if OFFICIAL is not None and DMG is not None:
+        def _wanted():
+            with lock:
+                return DMG.wanted()
+        OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
     try:
         sn.start()
@@ -1191,12 +1247,21 @@ def run_loop(core, lock, cfg, stop):
     dirty_since = None
     last_stat = time.time()
     last_dmg_save = 0
+    last_link = 0
     while not stop.wait(1):
         if DMG is not None and DMG.changed and time.time() - last_dmg_save > 30:
             with lock:
                 DMG.changed = False
                 save_dmg()
             last_dmg_save = time.time()
+        if DMG is not None and time.time() - last_link > 60:
+            last_link = time.time()
+            with lock:
+                try:
+                    if DMG.apply_auto():
+                        DMG.changed = True
+                except Exception as e:
+                    print("[被ダメ] 名前の自動の紐付けでエラー:", e)
         if time.time() - last_stat > 60:
             last_stat = time.time()
             ops = ", ".join("{:04X}×{}".format(k, v) for k, v in sorted(STATS["ops"].items()))

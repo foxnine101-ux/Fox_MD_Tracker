@@ -186,6 +186,18 @@
   最初のキャラはログイン中のキャラ(`DMG_CHAR_AUTO`。自分で選んだら外す)。場所ごとの表は `dmgByGear` で装備セットごとに分け(シャドウ違いはまとめる。`DATA.equip.sets` に無い古い ID は `_old` = 「前の記録」に一括)、
   各行の「シミュ」(`data-simgo` = [キャラ, 場所, 相手, 技, 装備+シャドウの ID])→ `simcGoDmg` が被ダメシミュを開く
 - v2.33.1: スロットの「元に戻す」は「ロード」に名前を変えて「保存」の横へ(`#sccrevert`。働きは同じ = `model = saved`)
+- **v2.34.0 公式サイトのモンスター情報**(`ro_official.py`。利用者の依頼: 入った MD のモンスター情報を公式サイトから負荷をかけずに自動で集める / 名前が分からない相手は使われたスキルから候補をタブで選んで手で紐付ける):
+  - 取り先: `https://rotool.gungho.jp/`(robots.txt は全部許可)。JSON 検索 `/monster_filtered_search/?name=&detail=1`(名前の部分一致。ID名 `Name`・`JName`・Lv・HP・属性 `property`・種族・サイズ `scale`・種類 `class`・Atk 等。**スキルは無い**)、
+    モンスター詳細 `/monster/<ID名>`(HTML。**使うスキル**・出現マップもある。`parse_detail`)、`/map_filtered_search/?name=`(MD の名前 → `map_file` 「1@ct0」。入ったマップ「0ef1@ct0」の後ろ `ct0` で見分ける)、`/map/<map_file>`(出現モンスター一覧 `parse_map`)。
+    **MD のマップの一覧は当てにならない**: `1@nls1`=26体 / `9@infi`(ファロス)=0体 / `1@ct2`(星座の塔)=536体(全部入り)。だから主な名簿は「見かけたモンスター」(`dmg_core.mob_seen` = 場所 → 名前。出現 09FD〜FF の種類 pkt[4]==5 が monster。フィールドは覚えない)と被ダメの相手の名前。一覧が `SMALL_MAP`(80)以下のマップだけ、そこのモンスターの詳細も集める
+  - **サイトポリシー(/sitepolicy/)**: 著作権は運営(ガンホー)にあり、個人的な利用以外での公開・配布は不可 → **集めたデータは `公式モンスター.json`(各 PC のローカル・.gitignore)だけ。アプリ(exe)にも GitHub にも同梱しない**(先に集めて同梱する案は、これで見送った)
+  - 負荷対策: 1件ずつ・`MIN_GAP`(3秒)+0〜1秒のゆらぎ・裏のスレッド・クッキー無し・同じものは二度取らない(見つからない名前は14日)・429/5xx/タイムアウトで30分休む・1回 `RUN_MAX`(120)件まで・アプリ起動の90秒後から30分おき(やることがあるときだけ)。UA は `Fox_MD_Tracker (personal local cache; …)`
+  - データ優先順位に足した: **実測(JRO_FIX) > 公式サイト(`Official.info`) > ラトリオ(mob_info.json) > rAthena**(`DmgCore.mob_view` が公式を先に引く。語彙は mob_info と同じ: 属性「闇1」・種族「悪魔」・サイズ「中」・ボス = 種類が一般以外なら 1。強さ違いは「185/250」)
+  - 名前の分からない相手 `ID○○` は **1体ごとの番号(出会うたびに変わる)** で、モンスターの種類ではない。だから `DmgCore.unknown_groups()` が 場所 × 使った(名前のある)技の組み合わせ でグループにして、候補 = その場所で見かけた名前 + 公式の出現一覧、
+    技が全部合う順(使った技が1つも合わないものは外す)。`auto` = 全部の技に当てはまるのが見かけたモンスター1つだけのとき(`apply_auto` が60秒おきに自動で紐付ける)。`link_ids(where, ids, name, remember, skills)` は `_rename_who` で記録を付けかえて、`names[ID]` も入れる(その ID の次の被ダメが名前で入る)。
+    `remember` = 決まり `links`([{where, skills, name}])。記録するときに `_rule_name(where, skill)` がその技にぴったり1つの決まりがあれば、その場で名前にする。他の技も使う相手は別グループ(混ぜない)
+  - API: `/api/data` に `mob_groups`・`official`(状態)・`official_names`、POST `/api/moblink`・POST `/api/official`({enabled} / {run:1}。`kick`)。画面は被ダメタブの上(`officialHtml` / `mobGroupsHtml` / `bindMobGroups`)
+  - テスト: 実ページを保存した fixture で `parse_*`・間隔・キャッシュ・429・上限を確認(scratchpad の `t_official.py`)、本物のサイトで 4 リクエストだけ実地確認ずみ。画面は `ui_server9.py`(`Official` の fetch を差しかえてサイトを呼ばない)
 - 残り: ~~5 ダメージ・被ダメとの連携~~(済)。与ダメージ(攻撃側)の計算はまだ(被ダメの記録から、そのときのキャラ・装備・敵・技を計算機に入れる)。ほかに 性能カスタマイズ・時限効果・オートスペル、二刀流の左手、シャドウのエンチャント、Fox のランダムオプション → ラトリオの番号
 - 第3段階への利用者の注文(済): 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
@@ -211,7 +223,7 @@
 
 ## 利用者のファイル(exe と同じフォルダ。git には入れない)
 - 利用者のローカルの置き場所: `C:\Users\fuso1\OneDrive\Desktop\Fox_MD_Tracker`(実測データはここ。読むだけ。`設定.json` は送信キーがあるので開かない)
-`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `計算機のキャラ.json` `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
+`設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `計算機のキャラ.json` `公式モンスター.json`(公式サイトから集めた、その PC だけのデータ。配らない) `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
 
 ## テストのしかた
 - `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`

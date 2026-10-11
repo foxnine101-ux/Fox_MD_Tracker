@@ -24,6 +24,8 @@ MDごと・キャラごとに「相手|技」でまとめて、回数・最大�
   - 「武器」属性の技は、モンスターが使うと無属性
 """
 import json
+import re
+import unicodedata
 import struct
 import time
 from collections import deque
@@ -143,6 +145,11 @@ def where_at(p, tick):
     return round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f)
 
 
+def _named(skill):
+    """名前の付いた技か(「通常攻撃」や、名前が分からない「スキル717」は、相手をしぼる手がかりにならない)。"""
+    return bool(skill) and skill != "通常攻撃" and not re.match(r"^スキル\d+$", skill)
+
+
 def _merge(x, v):
     """記録の行 v を x にまとめる [回数, 合計, 最大, 最後, ヒット, 近接の合計, 遠距離の合計, 最新のダメージ]
     (前の版の行は5つか7つ。[7] 最新のダメージ は足さずに、新しいほうを残す)"""
@@ -189,6 +196,9 @@ class DmgCore(object):
         self.info = info or {}              # 番号 -> [種類, 属性, 射程, 印](skill_info.json)
         self.efix = dict(efix or {})        # 手で直した種類・属性(番号 -> {"ele":, "kind":})。こっちが優先
         self.mobs = mobs or {}              # モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json)
+        self.official = None                # ro_official.Official(公式サイトから集めた、この PC だけのデータ)。あれば mob_info より優先
+        self.mob_seen = {}                  # 場所(MD) -> {見かけたモンスターの名前: 最後に見た時刻}(公式の情報を集める名簿)
+        self.links = []                     # 手で結びつけた「ID○○ → 名前」を、次からも自動にする決まり [{where, skills, name}]
         self.id_used = set()                # 名前がわからず「ID○○」で記録した相手(あとで名前がわかったら付けかえる)
         self.seen = {}                      # "番号" -> {n, max, last, where, src, lv}
         self.raw = {}                       # "08C8"/"01DE"/"unknown" -> [{t, char, where, hex, ...}]
@@ -213,7 +223,8 @@ class DmgCore(object):
     # ---------------- 保存 ----------------
     def snapshot(self):
         return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen,
-                "sets": self.sets, "gstats": self.gstats, "ails": self.ails, "acts": self.acts}
+                "sets": self.sets, "gstats": self.gstats, "ails": self.ails, "acts": self.acts,
+                "mob_seen": self.mob_seen, "links": self.links}
 
     def restore(self, d):
         if d:
@@ -224,6 +235,8 @@ class DmgCore(object):
             self.gstats = d.get("gstats") or {}
             self.ails = d.get("ails") or {}
             self.acts = d.get("acts") or {}
+            self.mob_seen = d.get("mob_seen") or {}
+            self.links = d.get("links") or []
             # 「ID○○」のままの相手は、名前がわかったら付けかえられるように覚えておく
             for per_char in self.stats.values():
                 for dd in per_char.values():
@@ -492,7 +505,7 @@ class DmgCore(object):
                 self._pos(key, op, pkt)
                 self._move(key, op, pkt)
             elif op in OP_SPAWN:
-                self._spawn(op, pkt)
+                self._spawn(op, pkt, key)
             elif op == OP_UNIT and len(pkt) >= 12:
                 uid, owner = struct.unpack_from("<II", pkt, 4)
                 if len(self.units) > MOBS_MAX:
@@ -582,11 +595,15 @@ class DmgCore(object):
             if not self._mine(key, tgt) or src == tgt or self._mine(key, src):
                 return
             self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res}, keep=True)
+            skill = self.skill_name(skid)
             who = self.names.get(src)
+            if not who:
+                who = self._rule_name(self._where(key), skill)
+                if who:
+                    self.names[src] = who
             if not who:
                 who = "ID{}".format(src)
                 self.id_used.add(src)
-            skill = self.skill_name(skid)
             self.last_act[key] = (now, who, skill)
             name = self.md.name_for(key)
             if name:
@@ -734,7 +751,23 @@ class DmgCore(object):
                 self.id_used.discard(aid)
                 self._rename_who("ID{}".format(aid), name)
 
-    def _spawn(self, op, pkt):
+    def _seen_mob(self, key, aid):
+        """見かけたモンスター(種類 5)の名前を、いる場所ごとに覚える。公式サイトから情報を集めるときの名簿になる(フィールドは覚えない)。"""
+        name = self.names.get(aid)
+        if not name or name.startswith("#"):
+            return
+        where = self._where(key)
+        if where.startswith("フィールド") or where == "不明":
+            return
+        d = self.mob_seen.setdefault(where, {})
+        now = int(time.time())
+        if name not in d:
+            d[name] = now
+            self.changed = True
+        elif now - d[name] > 3600:
+            d[name] = now
+
+    def _spawn(self, op, pkt, key=None):
         # 0x09FD〜FF: [op 2][長さ 2][種類 1][ID 4][GID 4] … [最大HP 4][HP 4][ボス 1][体 2][名前(最後まで)]
         at = SPAWN_NAME_AT[op]
         if len(pkt) <= at:
@@ -743,6 +776,8 @@ class DmgCore(object):
         aid = struct.unpack_from("<I", pkt, 5)[0]
         self._spawn_pos(op, pkt, aid)
         self._name(aid, pkt[at:at + 24], op, pkt)
+        if key is not None and pkt[4] == 5:
+            self._seen_mob(key, aid)
 
     def _gear_set(self, name, now):
         """いまの装備のまとめを、同じものは同じIDにして覚える。わからなければ ""。"""
@@ -768,14 +803,18 @@ class DmgCore(object):
             return
         if src not in self.names and src in self.units:
             src = self.units[src]                     # 技の設置物の当たり → 置いた人
+        skill = self.skill_name(skid)
+        where = self._where(key)
         who = self.names.get(src)
+        if not who:
+            who = self._rule_name(where, skill)             # 「次からも自動」にした結びつけがあれば、その名前
+            if who:
+                self.names[src] = who
         if not who:
             who = "ID{}".format(src)
             if src not in self.id_used:
                 self._raw_id(key, src)
             self.id_used.add(src)
-        skill = self.skill_name(skid)
-        where = self._where(key)
         self.last_act[key] = (time.time(), who, skill)
         now = int(time.time())
         if skid:
@@ -831,13 +870,148 @@ class DmgCore(object):
         """キャラの状態異常と、ダメージの無い技(MDごと)。"""
         return self.ails.get(name) or {}, self.acts.get(name) or {}
 
+    # ---------------- 公式サイトの情報と、名前の分からない相手 ----------------
+    def wanted(self):
+        """公式サイトから集めるもの: {"names": [名前, …](大事な順), "maps": [[MD の名前, [入ったマップの後ろの部分, …]], …]}"""
+        hits = {}
+        for per_char in self.stats.values():
+            for rows in per_char.values():
+                for k, v in rows.items():
+                    w = k.split("|")[0]
+                    if w and not (w.startswith("ID") and w[2:].isdigit()) and not w.startswith("#"):
+                        hits[w] = hits.get(w, 0) + v[0]
+        names = sorted(hits, key=lambda n: (n in self.mobs, -hits[n]))             # 被ダメの相手が先。mob_info に無いものを先に
+        seen = sorted(((t, n) for d in self.mob_seen.values() for n, t in d.items() if n not in hits), key=lambda x: (x[1] in self.mobs, -x[0]))
+        for _, n in seen:
+            if n not in names:
+                names.append(n)
+        maps, by = [], {}
+        for h in getattr(self.md, "history", []) or []:
+            md, m = h.get("md") or "", h.get("map") or ""
+            if md and "@" in m:
+                by.setdefault(md, [])
+                suf = m.split("@", 1)[1]
+                if suf not in by[md]:
+                    by[md].append(suf)
+        for md, sufs in by.items():
+            maps.append([md, sufs])
+        return {"names": names, "maps": maps}
+
+    def _suffixes(self, where):
+        """その場所(MD の名前)で入ったマップの後ろの部分。「MD ct2」のような名前なら ct2 そのもの。"""
+        if where.startswith("MD "):
+            return [where[3:]]
+        out = []
+        for h in getattr(self.md, "history", []) or []:
+            if (h.get("md") or "") == where and "@" in (h.get("map") or ""):
+                s = h["map"].split("@", 1)[1]
+                if s not in out:
+                    out.append(s)
+        return out
+
+    def _rule_name(self, where, skill):
+        """「次からも自動」にした決まりのうち、この場所でこの技に当てはまるものが1つだけなら、その名前。"""
+        hit = {r.get("name") for r in self.links if r.get("where") == where and skill in (r.get("skills") or [])}
+        return next(iter(hit)) if len(hit) == 1 else None
+
+    def unknown_groups(self, top=40):
+        """名前の分からない相手(ID○○)を、場所と「使った技の組み合わせ」で1グループにまとめて、公式サイトの情報から候補を出す。
+        ID は出てくるたびに変わる(1体ごとの番号)ので、1つずつ結びつけても次に効かない。同じ技を使う相手をまとめて決められるようにする。"""
+        off = self.official
+        norm = (lambda s: unicodedata.normalize("NFKC", str(s or "")).replace(" ", "")) if "unicodedata" in globals() else (lambda s: s)
+        ids = {}                                       # 場所 -> ID名 -> {技: 回数}
+        def add(where, k, n):
+            who, _, skill = k.partition("|")
+            if who.startswith("ID") and who[2:].isdigit():
+                d = ids.setdefault(where, {}).setdefault(who, {})
+                d[skill] = d.get(skill, 0) + n
+        for per_char in self.stats.values():
+            for where, rows in per_char.items():
+                for k, v in rows.items():
+                    add(where, k, v[0])
+        for per_char in self.acts.values():
+            for where, rows in per_char.items():
+                for k, v in rows.items():
+                    add(where, k, v[0])
+        groups = []
+        for where, per_id in ids.items():
+            by = {}
+            for who, sk in per_id.items():
+                named = tuple(sorted(s for s in sk if _named(s)))
+                g = by.setdefault(named, {"where": where, "named": named, "ids": [], "skills": {}})
+                g["ids"].append(who)
+                for s, n in sk.items():
+                    g["skills"][s] = g["skills"].get(s, 0) + n
+            pool = {}
+            for n in (self.mob_seen.get(where) or {}):
+                pool[n] = True
+            if off is not None:
+                for n in off.monsters_on(where, self._suffixes(where)):
+                    pool.setdefault(n, False)
+            for g in by.values():
+                used = {norm(s) for s in g["named"]}
+                cands = []
+                for n, seen in pool.items():
+                    sk = {norm(s) for s in (off.skills_of(n) if off is not None else [])}
+                    got = len(used & sk)
+                    if used and not got and sk:
+                        continue                                  # 使った技が1つも合わないモンスターは候補にしない
+                    cands.append({"name": n, "match": got, "total": len(used), "seen": bool(seen), "known": bool(sk), "extra": len(sk - used)})
+                cands.sort(key=lambda c: (-(c["match"] / c["total"] if c["total"] else 0), not c["seen"], not c["known"], c["extra"], c["name"]))
+                full = [c for c in cands if c["total"] and c["match"] == c["total"] and c["seen"] and c["known"]]
+                auto = full[0]["name"] if len(full) == 1 and sum(1 for c in cands if c["total"] and c["match"] == c["total"]) == 1 else None
+                groups.append({"where": where, "ids": sorted(g["ids"]), "named": list(g["named"]),
+                               "skills": sorted(g["skills"].items(), key=lambda kv: -kv[1]), "hits": sum(g["skills"].values()),
+                               "cands": cands[:10], "auto": auto})
+        groups.sort(key=lambda g: -g["hits"])
+        return groups[:top]
+
+    def link_ids(self, where, ids, name, remember=False, skills=None):
+        """名前の分からない相手(ID○○)をまとめて name にする。remember なら、次からもこの場所でこれらの技を使う相手は name にする。"""
+        n = 0
+        for who in ids:
+            if not (who.startswith("ID") and who[2:].isdigit()):
+                continue
+            self._rename_who(who, name)
+            aid = int(who[2:])
+            self.names[aid] = name
+            self.id_used.discard(aid)
+            n += 1
+        if remember and skills:
+            self.links = [r for r in self.links if not (r.get("where") == where and r.get("name") == name)]
+            self.links.append({"where": where, "skills": sorted(set(skills)), "name": name})
+        if n:
+            self.changed = True
+        return n
+
+    def apply_auto(self):
+        """決まり(次からも自動)と、候補が1つに決まるものを、いまある ID○○ に当てる。何件つなげたかを返す。"""
+        done = 0
+        for g in self.unknown_groups(top=200):
+            name = None
+            sk = {s for s, _ in g["skills"]}
+            hit = {r["name"] for r in self.links if r.get("where") == g["where"] and sk and sk <= set(r.get("skills") or [])}
+            if len(hit) == 1:
+                name = next(iter(hit))
+            elif g["auto"]:
+                name = g["auto"]
+            if name:
+                done += self.link_ids(g["where"], g["ids"], name)
+                self.log("[被ダメ] 名前の分からない相手 {} 体を「{}」にしました({})".format(len(g["ids"]), name, g["where"]))
+        return done
+
     def mob_view(self):
         """記録にある相手のうち、モンスターのデータがあるものだけ {名前: {lv, hp, race, size, ele, boss}}。"""
         who = {r.get("src") for r in self.recent}
         for per_char in self.stats.values():
             for d in per_char.values():
                 who.update(k.split("|")[0] for k in d)
-        return {w: self.mobs[w] for w in who if w in self.mobs}
+        out = {}
+        for w in who:
+            info = (self.official.info(w) if self.official is not None else None) or self.mobs.get(w)
+            if info:
+                out[w] = info
+        return out
 
     def for_char(self, name, top=40):
         """キャラの被ダメまとめ(MDごと、最大ダメージ順に top 件)。"""
