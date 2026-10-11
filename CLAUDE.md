@@ -198,6 +198,8 @@
     `remember` = 決まり `links`([{where, skills, name}])。記録するときに `_rule_name(where, skill)` がその技にぴったり1つの決まりがあれば、その場で名前にする。他の技も使う相手は別グループ(混ぜない)
   - API: `/api/data` に `mob_groups`・`official`(状態)・`official_names`、POST `/api/moblink`・POST `/api/official`({enabled} / {run:1}。`kick`)。画面は被ダメタブの上(`officialHtml` / `mobGroupsHtml` / `bindMobGroups`)
   - テスト: 実ページを保存した fixture で `parse_*`・間隔・キャッシュ・429・上限を確認(scratchpad の `t_official.py`)、本物のサイトで 4 リクエストだけ実地確認ずみ。画面は `ui_server9.py`(`Official` の fetch を差しかえてサイトを呼ばない)
+- **v2.35.0 ステ振りの相談**(利用者の指定): 目標 ASPD(`SIMC.opt.target`。`SIMC_ASPD`=193 は ASPD の欄など他の枠の印のまま)、対象は装備スロットのタグ × シャドウのスロットのタグ(`mainSel` / `shSel`。"now" = 計算機にいま入っているもの。`simcOptSets`。最大 `SIMC_OPT_COMBO_MAX`=16通り)。
+  **ラトリオは基本ステータスを 130 に切らない**(AGI 300 でも ASPD が伸びる)ので、届かないときは `SIMC_STTOP`(400)まで探して「いくつ要るか」を出す(`simcOptShort`、`simcMinStat`、`simcNeedKick`)。ふつうの探索は 130 まで。画面の言葉は「（1個入らず）」ではなく「（未装備 1）」
 - 残り: ~~5 ダメージ・被ダメとの連携~~(済)。与ダメージ(攻撃側)の計算はまだ(被ダメの記録から、そのときのキャラ・装備・敵・技を計算機に入れる)。ほかに 性能カスタマイズ・時限効果・オートスペル、二刀流の左手、シャドウのエンチャント、Fox のランダムオプション → ラトリオの番号
 - 第3段階への利用者の注文(済): 数が多いので目的別のタブ。加えて、**他職の支援はフィルター(絞り込み)と検索窓を付ける**
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、

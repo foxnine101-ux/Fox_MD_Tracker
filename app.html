@@ -1408,7 +1408,7 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, scope: "cur", busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => r.json()).catch(() => ({})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
@@ -1470,7 +1470,7 @@ async function simcImportPicked() {
 }
 // 「ASPD 193 まで あといくつ」では動かしようがないので、AGI・DEX をいくつにすれば届くか(届いているなら、いくつまで下げられるか)を出す。
 // それぞれ単独で動かした場合。計算係で 1〜上限 を二分探索する(1つのステータスで 8回ほど計算)
-const SIMC_ASPD = 193, SIMC_STMAX = 130;
+const SIMC_ASPD = 193, SIMC_STMAX = 130, SIMC_STTOP = 400;      // 130 = ふつうの上限。必要な値を出すときは 400 まで探す(130 を超えても計算は伸びる)
 function simcNeedKick() {
   const ch = simcCur(); if (!ch || !ENG.ready) return;
   const sig = JSON.stringify(ch.model);
@@ -1480,9 +1480,10 @@ function simcNeedKick() {
     const out = { sig };
     try {
       for (const k of ["agi", "dex"]) {
-        const cur = ch.model.status[k] || 1, top = Math.max(SIMC_STMAX, cur);
+        const cur = ch.model.status[k] || 1;
         const at = async (v) => { await sleep(0); const now = simcCur(); if (!now || JSON.stringify(now.model) !== sig) throw new Error("changed"); const m = JSON.parse(sig); m.status[k] = v; return engCalc(m).c[37] >= SIMC_ASPD; };
-        if (!(await at(top))) { out[k] = null; continue; }
+        let top = Math.max(SIMC_STMAX, cur);
+        if (!(await at(top))) { top = SIMC_STTOP; if (!(await at(top))) { out[k] = null; continue; } }       // 130 まででは届かない → 400 まで探す
         let lo = 1, hi = top;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
         out[k] = lo;
@@ -1498,7 +1499,8 @@ function simcNeedText(m) {
   const reached = (SIMC.res && SIMC.res.c[37]) >= SIMC_ASPD;
   const one = (k, label) => {
     const cur = m.status[k] || 1, v = nd[k];
-    if (v === null || v === undefined) return `${label} だけでは届かない`;
+    if (v === null || v === undefined) return `<span class="warn">${label} だけでは届かない（${SIMC_STTOP} まで振っても）</span>`;
+    if (v > SIMC_STMAX) return `<span class="warn">${label} ${cur}→<b>${v}</b>（+${v - cur}。ふつうの上限 ${SIMC_STMAX} を ${v - SIMC_STMAX} 超える）</span>`;
     if (v === cur) return reached ? `${label} ${cur} は削れない` : `${label} ${cur}`;
     return `${label} ${cur}→<b>${v}</b>（${v > cur ? "+" : "−"}${Math.abs(v - cur)}）`;
   };
@@ -1839,9 +1841,10 @@ async function simcTagKick(m) {
 // ステータス・シャドウ装備・支援はいまのまま。AGI・DEX の必要な値は、片方だけ動かした場合(1セットにつき 20回ほど計算するので、裏で少しずつ)
 const simcMultiSig = (m) => JSON.stringify(m) + "|" + simcSetList(m, false).tabs.map((x) => x.sid).join(",");
 async function simcMinStat(base, k, alive) {
-  const cur = base.status[k] || 1, top = Math.max(SIMC_STMAX, cur);
+  const cur = base.status[k] || 1;
   const at = async (v) => { await sleep(0); if (!alive()) throw new Error("changed"); const mm = JSON.parse(JSON.stringify(base)); mm.status[k] = v; return engCalc(mm).c[37] >= SIMC_ASPD; };
-  if (!(await at(top))) return null;
+  let top = Math.max(SIMC_STMAX, cur);
+  if (!(await at(top))) { top = SIMC_STTOP; if (!(await at(top))) return null; }
   let lo = 1, hi = top;
   while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(mid)) hi = mid; else lo = mid + 1; }
   return lo;
@@ -1871,9 +1874,9 @@ function simcMultiKick(m) {
 }
 function simcMultiTable(m, rows, total) {
   const n = simcNum, st = m.status;
-  const need = (v, cur) => v === null || v === undefined ? `<span class="warn">届かない</span>` : v <= cur ? `<span class="good">${v}</span> <span class="muted">（${v - cur || "±0"}）</span>` : `<b>${v}</b> <span class="muted">（+${v - cur}）</span>`;
+  const need = (v, cur) => v === null || v === undefined ? `<span class="warn">届かない</span>` : v > SIMC_STMAX ? `<b class="warn">${v}</b> <span class="muted">（+${v - cur}・上限超え）</span>` : v <= cur ? `<span class="good">${v}</span> <span class="muted">（${v - cur || "±0"}）</span>` : `<b>${v}</b> <span class="muted">（+${v - cur}）</span>`;
   let h = `<table class="multi"><tr><th>セット</th><th>ASPD</th><th>193 に要る AGI</th><th>193 に要る DEX</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th></tr>`
-    + rows.map((x) => `<tr><td>${x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span> <span class="muted">${esc(x.st.name || x.st.auto || "")}</span>` : esc(x.label)}${x.miss ? ` <span class="warn" title="名前が合わなくて入らなかった装備・カードがあります">（${x.miss}個入らず）</span>` : ""}</td>
+    + rows.map((x) => `<tr><td>${x.st ? `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.label)}</span> <span class="muted">${esc(x.st.name || x.st.auto || "")}</span>` : esc(x.label)}${x.miss ? ` <span class="warn" title="ラトリオの候補に同じ名前が無くて、装備できなかったものがあります（未装備）">（未装備 ${x.miss}）</span>` : ""}</td>
       <td class="v"><span class="${x.aspd >= SIMC_ASPD ? "good" : ""}">${n(x.aspd, 1)}</span></td><td>${need(x.agi, st.agi)}</td><td>${need(x.dex, st.dex)}</td>
       <td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td><td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td></tr>`).join("") + `</table>`;
   if (rows.length < total) return h + `<div class="muted">計算中… ${rows.length} / ${total}</div>`;
@@ -1905,27 +1908,71 @@ const simcPointsHtml = (m) => { const P = simcPoints(m); return P ? `残りス�
 // ---- ステ振りの相談: AGI・DEX は ASPD に、DEX・INT は変動詠唱に同時に効く。条件を満たす振り方のうち、使うポイントがいちばん少ないものを探す ----
 // DEX を上から1ずつ下げながら「その DEX で 193 に要る最小の AGI」をたどる(AGI は増える一方なので、階段をなぞるだけで済む)。
 // 変動詠唱は 詠唱の値 = (DEX+補正)×2 + (INT+補正) ≥ 530 から、その DEX で要る INT が決まる。補正はセットごとに計算係で測る。最後に計算係で確かめる
+// ステ振りの相談の対象: 選んだ装備スロット × 選んだシャドウのスロット(「いまの装備」「いまのシャドウ」は、計算機にいま入っているもの)
+const SIMC_OPT_COMBO_MAX = 16;
+function simcOptSel(m) {
+  const O = SIMC.opt, okM = new Set(simcSetList(m, false).tabs.map((x) => x.sid)), okS = new Set(simcSetList(m, true).tabs.map((x) => x.sid));
+  O.mainSel = O.mainSel.filter((x) => x === "now" || okM.has(x)); if (!O.mainSel.length) O.mainSel = ["now"];
+  O.shSel = O.shSel.filter((x) => x === "now" || okS.has(x)); if (!O.shSel.length) O.shSel = ["now"];
+  return { main: O.mainSel, sh: O.shSel };
+}
+function simcOptSets(m) {
+  const sel = simcOptSel(m), tabM = Object.fromEntries(simcSetList(m, false).tabs.map((x) => [x.sid, x.st])), tabS = Object.fromEntries(simcSetList(m, true).tabs.map((x) => [x.sid, x.st]));
+  const apply = (mm, st, shadow) => { if (st.sim) simcApplyFrag(mm, st.sim, shadow); else simcWear(mm, st.items || [], shadow); };
+  const out = [];
+  for (const a of sel.main) for (const s of sel.sh) {
+    if (out.length >= SIMC_OPT_COMBO_MAX) break;
+    const mm = simcClone(m);
+    if (a !== "now") apply(mm, tabM[a], false);
+    if (s !== "now") apply(mm, tabS[s], true);
+    const la = a === "now" ? "いまの装備" : tabM[a].tag, ls = s === "now" ? "" : tabS[s].tag;
+    out.push({ label: a === "now" && s === "now" ? "いまの装備" : ls ? (a === "now" ? "いまの装備" : la) + "・" + ls : la, mm });
+  }
+  return out;
+}
+// 届かないとき: 上限(130)まで振った場合にどれだけ足りないか、と、上限を超えてでもいくつ要るか(AGI だけ / DEX だけ / INT だけ)
+async function simcOptShort(sets, TG, tick, O) {
+  const MAX = SIMC_STMAX, rows = [], st0 = sets[0].mm.status, clone = simcClone;
+  for (const S of sets) {
+    const row = { label: S.label };
+    const at = async (k, v, other) => { await tick("足りない分を調べています…"); const t = clone(S.mm); t.status.agi = other.agi; t.status.dex = other.dex; t.status[k] = v; return engCalc(t).c[37] >= TG; };
+    const t0 = clone(S.mm); t0.status.agi = MAX; t0.status.dex = MAX; row.aspd = engCalc(t0).c[37];
+    if (O.aspd && row.aspd < TG) {
+      for (const [k, o] of [["agi", { agi: 0, dex: MAX }], ["dex", { agi: MAX, dex: 0 }]]) {
+        if (!(await at(k, SIMC_STTOP, o))) { row[k] = null; continue; }
+        let lo = MAX + 1, hi = SIMC_STTOP;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(k, mid, o)) hi = mid; else lo = mid + 1; }
+        row[k] = lo;
+      }
+    }
+    const tc = clone(S.mm); tc.status.dex = MAX; tc.status.int = MAX; const rc = engCalc(tc); row.castP = (rc.tot.DEX || 0) * 2 + (rc.tot.INT || 0);
+    if (O.cast && row.castP < 530) { const gap = 530 - row.castP; row.dexC = MAX + Math.ceil(gap / 2); row.intC = MAX + gap; }
+    rows.push(row);
+  }
+  return rows;
+}
 async function simcOptRun(m) {
   const O = SIMC.opt, sig = JSON.stringify(m), st = m.status, MAX = SIMC_STMAX, cost = (v) => ENG.hm.GetStatusTotalCost(v);
+  const TG = Math.max(100, Math.min(193, +O.target || 193));
   const clone = (x) => JSON.parse(JSON.stringify(x));
   const alive = () => { const c = simcCur(); return !!c && O.busy && JSON.stringify(c.model) === sig; };
   O.busy = true; O.res = null; O.prog = "準備中…"; render();
   let n = 0;
   const tick = async (label) => { if (++n % 4 === 0) { await sleep(0); if (!alive()) throw new Error("changed"); O.prog = label; const el = $("#sccoprog"); if (el) el.textContent = label; } };
   try {
-    const sets = [{ label: "いまの装備", mm: clone(m) }];
-    if (O.scope === "all") for (const { st: T } of simcSetList(m, false).tabs) { const mm = clone(m); if (T.sim) simcApplyFrag(mm, T.sim, false); else simcWear(mm, T.items || [], false); sets.push({ label: T.tag, mm }); }
+    const sets = simcOptSets(m);
     for (const S of sets) { const r = engCalc(S.mm); S.bD = (r.tot.DEX || 0) - st.dex; S.bI = (r.tot.INT || 0) - st.int; }
     const lim = (k) => Math.max(1, Math.min(MAX, Math.round(+O.min[k] || 1)));     // 下限(「MATK のために INT は 120 以上」など)
     const dLo = Math.max(lim("dex"), O.cast ? Math.max(1, ...sets.map((S) => Math.ceil((530 - (MAX + S.bI)) / 2 - S.bD))) : 1);
     const intNeed = (d) => Math.max(lim("int"), O.cast ? Math.max(1, ...sets.map((S) => 530 - 2 * (d + S.bD) - S.bI)) : (lim("int") > 1 ? 1 : st.int));
-    if (dLo > MAX) { O.res = { sig, fail: "DEX と INT を上限（" + MAX + "）まで振っても、変動詠唱なし（詠唱の値 530）に届きません。" }; return; }
+    const short = async (why) => { O.res = { sig, target: TG, fail: why, short: await simcOptShort(sets, TG, tick, O), aspd: O.aspd, cast: O.cast }; };
+    if (dLo > MAX) return await short("DEX と INT を上限（" + MAX + "）まで振っても、変動詠唱なし（詠唱の値 530）に届きません。");
     const agiNeed = {};
     for (let d = dLo; d <= MAX; d++) agiNeed[d] = O.aspd ? lim("agi") : Math.max(lim("agi"), lim("agi") > 1 ? 1 : st.agi);
     if (O.aspd) {
       for (let k = 0; k < sets.length; k++) {
         const S = sets[k], label = `「${S.label}」を調べています（${k + 1} / ${sets.length}）…`;
-        const ok = async (a, d) => { await tick(label); const t = clone(S.mm); t.status.agi = a; t.status.dex = d; return engCalc(t).c[37] >= SIMC_ASPD; };
+        const ok = async (a, d) => { await tick(label); const t = clone(S.mm); t.status.agi = a; t.status.dex = d; return engCalc(t).c[37] >= TG; };
         let a = null;
         if (!(await ok(MAX, MAX))) S.never = true;
         else { let lo = lim("agi"), hi = MAX; while (lo < hi) { const mid = (lo + hi) >> 1; if (await ok(mid, MAX)) hi = mid; else lo = mid + 1; } a = lo; }
@@ -1937,33 +1984,46 @@ async function simcOptRun(m) {
     }
     const cands = [];
     for (let d = dLo; d <= MAX; d++) { const a = agiNeed[d], i = intNeed(d); if (a === null || i > MAX) continue; cands.push({ agi: a, dex: d, int: i, cost: cost(a) + cost(d) + cost(i) }); }
-    if (!cands.length) { O.res = { sig, fail: "AGI と DEX を上限（" + MAX + "）まで振っても、ASPD 193 に届かない装備があります" + (sets.some((S) => S.never) ? "（" + sets.filter((S) => S.never).map((S) => S.label).join("・") + "）" : "") + "。装備・支援（速度ポーションなど）を見直すか、対象から外してください。" }; return; }
+    if (!cands.length) return await short("AGI と DEX を上限（" + MAX + "）まで振っても、ASPD " + TG + " に届かない装備があります" + (sets.some((S) => S.never) ? "（" + sets.filter((S) => S.never).map((S) => S.label).join("・") + "）" : "") + "。");
     cands.sort((x, y) => x.cost - y.cost || y.dex - x.dex);
     // 計算係で確かめる(ステータスの値で変わる補正があると、式どおりにならないことがある → 足りなければ INT / AGI を1ずつ足す)
     const best = cands[0];
     for (let guard = 0; guard < 12; guard++) {
       let okA = true, okC = true;
-      for (const S of sets) { await tick("確かめています…"); const t = clone(S.mm); Object.assign(t.status, { agi: best.agi, dex: best.dex, int: best.int }); const r = engCalc(t); if (O.aspd && r.c[37] < SIMC_ASPD) okA = false; if (O.cast && (r.tot.DEX || 0) * 2 + (r.tot.INT || 0) < 530) okC = false; }
+      for (const S of sets) { await tick("確かめています…"); const t = clone(S.mm); Object.assign(t.status, { agi: best.agi, dex: best.dex, int: best.int }); const r = engCalc(t); if (O.aspd && r.c[37] < TG) okA = false; if (O.cast && (r.tot.DEX || 0) * 2 + (r.tot.INT || 0) < 530) okC = false; }
       if (okA && okC) break;
       if (!okC && best.int < MAX) best.int++; else if (!okA && best.agi < MAX) best.agi++; else break;
       best.cost = cost(best.agi) + cost(best.dex) + cost(best.int);
     }
     const alts = [];
     for (const c of cands.slice(1)) { if ([best].concat(alts).every((x) => Math.abs(x.dex - c.dex) >= 4)) alts.push(c); if (alts.length >= 4) break; }
-    O.res = { sig, best, alts, sets: sets.map((S) => S.label), calcs: n, aspd: O.aspd, cast: O.cast };
+    O.res = { sig, best, alts, target: TG, sets: sets.map((S) => S.label), calcs: n, aspd: O.aspd, cast: O.cast };
   } catch (e) { if (e.message !== "changed") { console.warn("opt", e); O.res = { sig, fail: "計算できませんでした: " + e.message }; } }
   finally { O.busy = false; O.prog = ""; render(); }
 }
 function simcOptHtml(m) {
-  const O = SIMC.opt, st = m.status, P = simcPoints(m), nTabs = simcSetList(m, false).tabs.length;
-  let h = `<div class="bfbar"><span class="muted">条件</span><label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD 193</label><label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
-      <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}
-      <span class="muted">対象</span><select id="sos"><option value="cur" ${O.scope === "cur" ? "selected" : ""}>いまの装備だけ</option><option value="all" ${O.scope === "all" ? "selected" : ""} ${nTabs ? "" : "disabled"}>いまの装備 ＋ 登録した全部のセット（${nTabs}）</option></select>
-      <button id="sogo" ${O.busy || !(O.aspd || O.cast) ? "disabled" : ""}>${O.busy ? "計算中…" : "いちばん安い振り方を探す"}</button><span class="muted" id="sccoprog">${esc(O.prog || "")}</span></div>`;
+  const O = SIMC.opt, st = m.status, P = simcPoints(m), sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs;
+  const combos = sel.main.length * sel.sh.length;
+  const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
+  let h = `<div class="bfbar"><span class="muted">条件</span>
+      <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
+      <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
+      <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
+    <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid), s2)).join("")}</div>
+      <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid), s2)).join("")}</div>
+      <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ調べます）</span>` : ""}</span></div>
+    <div class="bfbar"><button id="sogo" ${O.busy || !(O.aspd || O.cast) ? "disabled" : ""}>${O.busy ? "計算中…" : "いちばん安い振り方を探す"}</button><span class="muted" id="sccoprog">${esc(O.prog || "")}</span></div>`;
   const R = O.res;
-  if (!R) return h + `<div class="muted">AGI・DEX・INT の振り方のうち、条件を満たして、使うステータスポイントがいちばん少ないものを探します。ほかのステータス・装備・支援は、いまのままで計算します（${O.scope === "all" ? "セットの数 × 30秒ほど" : "30秒ほど"}かかります）。</div>`;
+  if (!R) return h + `<div class="muted">AGI・DEX・INT の振り方のうち、条件を満たして、使うステータスポイントがいちばん少ないものを探します。ほかのステータス・支援は、いまのままで計算します。シャドウ装備も計算に入っています（「いまのシャドウ」= 計算機にいま入っているもの）。選んだ装備スロット × シャドウのスロットの全部で条件を満たす振り方を探します（1通りにつき30秒ほどかかります）。</div>`;
   if (R.sig !== JSON.stringify(m)) h += `<div class="warn" style="margin-bottom:4px">ステータスや装備を変えたので、下の結果は前の状態のものです。もう一度探してください。</div>`;
-  if (R.fail) return h + `<div class="warn">${esc(R.fail)}</div>`;
+  if (R.fail) {
+    const MAXV = SIMC_STMAX, ov = (v) => v === null || v === undefined ? `<span class="warn">${SIMC_STTOP} でも届かない</span>` : `<b class="warn">${v}</b> <span class="muted">（上限 ${MAXV} を ${v - MAXV} 超える）</span>`;
+    const rows = (R.short || []).map((x) => `<tr><td>${esc(x.label)}</td>
+      ${R.aspd ? `<td class="v">${simcNum(x.aspd, 1)}</td><td class="v">${x.aspd >= R.target ? `<span class="good">届いている</span>` : "あと " + simcNum(R.target - x.aspd, 1)}</td><td>${x.aspd >= R.target ? "-" : ov(x.agi)}</td><td>${x.aspd >= R.target ? "-" : ov(x.dex)}</td>` : ""}
+      ${R.cast ? `<td class="v">${simcNum(x.castP)}</td><td class="v">${x.castP >= 530 ? `<span class="good">届いている</span>` : "あと " + (530 - x.castP)}</td><td>${x.castP >= 530 ? "-" : ov(x.dexC)}</td><td>${x.castP >= 530 ? "-" : ov(x.intC)}</td>` : ""}</tr>`).join("");
+    return h + `<div class="warn">${esc(R.fail)}</div>` + (rows ? `<div class="muted" style="margin:6px 0 2px">AGI・DEX・INT をそれぞれ ${MAXV} まで振った場合の結果と、届かせるために要る値です（ふつうの上限 ${MAXV} を超える分は、装備・支援・ステータスの補正などで足す必要があります）。</div>
+      <table class="multi"><tr><th>対象</th>${R.aspd ? `<th>ASPD（AGI・DEX ${MAXV}）</th><th>目標 ${esc(R.target)} まで</th><th>AGI だけなら</th><th>DEX だけなら</th>` : ""}${R.cast ? `<th>詠唱の値（DEX・INT ${MAXV}）</th><th>530 まで</th><th>DEX だけなら</th><th>INT だけなら</th>` : ""}</tr>${rows}</table>` : "");
+  }
   const cost = (v) => ENG.hm.GetStatusTotalCost(v), curCost = cost(st.agi) + cost(st.dex) + cost(st.int);
   const row = (label, c, i) => { const d = c.cost - curCost; return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost}</td><td>${d === 0 ? "同じ" : d < 0 ? `<span class="good">${-d} ポイント浮く</span>` : `<span class="warn">${d} ポイント多く要る</span>`}</td><td>${i === undefined ? "" : `<button class="ghost" data-optapply="${i}">この振り方にする</button>`}</td></tr>`; };
   h += `<table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>この3つに使うポイント</th><th>いまと比べて</th><th></th></tr>
@@ -1972,7 +2032,7 @@ function simcOptHtml(m) {
     const after = P.remain - (R.best.cost - curCost), room = (k) => { let v = st[k] || 1; while (v < SIMC_STMAX && cost(v + 1) - cost(st[k] || 1) <= after) v++; return v; };
     h += `<div class="multisum">「いちばん安い」にすると、残りステータスポイントは <b class="${after < 0 ? "warn" : ""}">${after}</b> になります。`
       + (after > 0 ? `その分で、たとえば VIT ${st.vit}→<b>${room("vit")}</b>、または STR ${st.str}→<b>${room("str")}</b>、または LUK ${st.luk}→<b>${room("luk")}</b> まで上げられます。` : after < 0 ? `ポイントが足りません（BaseLv やほかのステータスを見直してください）。` : "")
-      + `<br><span class="muted">条件: ${[R.aspd ? "ASPD 193" : "", R.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}／対象: ${esc(R.sets.join("・"))}／${R.calcs} 回計算。INT を下げると MATK も下がります。下げたくないときは、上の「下限」に入れてから探してください。</span></div>`;
+      + `<br><span class="muted">条件: ${[R.aspd ? "ASPD " + R.target : "", R.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}／対象: ${esc(R.sets.join("・"))}／${R.calcs} 回計算。INT を下げると MATK も下がります。下げたくないときは、上の「下限」に入れてから探してください。</span></div>`;
   }
   return h;
 }
@@ -2018,7 +2078,7 @@ function simcXParse(html, hasHeader) {    // ラトリオの表 → [{k: 見出�
   }
   return out;
 }
-function simcCmpHead(cols) { return `<tr><th></th><th>いまの装備</th>${cols.map((x) => `<th><span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn" title="名前が合わなくて入らなかった装備・カードがあります">${x.miss}個入らず</span>` : ""}</th>`).join("")}</tr>`; }
+function simcCmpHead(cols) { return `<tr><th></th><th>いまの装備</th>${cols.map((x) => `<th><span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn" title="ラトリオの候補に同じ名前が無くて、装備できなかったものがあります（未装備）">未装備 ${x.miss}</span>` : ""}</th>`).join("")}</tr>`; }
 function simcCmpKeyHtml(m, r) {
   const R = SIMC.cmpRes; if (!simcCmpIds(m).length) return "";
   if (!R || R.sig !== simcCmpSig(m)) return `<div class="muted">比べています…</div>`;
@@ -2258,7 +2318,7 @@ function simcExtraBody(r) {               // 「比べる」で装備スロッ�
   const cmpOn = m && simcCmpIds(m).length, R = cmpOn && SIMC.cmpRes && SIMC.cmpRes.sig === simcCmpSig(m) ? SIMC.cmpRes : null;
   const block = (title, html, who) => `<div class="xinfo"><div class="xttl">${title}${who ? ` <span class="xwho">${who}</span>` : ""}</div>${html || `<span class="muted">-</span>`}</div>`;
   return ENG_XKINDS.filter(([id]) => on.includes(id)).map(([id, t]) => `<div class="xrow">${block(t, (r.x || {})[id], cmpOn ? "いまの計算機の装備" : "")}`
-    + (R ? R.cols.map((x) => block(t, (x.r.x || {})[id], `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn">${x.miss}個入らず</span>` : ""}`)).join("") : cmpOn ? `<div class="muted">比べています…</div>` : "") + `</div>`).join("");
+    + (R ? R.cols.map((x) => block(t, (x.r.x || {})[id], `<span class="settab on" style="--c:${tagColor(x.st)};cursor:default">${esc(x.st.tag)}</span>${x.miss ? ` <span class="warn">未装備 ${x.miss}</span>` : ""}`)).join("") : cmpOn ? `<div class="muted">比べています…</div>` : "") + `</div>`).join("");
 }
 function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履歴)の ID、または "now:キャラ名"(いまゲームで着ている装備)
   const ch = simcCur(), EQ = DATA.equip || {}; if (!ch) return;
@@ -2431,7 +2491,7 @@ function renderSimChara() {
           ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
       ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>${simcRelHtml(m, "ac", "relkey", "ASPD・詠唱・ディレイに効く支援・アイテム・スキル")}<div id="scckeycmp" class="cmpbox">${simcCmpKeyHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccksum">${esc(simcKeySum(r))}</span>${simcCmpChips(m)}`)}
-      ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（ASPD 193・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
+      ${simcFold("opt", "ステ振りの相談", simcOptHtml(m), ` <span class="muted">（目標の ASPD・無詠唱を、いちばん少ないポイントで満たす AGI・DEX・INT）</span>`, false)}
       ${simcFold("multi", "装備セットごとの確認", simcMultiHtml(m), ` <span class="muted">（登録した全部のセットで ASPD 193・無詠唱に届くか）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
@@ -2546,7 +2606,10 @@ function renderSimChara() {
       const O = SIMC.opt, rr = () => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
       g("soa").onchange = (e) => { O.aspd = e.target.checked; rr(); };
       g("soc").onchange = (e) => { O.cast = e.target.checked; rr(); };
-      g("sos").onchange = (e) => { O.scope = e.target.value; rr(); };
+      g("sotg").onchange = (e) => { O.target = Math.max(100, Math.min(193, Math.round((+e.target.value || 193) * 10) / 10)); rr(); };
+      const tog = (arr, id) => { const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id); rr(); };
+      V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog(O.mainSel, el.dataset.optm));
+      V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog(O.shSel, el.dataset.opts));
       g("sogo").onclick = () => simcOptRun(m);
       V.querySelectorAll("[data-optmin]").forEach((el) => el.onchange = () => { O.min[el.dataset.optmin] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+el.value || 1))); });
       V.querySelectorAll("[data-optapply]").forEach((el) => el.onclick = () => { const i = +el.dataset.optapply, c = i ? O.res.alts[i - 1] : O.res.best; Object.assign(m.status, { agi: c.agi, dex: c.dex, int: c.int }); O.res.sig = JSON.stringify(m); SIMC.msg = `AGI ${c.agi}・DEX ${c.dex}・INT ${c.int} にしました。`; changed(); });
