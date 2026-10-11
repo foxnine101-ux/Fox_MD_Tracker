@@ -2358,14 +2358,14 @@ function renderSimChara() {
       <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
         <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
+        <button id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットに保存してある内容を読み込みます（保存していない変更は消えます）">ロード</button>
         <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
-        <button class="ghost" id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットを、最後に保存したときの内容に戻します">元に戻す</button>
         <button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
       <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオ」で中身を入れられます">＋ 新しいスロットを作成</button>
         ${ch ? `<button id="sccnow" ${nowChar() && !SIMC.busy ? "" : "disabled"} title="${nowChar() ? `いまログインしている「${esc(cn(nowChar()))}」の職業・Lv・ステータスと、いま着ている装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">⟳ 現在のキャラを反映${nowChar() ? `（${esc(cn(nowChar()))}）` : ""}</button>` : ""}
         ${nowChar() ? "" : `<span class="muted">「現在のキャラを反映」は、ゲームにログインすると使えます。</span>`}</div>
-      ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「元に戻す」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「元に戻す」で戻せます。"}</div>` : ""}</div>`;
+      ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「ロード」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「ロード」で戻せます。"}</div>` : ""}</div>`;
   {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
     let game = `<div class="muted">ゲームにログインすると、このツールがキャラ（職業・Lv・ステータス・装備）を覚えます。覚えたキャラから、新しいスロットを作れます。</div>`;
@@ -2478,11 +2478,11 @@ function renderSimChara() {
   };
   if (g("sccnow")) g("sccnow").onclick = async () => {
     const c = nowChar(); if (!c) return;
-    if (await askOnce("nowchar", `スロット「${ch.name}」に、いまログインしている「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「元に戻す」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
+    if (await askOnce("nowchar", `スロット「${ch.name}」に、いまログインしている「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「ロード」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
   };
   if (g("sccretry")) g("sccretry").onclick = () => { ENG.err = ""; engInit().then(render); render(); };
   if (g("sccsavebtn")) g("sccsavebtn").onclick = () => { ch.saved = simcClone(ch.model); simcSave(); SIMC.msg = "保存しました。"; render(); };
-  if (g("sccrevert")) g("sccrevert").onclick = async () => { if (await askOnce("revert", `「${ch.name}」を、最後に保存したときの内容に戻します。\n保存していない変更は消えます。`, "元に戻す")) { ch.model = simcClone(ch.saved); SIMC.res = null; SIMC.report = null; simcSave(); SIMC.msg = "保存したときの内容に戻しました。"; render(); } };
+  if (g("sccrevert")) g("sccrevert").onclick = async () => { if (await askOnce("revert", `「${ch.name}」に保存してある内容を読み込みます。\n保存していない変更は消えます。`, "ロードする")) { ch.model = simcClone(ch.saved); SIMC.res = null; SIMC.report = null; simcSave(); SIMC.msg = "保存してある内容を読み込みました。"; render(); } };
   if (g("sfc")) {
     g("sfc").onchange = (e) => { SIMC.fox.char = e.target.value; e.target.blur(); render(); };
     g("sfs").onchange = (e) => { SIMC.fox.set = e.target.value; };
