@@ -824,6 +824,18 @@ class CharCore(object):
                 self.log("[装備] 装備の一覧(0B39)を受け取りましたが、着ているものがありません(全{}件)".format(len(items)))
                 return
             ch = self._ch()
+            MAIN = 1023 | 65536 | 131072 | 262144 | 524288 | 1048576 | 2097152      # 衣装(1024〜8192)をのぞく、ふつうの装備・シャドウ装備の場所
+            main = [e for e in worn if e["wear"] & MAIN]
+            self.log("[装備] 一覧(0B39) 種類={} 全{}件・着ている{}件(ふつうの装備・シャドウ {}・衣装 {})".format(pkt[4], len(items), len(worn), len(main), len(worn) - len(main)))
+            if not main:
+                # 衣装だけの一覧。これでふつうの装備の記録を消さない(前の記録のふつうの装備は残し、衣装だけ入れかえる)。本体の一覧はまだ → 着替えは反映しない
+                old = [e for e in (ch.get("equips") or []) if e["wear"] & MAIN]
+                ch["equips"] = old + worn
+                ch["eq_stale"] = True
+                ch["updated"] = int(time.time())
+                self.changed = True
+                self.log("[装備] 衣装だけの一覧でした({}点)。ふつうの装備の一覧は、まだ届いていません(前の記録の{}点を残します)".format(len(worn), len(old)))
+                return
             self._synced.add(getattr(self, "_key", None))
             ch["eq_stale"] = False
             ch["equips"] = worn
