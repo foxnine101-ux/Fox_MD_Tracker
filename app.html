@@ -942,7 +942,7 @@ details.slotc{border-color:var(--slotc)}
 .relbox>summary{font-size:13px}
 .relgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:3px 6px}
 .bfi.sm{padding:1px 6px;font-size:12px}
-#stp{overflow-x:auto}.stpmainw{display:grid;grid-template-columns:auto minmax(300px,1fr);gap:16px;align-items:start}@media (max-width:1000px){.stpmainw{grid-template-columns:1fr}}.stpc{white-space:nowrap}.stpbtn{padding:1px 7px;font-size:12px}.stpin{width:4.4em;text-align:center}
+#stp{overflow-x:auto}.stpmainw{display:grid;grid-template-columns:auto minmax(300px,1fr);gap:16px;align-items:start}@media (max-width:1000px){.stpmainw{grid-template-columns:1fr}}.stpsbc{border:1px solid var(--line);border-radius:8px;padding:6px 10px;margin:6px 0}.stpc{white-space:nowrap}.stpbtn{padding:1px 7px;font-size:12px}.stpin{width:4.4em;text-align:center}
 .stpres{display:flex;flex-direction:column;gap:10px;margin:2px 0}.stph{font-weight:700;margin:10px 0 2px;font-size:13px}
 .bfi.sw{gap:8px}.bfi.sw input[type=checkbox]{display:none}
 .bfi .swt{flex:none;width:28px;height:15px;border-radius:8px;background:var(--line);position:relative;transition:background .15s}
@@ -2025,16 +2025,41 @@ function simcOptSets(m) {
   return out;
 }
 // 届かないとき: 上限(130)まで振った場合にどれだけ足りないか、と、上限を超えてでもいくつ要るか(AGI だけ / DEX だけ / INT だけ)
-function simcSbAvg(m, over) {                // サンドバックマンの設定のメインスキルで、ステータスを over にしたときの1回のダメージ(平均)。INT を下げた影響を測る用
+function stpSbKind(mm, cfg, mt) {              // このスキルが物理か魔法か(物理ダメージ+100% / 魔法ダメージ+100% を足して、数字が動くほう)
+  const key = "stpk:" + JSON.stringify([mm.status.jobId, mt.skill, mt.src, cfg.kind, cfg.race, cfg.ele, cfg.lv, cfg.size]);
+  if (ENG.cache[key]) return ENG.cache[key];
+  const run = (fx) => { const r = engSandbag(mm, cfg, Object.assign({}, mt, { fx })); return r ? r.per.avg || 0 : 0; };
+  const b = run([]), ph = run([[ATK_AT, 5, 100]]) > b * 1.001, ma = run([[ATK_AT, 14, 100]]) > b * 1.001;
+  return ENG.cache[key] = ph && !ma ? "p" : ma && !ph ? "m" : "b";
+}
+function stpSbMt(m) {                           // サンドバックマンの設定(スキル・Lv・追加設定)から、計算に渡す形
+  const cfg = simcSbCfg(m), methods = engAttackMethods(m), item = methods.find((x) => x.full === cfg.full) || methods.find((x) => x.skill !== 0) || methods[0];
+  if (!item) return null;
+  const chain = sbChain(item.tree, cfg.vals); cfg.full = item.full; cfg.vals = chain.map((c) => c.v);
+  return { cfg, methods, item, chain, mt: { skill: item.skill, src: item.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: item.name } };
+}
+// サンドバックマンの設定のメインスキルで、ステータスを over にしたときの1回のダメージ(平均)。useFx = オンにしている時限効果(真理の解放など)を足す。結果は覚える
+function simcSbAvg(m, over, useFx) {
   try {
     if (!ENG.sb) return null;
-    const cfg = simcSbCfg(m), methods = engAttackMethods(m), item = methods.find((x) => x.full === cfg.full) || methods.find((x) => x.skill !== 0) || methods[0];
-    if (!item) return null;
-    const chain = sbChain(item.tree, cfg.vals), mt = { skill: item.skill, src: item.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: item.name };
     const mm = simcClone(m); Object.assign(mm.status, over || {});
-    const r = engSandbag(mm, cfg, mt); return r ? { avg: r.per.avg, name: item.name } : null;
+    const key = "sbd:" + (useFx ? JSON.stringify(atkFxSet().on) : "-") + JSON.stringify(mm);
+    if (ENG.cache[key] !== undefined) return ENG.cache[key];
+    const T = stpSbMt(mm); if (!T) return null;
+    const mt = Object.assign({}, T.mt);
+    if (useFx) mt.fx = atkFxApplied(atkActiveIds(stpSbKind(mm, T.cfg, mt)), T.cfg.kind === 1);
+    const r = engSandbag(mm, T.cfg, mt);
+    return ENG.cache[key] = r ? { avg: r.per.avg, name: T.item.name } : null;
   } catch (e) { return null; }
 }
+// ---- ダメージの表示: 数が大きいので K / M で、増減は実数と % の両方 ----
+const stpKM = (v) => v === null || v === undefined || Number.isNaN(v) ? "-" : Math.abs(v) >= 1e9 ? (v / 1e9).toFixed(2) + "G" : Math.abs(v) >= 1e6 ? (v / 1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? (v / 1e3).toFixed(1) + "K" : String(Math.round(v));
+function stpDelta(v, base) {
+  if (v === null || v === undefined || base === null || base === undefined) return "";
+  const d = v - base, p = base ? d / base * 100 : 0, cls = Math.abs(p) < 0.005 ? "muted" : d > 0 ? "good" : "warn";
+  return `<span class="${cls}">${d >= 0 ? "+" : "−"}${stpKM(Math.abs(d))}（${p >= 0 ? "+" : "−"}${Math.abs(p).toFixed(2)}%）</span>`;
+}
+const stpDmgSig = (m) => JSON.stringify([simcSbCfg(m), atkFxSet().on]);
 // ================= ステータスシミュレーター(旧「ステ振りの相談」+「装備セットごとの確認」を作り直したもの) =================
 // ラトリオの ASPD の式(status/stallcalc-magic-dmg-aspd.js)。AGI・DEX は「補正(装備・支援)込みの合計」:
 //   素 = 武器の基本 + √(AGI×(10+10/111) + DEX×9/49)×(…)  ← DEX は AGI の約 1/55 しか効かない
@@ -2050,7 +2075,7 @@ const stpTarget = () => Math.max(100, Math.min(193, +SIMC.opt.target || 193));
 const stpText = (html) => { const el = document.createElement("div"); el.innerHTML = html || ""; return el.textContent.replace(/\s+/g, " "); };
 function stpState() {                           // 試算中のステータス(スロットごと)。触るまでは、基本ステータス欄の値についていく
   const c = simcCur(); if (!c) return null;
-  if (!SIMC.stp || SIMC.stp.id !== SIMC.cur) SIMC.stp = { id: SIMC.cur, d: null, touched: false, pats: null, patSig: "", rows: null, rowSig: "", sug: null, sugSig: "", eff: null, effSig: "", tok: 0 };
+  if (!SIMC.stp || SIMC.stp.id !== SIMC.cur) SIMC.stp = { id: SIMC.cur, d: null, touched: false, pats: null, patSig: "", rows: null, rowSig: "", sug: null, sugSig: "", eff: null, effSig: "", sw: { stat: "int", dir: -1, step: 10, n: 8 }, swR: null, swSig: "", tok: 0 };
   const S = SIMC.stp; if (!S.touched || !S.d) S.d = Object.fromEntries(STP_KEYS.map((k) => [k, c.model.status[k] || 1]));
   return S;
 }
@@ -2142,7 +2167,16 @@ function stpMainHtml(m, S) {
     <div class="stpres"><div><div class="muted">ASPD（装備・支援の補正込み）</div>${O.aspd ? stpAspdText(e, TG) : `<b>${simcNum(e.aspd, 1)}</b>`}${dl(e.aspd, e0.aspd, 1)}</div>
       <div><div class="muted">詠唱の値（DEX×2+INT。補正込み）</div><b class="${e.castP >= 530 ? "good" : ""}" style="font-size:18px">${simcNum(e.castP)}</b> <span class="muted">／ 530 で変動詠唱なし</span>${dl(e.castP, e0.castP)}
         <div class="muted" style="font-size:12px">= DEX ${d.dex}+${e.bonus.dex}（補正）= ${d.dex + e.bonus.dex} の2倍 ＋ INT ${d.int}+${e.bonus.int} = ${d.int + e.bonus.int}</div></div>
+      ${stpDmgBlock(m, d)}
       <div><div class="muted">最大HP ／ 所持限界量 ／ 状態異常のステ耐性の合計</div>${simcNum(e.hp)}${dl(e.hp, e0.hp)} ／ ${ex.weight === null ? "-" : simcNum(ex.weight)}${ex.weight !== null && ex0.weight !== null ? dl(ex.weight, ex0.weight) : ""} ／ ${simcNum(ex.ail)}%${dl(ex.ail, ex0.ail)}</div>${stpSurplus(d, e, O)}</div></div>`;
+}
+function stpDmgBlock(m, d) {                     // ダメージ(サンドバックマン): 試算のステータスと、基本ステータス欄の値(いま)の比べ
+  const base = simcSbAvg(m, m.status, false), cur = simcSbAvg(m, d, false), fxOn = atkActiveIds(null).length > 0;
+  if (!base || !cur) return "";
+  const baseF = fxOn ? simcSbAvg(m, m.status, true) : null, curF = fxOn ? simcSbAvg(m, d, true) : null;
+  return `<div><div class="muted">ダメージ（サンドバックマン ${esc(cur.name)}・1回の平均。比べる相手は、基本ステータス欄の値）</div>
+    バフなし <b style="font-size:18px">${stpKM(cur.avg)}</b> <span class="muted">（基準 ${stpKM(base.avg)}）</span> ${stpDelta(cur.avg, base.avg)}
+    ${fxOn && curF && baseF ? `<div>時限効果込み <b style="font-size:18px">${stpKM(curF.avg)}</b> <span class="muted">（基準 ${stpKM(baseF.avg)}）</span> ${stpDelta(curF.avg, baseF.avg)}</div>` : `<div class="muted" style="font-size:12px">時限効果（真理の解放・暴走した魔力など）をオンにすると、「時限効果込み」も出ます（上の小型サンドバックマン）</div>`}</div>`;
 }
 function stpSurplus(d, e, O) {                   // 詠唱の値が 530 を超えている分は、INT を下げて AGI に回せる
   if (!O.cast || e.castP <= 530) return "";
@@ -2180,26 +2214,43 @@ function stpSugHtml(m, S) {
     if (!R.list.length) return failH;
   }
   const cur = stpCost(d.agi) + stpCost(d.dex) + stpCost(d.int), P = simcPoints(m);
+  const fxOn = atkActiveIds(null).length > 0, d0 = simcSbAvg(m, d, false), d0f = fxOn ? simcSbAvg(m, d, true) : null;
+  const dcell = (c) => { const a = c.dmg, f = c.dmgF; return `<td class="v">${a ? `${stpKM(a.avg)} ${d0 ? stpDelta(a.avg, d0.avg) : ""}` : "-"}</td>${fxOn ? `<td class="v">${f ? `${stpKM(f.avg)} ${d0f ? stpDelta(f.avg, d0f.avg) : ""}` : "-"}</td>` : ""}`; };
   const row = (label, c, i) => { const dd = c.cost - cur, rem = P ? P.earned - (c.cost + stpCost(d.vit) + stpCost(d.str) + stpCost(d.luk)) : null;
     return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost} <span class="muted">(${dd === 0 ? "±0" : (dd > 0 ? "+" : "") + dd})</span></td><td class="v">${rem === null ? "-" : rem}</td>
+      ${i === undefined ? `<td class="v">${d0 ? stpKM(d0.avg) : "-"}</td>${fxOn ? `<td class="v">${d0f ? stpKM(d0f.avg) : "-"}</td>` : ""}` : dcell(c)}
       <td>${i === undefined ? "" : c.ok === false ? `<span class="warn">確かめると届きません</span>` : `<span class="good">全パターンOK</span>`}</td><td>${i === undefined ? "" : `<button class="ghost" data-stpapply="${i}">試算に入れる</button>`}</td></tr>`; };
   return failH + `<div class="muted" style="font-size:12px;margin:4px 0">条件（${[O.aspd ? "ASPD " + stpTarget() : "", O.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}）を、選んだ全部の装備パターンで満たす AGI・DEX・INT のうち、使うポイントがいちばん少ない振り方です（式で出して、ラトリオの計算で確かめています）。ポイントは上げるほど1ポイントあたりが重くなるので、ふつうは「条件に要る分だけ」で止めるのが得です。</div>
-    <table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>AGI・DEX・INT に使うポイント<br>（いまの試算との差）</th><th title="この振り方にして、VIT・STR・LUK は試算のままのときの、余りのポイント">余り</th><th>確認</th><th></th></tr>
+    <table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>AGI・DEX・INT に使うポイント<br>（いまの試算との差）</th><th title="この振り方にして、VIT・STR・LUK は試算のままのときの、余りのポイント">余り</th><th title="サンドバックマンのメインスキル1回の平均。かっこは、いまの試算との差（実数と%）">ダメージ</th>${fxOn ? `<th title="オンにしている時限効果（真理の解放・暴走した魔力など）がかかったとき">時限効果込み</th>` : ""}<th>確認</th><th></th></tr>
     ${row("いまの試算", { agi: d.agi, dex: d.dex, int: d.int, cost: cur })}${R.list.map((c, i) => row(i === 0 ? "<b>いちばん安い</b>" : "ほかの候補", c, i)).join("")}</table>
     <div class="muted" style="font-size:12px">AGI が効く理由: ASPD の式で AGI は DEX の約55倍効きます。DEX は主に詠唱の値（DEX×2+INT）のために振ります。${R.hint ? esc(R.hint) : ""}</div>`;
 }
+function stpSwHtml(m, S) {
+  const R = S.swR && S.swSig === stpSwSig(m, S) ? S.swR : null;
+  if (!R) return `<div class="spin">計算中…（枠を開いたときに計算します）</div>`;
+  const B = R.rows[0], fxOn = R.fxOn;
+  // 段差: 1刻みあたりの下がり方が、ほかの刻みの 1.8 倍以上のところ(= そのあいだで、ステータスの条件つきの効果が外れた/付いた可能性)
+  const drops = R.rows.map((x, i) => (i && R.rows[i - 1].dmg ? Math.abs(x.dmg - R.rows[i - 1].dmg) / R.rows[i - 1].dmg : 0)), srt = drops.slice(1).sort((a, b) => a - b), med = srt.length ? srt[srt.length >> 1] : 0;
+  const jump = (i) => i && drops[i] > med * 1.8 && drops[i] - med > 0.004;
+  return `<div class="muted" style="font-size:12px;margin:4px 0">${STP_LABEL[S.sw.stat]} を ${S.sw.dir < 0 ? "下げた" : "上げた"}ときの、サンドバックマン（${esc(R.name || "")}）1回の平均ダメージです。増減は、いまの試算の値（先頭の行）との差で、実数と%。条件で効果が出る装備・カード・エンチャント（INT 110 以上で…など）は、ラトリオの計算で自動で入るので、段差があればそこで数字が動きます。詠唱の値が 530 を下回ると、変動詠唱が出ます。</div>
+    <table class="multi"><tr><th>${STP_LABEL[S.sw.stat]}</th><th>使うポイント</th><th>ASPD</th><th>詠唱の値</th><th>ダメージ</th>${fxOn ? "<th>時限効果込み</th>" : ""}<th></th></tr>
+    ${R.rows.map((x, i) => `<tr><td><b>${x.v}</b>${i === 0 ? ' <span class="muted">（いまの試算）</span>' : ""}</td><td class="v">${x.cost} ${i ? stpDelta0(x.cost - B.cost) : ""}</td><td class="v">${simcNum(x.aspd, 1)}</td><td class="v"><span class="${x.castP >= 530 ? "" : "warn"}">${simcNum(x.castP)}</span></td>
+      <td class="v">${x.dmg === null ? "-" : stpKM(x.dmg)} ${i && B.dmg !== null ? stpDelta(x.dmg, B.dmg) : ""}</td>${fxOn ? `<td class="v">${x.dmgF === null ? "-" : stpKM(x.dmgF)} ${i && B.dmgF !== null ? stpDelta(x.dmgF, B.dmgF) : ""}</td>` : ""}<td>${jump(i) ? `<span class="warn" title="この刻みだけ、下がり方がほかの刻みより大きいです。ステータスの条件で効果が出る装備・カード・エンチャントが外れた可能性があります（刻みを1にすると、境目が分かります）">⚠ 段差</span>` : ""}</td></tr>`).join("")}</table>`;
+}
+const stpDelta0 = (v) => `<span class="muted">(${v >= 0 ? "+" : "−"}${Math.abs(v)})</span>`;
 function stpEffHtml(m, S) {
   const R = S.eff && S.effSig === stpEffSig(m, S) ? S.eff : null;
   if (!R) return `<div class="spin">ポイントを足したときの影響を調べています…</div>`;
   const n = simcNum, dl = (v, v0, f = 0) => { const x = Math.round((v - v0) * Math.pow(10, f)) / Math.pow(10, f); return x ? `<span class="${x > 0 ? "good" : "warn"}">${x > 0 ? "+" : ""}${n(x, f)}</span>` : `<span class="muted">±0</span>`; };
   return `<div class="muted" style="font-size:12px;margin:4px 0">各ステータスを +10 したときの変化です（いまの試算が基準）。ポイントは上げるほど重いので、条件（ASPD・無詠唱）に要る分のあとは、費用に見合う効果があるものだけ足すのが得です。${R.dmgName ? `ダメージは、サンドバックマンの枠で選んでいるスキル（${esc(R.dmgName)}）の1回の平均です。` : ""}</div>
-    <table class="multi"><tr><th>+10 するステータス</th><th>かかるポイント</th><th>ASPD</th><th>詠唱の値</th><th>最大HP</th><th>所持限界量</th><th>状態異常のステ耐性の合計</th><th>${R.dmgName ? "ダメージ" : ""}</th><th>効率</th></tr>
+    <table class="multi"><tr><th>+10 するステータス</th><th>かかるポイント</th><th>ASPD</th><th>詠唱の値</th><th>最大HP</th><th>所持限界量</th><th>状態異常のステ耐性の合計</th><th>${R.dmgName ? "ダメージ" : ""}</th>${R.fxOn ? "<th>時限効果込み</th>" : ""}<th>効率</th></tr>
     ${R.rows.map((x) => `<tr><td><b>${STP_LABEL[x.k]}</b> ${x.v}→${x.v + x.step}</td><td class="v">${x.cost}</td><td class="v">${dl(x.aspd, R.base.aspd, 1)}</td><td class="v">${dl(x.castP, R.base.castP)}</td><td class="v">${dl(x.hp, R.base.hp)}</td><td class="v">${x.weight === null ? "-" : dl(x.weight, R.base.weight)}</td><td class="v">${dl(x.ail, R.base.ail)}</td>
-      <td class="v">${R.dmgName ? (x.dmg === null || R.base.dmg === null ? "-" : `${n(x.dmg)} <span class="${x.dmg > R.base.dmg ? "good" : "muted"}">(${x.dmg >= R.base.dmg ? "+" : ""}${n((x.dmg / R.base.dmg - 1) * 100, 2)}%)</span>`) : ""}</td>
+      <td class="v">${R.dmgName ? (x.dmg === null || R.base.dmg === null ? "-" : `${stpKM(x.dmg)} ${stpDelta(x.dmg, R.base.dmg)}`) : ""}</td>${R.fxOn ? `<td class="v">${x.dmgF === null || R.base.dmgF === null ? "-" : `${stpKM(x.dmgF)} ${stpDelta(x.dmgF, R.base.dmgF)}`}</td>` : ""}
       <td class="muted">${x.hp > R.base.hp ? `HP +${n(((x.hp - R.base.hp) / x.cost) | 0)}/pt` : ""}</td></tr>`).join("")}</table>`;
 }
-const stpSugSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([SIMC.opt.aspd, SIMC.opt.cast, SIMC.opt.target, SIMC.opt.min, S.d.vit, S.d.str, S.d.luk]);
-const stpEffSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
+const stpSugSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([SIMC.opt.aspd, SIMC.opt.cast, SIMC.opt.target, SIMC.opt.min, S.d.vit, S.d.str, S.d.luk]) + stpDmgSig(m);
+const stpEffSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d) + stpDmgSig(m);
+const stpSwSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([S.d, S.sw]) + stpDmgSig(m);
 // よく使う支援(濃縮サラマインジュース・ブレッシング・速度増加)のスイッチ。「支援・アイテム・スキル」の枠と同じ値を動かす(同期)
 const STP_POTS = ["なし", "攻撃速度増加ポーション", "ハイスピードポーション", "バーサークポーション"];      // ラトリオの SpeedPotName(スピードアップ・ハイスピード・バーサーク)。ASPD が 10 / 15 / 20 % 増える。どれか1つ(排他)
 function stpBuffHtml(m) {
@@ -2214,6 +2265,21 @@ function stpBuffHtml(m) {
 }
 // いま着ている装備スロット(記号つきで登録ずみ・手を加えていない)の ID。「いまの装備」はこれと同じ中身なので、この記号のチップも選択済みに見せる
 function stpNowSid(m, shadow) { const sid = shadow ? m.foxShadow : m.foxSet; return sid && !simcDirty(m, shadow) && simcSetList(m, shadow).tabs.some((x) => x.sid === sid) ? sid : ""; }
+function stpSbCtl(m) {
+  if (!ENG.sb) return "";
+  let T; try { T = stpSbMt(m); } catch (e) { return ""; }
+  if (!T) return "";
+  const cfg = T.cfg, sel = (id, arr, cur) => `<select data-stpsb="${id}">${arr.map((t, i) => `<option value="${i}" ${i === cur ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+  let kind = "b"; try { kind = stpSbKind(simcClone(m), cfg, T.mt); } catch (e) { /* 判定できなければ両方 */ }
+  const on = atkFxSet().on, fx = atkFxAll().filter((e) => e.kind === "b" || e.kind === kind || kind === "b");
+  return `<div class="stpsbc"><div class="opts"><b>ダメージの目安（小型サンドバックマン）</b><span class="muted">サンドバックマンの枠と同じ設定です。ステータスを変えたときの、メインスキル1回の平均ダメージ</span></div>
+    <div class="bfbar"><label>スキル <select data-stpsb="full">${T.methods.filter((x) => x.skill !== 0 || T.methods.length === 1).map((x) => `<option value="${esc(x.full)}" ${x.full === cfg.full ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+      ${T.chain.map((c, i) => c.ol.type === 0 ? `<label>${esc(i === 0 ? "Lv" : c.ol.label || "設定")} <select data-stpsb="o:${i}">${c.ol.opts.map((o) => `<option value="${esc(o[0])}" ${o[0] === c.v ? "selected" : ""}>${esc(o[1])}</option>`).join("")}</select></label>` : `<label>${esc(c.ol.label || "設定")} <input type="number" data-stpsb="o:${i}" value="${esc(c.v)}" style="width:6em"></label>`).join("")}
+      <span class="tag">${kind === "p" ? "物理" : kind === "m" ? "魔法" : "物理・魔法"}</span></div>
+    <div class="bfbar"><label>種類 ${sel("kind", SB_KINDS, cfg.kind)}</label><label>種族 ${sel("race", SB_RACES, cfg.race)}</label><label>属性 ${sel("ele", SB_ELES, cfg.ele)}</label>
+      <label>属性Lv <select data-stpsb="lv">${[1, 2, 3, 4].map((i) => `<option value="${i}" ${i === cfg.lv ? "selected" : ""}>Lv${i}</option>`).join("")}</select></label><label>サイズ ${sel("size", SB_SIZES, cfg.size)}</label></div>
+    <div class="atkfxl" style="margin:4px 0"><span class="muted">時限効果（かかったときの数字を「時限効果込み」に出します。「与ダメシミュ」と共通）</span>${fx.map((e) => `<label class="afx${on[e.id] ? " on" : ""}" title="${esc(e.text)}"><input type="checkbox" data-stpfx="${esc(e.id)}" ${on[e.id] ? "checked" : ""}>${esc(e.name)}</label>`).join("")}</div></div>`;
+}
 function stpHtml(m) {
   const S = stpState(), O = SIMC.opt, sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs, combos = sel.main.length * sel.sh.length;
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
@@ -2227,10 +2293,15 @@ function stpHtml(m) {
       <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ）</span>` : ""}</span></div>
     ${stpBuffHtml(m)}
     <div class="muted" style="font-size:12px;margin:2px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（「支援・アイテム・スキル」の枠のオンのもの）</div>
+    ${stpSbCtl(m)}
     <div id="stpmain">${stpMainHtml(m, S)}</div>
     ${(() => { const L = simcLearnedList(m), n = simcLearnedCount(m); return L.length || n === 0 ? `<div class="muted" style="font-size:12px;margin:4px 0">【習】の装備（習得スキルのレベルで効果が変わる）: <b>${L.length ? esc(L.join("、")) : "いまの装備には無し"}</b>。習得スキルは、いまのキャラのものを使います（${n === null ? "確認中" : n === 0 ? `<span class="warn">入っていません。【習】の効果が出ません。「現在のキャラを反映」で入れてください</span>` : n + " 個入っています"}）。</div>` : ""; })()}
     <div class="stph">装備パターンごとの確認</div><div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
     <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
+    ${simcFold("stpsw", "ステータスを変えたときのダメージ（INT を下げたらどれくらい？）", `<div class="bfbar"><label>ステータス <select data-stpswc="stat">${STP_KEYS.map((k) => `<option value="${k}" ${S.sw.stat === k ? "selected" : ""}>${STP_LABEL[k]}</option>`).join("")}</select></label>
+        <label>向き <select data-stpswc="dir"><option value="-1" ${S.sw.dir < 0 ? "selected" : ""}>下げる</option><option value="1" ${S.sw.dir > 0 ? "selected" : ""}>上げる</option></select></label>
+        <label>刻み <input type="number" min="1" max="50" data-stpswc="step" value="${S.sw.step}" style="width:4.5em"></label><label>回数 <input type="number" min="1" max="12" data-stpswc="n" value="${S.sw.n}" style="width:4em"></label></div>
+      <div id="stpsw">${stpSwHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}
     ${simcFold("stpeff", "ポイントを足したときの影響（余りの使い道）", `<div id="stpeff">${stpEffHtml(m, S)}</div>`, ` <span class="muted">（開くと計算します）</span>`, false)}</div>`;
 }
 const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
@@ -2238,8 +2309,8 @@ function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && 
 function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
   const mf = $("#view").querySelector('details[data-fold="opt"]'); if (!mf || !mf.open || !$("#stp") || !ENG.ready) return;
   const S = stpState(); if (!S) return;
-  const fe = $("#view").querySelector('details[data-fold="stpeff"]');
-  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S)));
+  const fe = $("#view").querySelector('details[data-fold="stpeff"]'), fw = $("#view").querySelector('details[data-fold="stpsw"]');
+  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S))) || (fw && fw.open && !(S.swR && S.swSig === stpSwSig(m, S)));
   if (!need || SIMC.busy) return;          // 「反映」などの作業中は計算しない(終わって描き直したあとに始める)
   clearTimeout(S.kt); S.kt = setTimeout(() => stpHeavy(), S.rows ? 1000 : 500);
 }
@@ -2266,28 +2337,41 @@ async function stpHeavy() {
         const all = stpSolve(cals, MAXV), pick = [];
         for (const c1 of all) { if (pick.every((x) => Math.abs(x.dex - c1.dex) >= 6)) pick.push(Object.assign({}, c1)); if (pick.length >= 4) break; }
         R = { list: [], best: [] };
-        if (pick.length) { for (const c1 of pick) R.list.push(await stpVerify(pats, c1, d, tick)); R.list.sort((a, b) => (b.ok - a.ok) || a.cost - b.cost); }
+        const fxOn = atkActiveIds(null).length > 0, dmgOf = async (c) => { await tick(); const dd = Object.assign({}, d, { agi: c.agi, dex: c.dex, int: c.int }); c.dmg = simcSbAvg(pats[0].mm, dd, false); c.dmgF = fxOn ? simcSbAvg(pats[0].mm, dd, true) : null; return c; };
+        if (pick.length) { for (const c1 of pick) R.list.push(await dmgOf(await stpVerify(pats, c1, d, tick))); R.list.sort((a, b) => (b.ok - a.ok) || a.cost - b.cost); }
         else R.fail = `AGI・DEX・INT をふつうの上限（${MAXV}）まで振っても、目標を満たせません。`;
         if (!pick.length) {       // 届かない → 無詠唱は維持したまま ASPD を最大にする案(詠唱で余った分を AGI に回す)
           const Pt = simcPoints(m), others = stpCost(d.vit) + stpCost(d.str) + stpCost(d.luk), spend = stpCost(d.agi) + stpCost(d.dex) + stpCost(d.int), bl = [stpBest(cals, spend, MAXV, "いまと同じポイントで ASPD を最大に")];
           if (Pt && Pt.earned - others > spend) bl.push(stpBest(cals, Pt.earned - others, MAXV, "余りのポイントも使って ASPD を最大に"));
-          for (const b of bl) if (b && !R.best.some((x) => x.agi === b.agi && x.dex === b.dex && x.int === b.int)) R.best.push(await stpCheck(pats, b, d, tick));
+          for (const b of bl) if (b && !R.best.some((x) => x.agi === b.agi && x.dex === b.dex && x.int === b.int)) R.best.push(await dmgOf(await stpCheck(pats, b, d, tick)));
         }
       }
       S.sug = R; S.sugSig = stpSugSig(m, S); put("stpsug", stpSugHtml(m, S));
     }
-    // 3) ポイントを足したときの影響(枠を開いているときだけ)
+    // 3) ステータスを変えたときのダメージ(掃引。枠を開いているときだけ)
+    const fw = $("#view").querySelector('details[data-fold="stpsw"]');
+    if (fw && fw.open && !(S.swR && S.swSig === stpSwSig(m, S))) {
+      const P0 = pats[0], sw = S.sw, rows = [], fxOn = atkActiveIds(null).length > 0; let name = "";
+      for (let i = 0; i <= sw.n; i++) {
+        const v = Math.max(1, Math.min(MAXV, d[sw.stat] + sw.dir * sw.step * i)); if (i && rows[rows.length - 1].v === v) break;
+        await tick(); const dd = Object.assign({}, d, { [sw.stat]: v }), e = stpEval(P0, dd), a = simcSbAvg(P0.mm, dd, false), f = fxOn ? simcSbAvg(P0.mm, dd, true) : null; if (a) name = a.name;
+        rows.push({ v, cost: stpCost(v), aspd: e.aspd, castP: e.castP, dmg: a ? a.avg : null, dmgF: f ? f.avg : null });
+      }
+      S.swR = { rows, fxOn, name }; S.swSig = stpSwSig(m, S); put("stpsw", stpSwHtml(m, S));
+    }
+    // 4) ポイントを足したときの影響(枠を開いているときだけ)
     const fe = $("#view").querySelector('details[data-fold="stpeff"]');
     if (fe && fe.open && !(S.eff && S.effSig === stpEffSig(m, S))) {
-      const P0 = pats[0], withX = (dd) => stpEval(P0, dd, [3, 8]), b = withX(d), bx = stpExtra(b.r), sb0 = simcSbAvg(Object.assign(simcClone(P0.mm), { status: Object.assign({}, P0.mm.status, d) }), {});
-      const base = { aspd: b.aspd, castP: b.castP, hp: b.hp, weight: bx.weight, ail: bx.ail, dmg: sb0 ? sb0.avg : null }, rows = [];
+      const P0 = pats[0], withX = (dd) => stpEval(P0, dd, [3, 8]), b = withX(d), bx = stpExtra(b.r), sb0 = simcSbAvg(Object.assign(simcClone(P0.mm), { status: Object.assign({}, P0.mm.status, d) }), {}, false);
+      const fxOn = atkActiveIds(null).length > 0, sb0f = fxOn ? simcSbAvg(Object.assign(simcClone(P0.mm), { status: Object.assign({}, P0.mm.status, d) }), {}, true) : null;
+      const base = { aspd: b.aspd, castP: b.castP, hp: b.hp, weight: bx.weight, ail: bx.ail, dmg: sb0 ? sb0.avg : null, dmgF: sb0f ? sb0f.avg : null }, rows = [];
       for (const k of ["agi", "dex", "int", "vit", "str", "luk"]) {
         await tick(); const step = Math.min(10, MAXV - d[k]); if (step <= 0) continue;
         const dd = Object.assign({}, d, { [k]: d[k] + step }), e = withX(dd), x = stpExtra(e.r), mm = simcClone(P0.mm); Object.assign(mm.status, dd);
-        const sb = sb0 ? simcSbAvg(mm, {}) : null;
-        rows.push({ k, v: d[k], step, cost: stpCost(d[k] + step) - stpCost(d[k]), aspd: e.aspd, castP: e.castP, hp: e.hp, weight: x.weight, ail: x.ail, dmg: sb ? sb.avg : null });
+        const sb = sb0 ? simcSbAvg(mm, {}, false) : null, sbf = fxOn ? simcSbAvg(mm, {}, true) : null;
+        rows.push({ k, v: d[k], step, cost: stpCost(d[k] + step) - stpCost(d[k]), aspd: e.aspd, castP: e.castP, hp: e.hp, weight: x.weight, ail: x.ail, dmg: sb ? sb.avg : null, dmgF: sbf ? sbf.avg : null });
       }
-      S.eff = { base, rows, dmgName: sb0 ? sb0.name : "" }; S.effSig = stpEffSig(m, S); put("stpeff", stpEffHtml(m, S));
+      S.eff = { base, rows, dmgName: sb0 ? sb0.name : "", fxOn }; S.effSig = stpEffSig(m, S); put("stpeff", stpEffHtml(m, S));
     }
   } catch (err) { if (err.message !== "changed") console.warn("stp", err); }
 }
@@ -3359,6 +3443,15 @@ function renderSimChara() {
       };
       g("stp").onchange = (e) => {
         const i = e.target.closest("[data-stpv]"); if (i) { setV(i.dataset.stpv, i.value); return; }
+        const sb = e.target.closest("[data-stpsb]"); if (sb) {               // 小型サンドバックマン(サンドバックマンの枠と同じ設定 m.foxSb)
+          const k = sb.dataset.stpsb, cfg = simcSbCfg(m);
+          if (k === "full") { cfg.full = sb.value; cfg.vals = []; }
+          else if (k.startsWith("o:")) { const n = +k.slice(2), T = stpSbMt(m); cfg.vals = (T ? T.chain.map((c) => c.v) : []).slice(0, n); cfg.vals[n] = Number.isNaN(+sb.value) ? sb.value : +sb.value; }
+          else cfg[k] = +sb.value;
+          S.sugSig = ""; S.effSig = ""; S.swSig = ""; simcSave(); render(); return;
+        }
+        const fx = e.target.closest("[data-stpfx]"); if (fx) { const F = atkFxSet(); if (fx.checked) F.on[fx.dataset.stpfx] = 1; else delete F.on[fx.dataset.stpfx]; saveSettings(); S.sugSig = ""; S.effSig = ""; S.swSig = ""; render(); return; }
+        const sc = e.target.closest("[data-stpswc]"); if (sc) { const k = sc.dataset.stpswc; S.sw[k] = k === "stat" ? sc.value : Math.max(k === "dir" ? -1 : 1, Math.min(k === "n" ? 12 : 50, Math.round(+sc.value) || (k === "dir" ? -1 : 1))); S.swSig = ""; render(); return; }
         const q = e.target.closest("[data-qb],[data-qbs]"); if (q) {         // 支援のスイッチ(「支援・アイテム・スキル」と同期)
           const key = q.dataset.qb || q.dataset.qbs, it = (simcSchema(m) || []).find((x) => simcBuffKey(x) === key); if (!it) return;
           simcBuffSet(m, it, q.dataset.qbs ? (q.checked ? it.opts[it.opts.length - 1][0] : 0) : q.type === "checkbox" ? q.checked : q.value); changed();
@@ -3412,7 +3505,7 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    foldBind(V, (el) => { if ((el.dataset.fold === "opt" || el.dataset.fold === "stpeff") && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    foldBind(V, (el) => { if ((el.dataset.fold === "opt" || el.dataset.fold === "stpeff" || el.dataset.fold === "stpsw") && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
     if (g("stp")) stpKick(m);
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
