@@ -105,6 +105,33 @@ def parse_map(html_text):
     return out
 
 
+def parse_map_page(html_text):
+    """マップのページ → {title, file, img, props: [[項目, 値]], blocked: [使えないスキルなど], mons}。読めなければ None。
+    画像の場所はページの中の <figure class="img-map"> から取る(ファイル名と同じとは限らない。1@23inf は 1@infi.png)。"""
+    t = html_text
+    m = re.search(r'<h1[^>]*class="conent-ttl"[^>]*>\s*(.*?)\s*</h1>', t, flags=re.S)
+    if not m:
+        return None
+
+    def clean(x):
+        return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", x)).strip()
+    title = clean(m.group(1))
+    mf = re.search(r"\(([^()\s]+)\)\s*$", title)
+    img = re.search(r'<figure class="img-map">\s*<img[^>]*src="([^"]+)"', t, flags=re.S)
+    props, blocked = [], []
+    ms = re.search(r'<div class="map-status">\s*<table>(.*?)</table>\s*</div>', t, flags=re.S)
+    if ms:
+        for th, td in re.findall(r"<tr>\s*<th>(.*?)</th>\s*<td>(.*?)</td>\s*</tr>", ms.group(1), flags=re.S):
+            k = clean(th.replace("<br>", " / "))
+            if '<div id="' in td:                       # 「使えないスキル」などの一覧(中に <br> 区切りの名前)
+                items = [clean(x) for x in re.split(r"<br\s*/?>", re.sub(r'.*?<div id="[^"]*">', "", td, count=1, flags=re.S)) if clean(x)]
+                blocked.append([k, items])
+            else:
+                props.append([k, clean(td)])
+    return {"title": title, "file": mf.group(1) if mf else "", "img": img.group(1) if img else "", "props": props, "blocked": blocked,
+            "mons": parse_map(t)}
+
+
 def from_search(d):
     """モンスター検索(JSON)の1件 → 保存する形(使うスキル・出現マップは詳細ページで足す)。"""
     return {"jname": str(d.get("JName") or "").strip(), "sub": str(d.get("SubJName") or "").strip(), "lv": _int(d.get("LV")),
@@ -167,6 +194,13 @@ class Official(object):
         self.budget = 0
         self.requests = 0     # 起動してからの件数
         self._last_get = 0.0
+        self._pace = threading.Lock()
+        self._tl = threading.local()
+        self.maplist = []     # 公式のマップの一覧 [[ファイル名, マップ名], …]
+        self.maplist_t = 0
+        self.mapdir = os.path.join(os.path.dirname(os.path.abspath(path)), "公式マップ")      # マップの画像(この PC だけ)
+        self._save_lock = threading.Lock()
+        self.map_job = {"file": "", "state": "idle", "done": 0, "total": 0, "msg": ""}
         self._by_name = None
         self._thread = None
         self.changed = False
@@ -186,21 +220,31 @@ class Official(object):
         self.maps = d.get("maps") or {}
         self.mdmaps = d.get("mdmaps") or {}
         self.misses = d.get("misses") or {}
+        self.maplist = d.get("maplist") or []
+        self.maplist_t = d.get("maplist_t") or 0
         self.pause_until = d.get("pause_until") or 0
         self._by_name = None
 
     def save(self):
-        with self.lock:
+        with self.lock:                                   # 書き足している最中のものを読まない(JSON はここで作りきる)
             d = {"v": STATE_V, "note": "RO公式ツールから集めたこの PC だけのデータ。配布しないでください。", "enabled": self.enabled,
-                 "mobs": self.mobs, "maps": self.maps, "mdmaps": self.mdmaps, "misses": self.misses, "pause_until": self.pause_until}
-        tmp = self.path + ".tmp"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(d, f, ensure_ascii=False, separators=(",", ":"))
-            os.replace(tmp, self.path)
+                 "mobs": self.mobs, "maps": self.maps, "mdmaps": self.mdmaps, "misses": self.misses, "maplist": self.maplist, "maplist_t": self.maplist_t,
+                 "pause_until": self.pause_until}
+            try:
+                text = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+            except (TypeError, ValueError) as e:
+                self.log("[公式] 保存の中身を作れませんでした: {}".format(e))
+                return
             self.changed = False
-        except OSError as e:
-            self.log("[公式] 保存できませんでした: {}".format(e))
+        with self._save_lock:                             # ファイルへの書き込みは同時に1つだけ
+            tmp = self.path + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(text)
+                os.replace(tmp, self.path)
+            except OSError as e:
+                self.changed = True
+                self.log("[公式] 保存できませんでした: {}".format(e))
 
     # ---------- 引く ----------
     def _index(self):
@@ -276,14 +320,18 @@ class Official(object):
 
     def _get(self, path):
         """1件取る。前の1件から MIN_GAP 秒以上あける。上限・エラーは Stop。"""
-        if self.budget <= 0:
+        free = getattr(self._tl, "free", False)          # 画面からの「このマップを読み込む」は、自分の上限で動く
+        if not free and self.budget <= 0:
             raise Stop("件数の上限")
-        wait = self._last_get + MIN_GAP + random.random() - self._clock()
+        with self._pace:                                  # 裏の作業と「マップ読み込み」が同時に動いても、3秒以上あける
+            slot = max(self._clock(), self._last_get + MIN_GAP + random.random())
+            wait = slot - self._clock()
+            self._last_get = slot
+            if not free:
+                self.budget -= 1
+            self.requests += 1
         if wait > 0:
             self._sleep(wait)
-        self._last_get = self._clock()
-        self.budget -= 1
-        self.requests += 1
         try:
             body = self._fetch(BASE + path)
         except urllib.error.HTTPError as e:
@@ -449,12 +497,149 @@ class Official(object):
         except Stop as e:
             res = "stop: {}".format(e)
         finally:
-            self.last_run = self._clock()
-            if self.changed:
-                self.save()
-            self.state = "paused" if self._clock() < self.pause_until else "idle"
-            self._run_lock.release()
+            try:
+                self.last_run = self._clock()
+                if self.changed:
+                    self.save()
+            finally:
+                self.state = "paused" if self._clock() < self.pause_until else "idle"
+                self._run_lock.release()
         return res
+
+    # ---------- マップ読み込み(画面から。1つのマップを、ゆっくり丸ごと取る) ----------
+    def _bytes(self, path):
+        return self._get(path)
+
+    def _img_name(self, src):
+        """画像の場所 → 保存するファイル名(安全な文字だけ)。"""
+        n = os.path.basename(urllib.parse.urlparse(src or "").path)
+        return n if re.match(r"^[\w@.\-]+\.(png|jpg|jpeg|gif)$", n) else ""
+
+    def img_path(self, name):
+        n = self._img_name(name)
+        return os.path.join(self.mapdir, n) if n else ""
+
+    def map_search(self, q, limit=60):
+        """マップの一覧から名前・ファイル名で探す(ひらがな/カタカナ・全角半角はそろえる)。[[ファイル名, マップ名, 取り込みずみか], …]"""
+        k = norm(q)
+        with self.lock:
+            rows = list(self.maplist)
+            have = set(self.maps)
+        out = []
+        for f, n in rows:
+            if not k or k in norm(n) or k in norm(f):
+                out.append([f, n, f in have and bool(self.maps[f].get("page"))])
+                if len(out) >= limit:
+                    break
+        return out
+
+    def map_files_by_suffix(self, name):
+        """ゲームの中のマップ名(MD の中は「0ef1@ct0」)→ 公式のマップのファイル名の候補。フィールドは同じ名前、MD は @ の後ろが同じもの。"""
+        name = str(name or "")
+        suf = name.split("@")[-1] if "@" in name else ""
+        with self.lock:
+            rows = list(self.maplist)
+        if "@" in name:
+            return [[f, n] for f, n in rows if f.split("@")[-1] == suf]
+        return [[f, n] for f, n in rows if f == name]
+
+    def fetch_maplist(self):
+        data = self._json("/map_filtered_search/?name=")
+        if isinstance(data, list):
+            with self.lock:
+                self.maplist = [[str(d.get("map_file") or ""), str(d.get("map_name") or "")] for d in data if isinstance(d, dict) and d.get("map_file")]
+                self.maplist_t = int(self._clock())
+                self.changed = True
+
+    def map_view(self, mf):
+        """画面に出す形: ページの内容 + 出現モンスターごとの詳細(取れている分)。無ければ None。"""
+        with self.lock:
+            m = self.maps.get(mf)
+            if not m or not m.get("page"):
+                return None
+            mons = []
+            for a, jn in m.get("mons") or []:
+                r = self.mobs.get(a) or {}
+                mons.append({"id": a, "jname": r.get("jname") or jn, "lv": r.get("lv"), "hp": r.get("hp"), "ele": r.get("ele"), "race": r.get("race"),
+                             "size": r.get("size"), "cls": r.get("cls"), "def": r.get("def"), "mdef": r.get("mdef"), "skills": r.get("skills") or [],
+                             "d": bool(r.get("d"))})
+            return {"file": mf, "name": m.get("name") or m.get("title") or mf, "title": m.get("title") or "", "img": self._img_name(m.get("img")),
+                    "props": m.get("props") or [], "blocked": m.get("blocked") or [], "mons": mons, "t": m.get("t") or 0,
+                    "small": len(mons) <= self.SMALL_MAP}
+
+    def load_map(self, mf, details=True, max_details=SMALL_MAP):
+        """1つのマップを取る: ページ → 画像 → (出現モンスターが少ないマップなら)モンスターの詳細。
+        取りにいく作業とは別に動くが、サイトへの間隔(3秒)は共通。同じ時に動くのは1つだけ。休み中・オフなら何もしない。"""
+        mf = str(mf or "")
+        if not re.match(r"^[\w@.\-]+$", mf):
+            return "bad"
+        if not self.enabled:
+            self.map_job = {"file": mf, "state": "error", "done": 0, "total": 0, "msg": "公式サイトからの取得がオフです（被ダメタブで入り切りできます）"}
+            return "off"
+        if self._clock() < self.pause_until:
+            self.map_job = {"file": mf, "state": "error", "done": 0, "total": 0, "msg": "サイトの調子が悪かったので、しばらく休んでいます"}
+            return "paused"
+        if not self._run_lock.acquire(False):             # 裏の収集と同じ鍵: サイトに同時に2つ聞かない
+            self.map_job = {"file": mf, "state": "error", "done": 0, "total": 0, "msg": "いま裏でモンスター情報を集めている最中です。少ししてからもう一度押してください"}
+            return "busy"
+        self._tl.free = True
+        job = self.map_job = {"file": mf, "state": "loading", "done": 0, "total": 1, "msg": "ページを取っています"}
+        try:
+            if not self.maplist:
+                job["msg"] = "マップの一覧を取っています"
+                self.fetch_maplist()
+            job["msg"] = "ページを取っています"
+            t = self._text("/map/" + urllib.parse.quote(mf, safe="@_-"))
+            pg = parse_map_page(t) if t else None
+            if not pg:
+                job.update(state="error", msg="公式サイトにこのマップのページが見つかりませんでした")
+                return "none"
+            with self.lock:
+                self.maps[mf] = {"name": next((n for f, n in self.maplist if f == mf), "") or pg["title"], "title": pg["title"], "mons": pg["mons"],
+                                 "img": pg["img"], "props": pg["props"], "blocked": pg["blocked"], "page": 1, "t": int(self._clock())}
+                self.changed = True
+            nm = self._img_name(pg["img"])
+            if nm and not os.path.isfile(os.path.join(self.mapdir, nm)):
+                job["msg"] = "マップの画像を取っています"
+                body = self._bytes(urllib.parse.urlparse(pg["img"]).path)
+                if body:
+                    os.makedirs(self.mapdir, exist_ok=True)
+                    tmp = os.path.join(self.mapdir, nm + ".tmp")
+                    with open(tmp, "wb") as f:
+                        f.write(body)
+                    os.replace(tmp, os.path.join(self.mapdir, nm))
+            todo = []
+            if details and 0 < len(pg["mons"]) <= self.SMALL_MAP:
+                todo = [(a, jn) for a, jn in pg["mons"] if (self.mobs.get(a) or {}).get("d") is None][:max_details]      # 前に取れなかったもの(d=0)は取り直さない
+            job.update(done=0, total=len(todo))
+            for i, (a, jn) in enumerate(todo):
+                job.update(done=i, msg="モンスターの情報を取っています（{}/{}）".format(i + 1, len(todo)))
+                self.fetch_detail(a, {"jname": jn})
+            job.update(state="done", done=len(todo), msg="")
+            return "done"
+        except Stop as e:
+            job.update(state="error", msg="途中で止まりました（{}）。取れた分は残してあります".format(e))
+            return "stop"
+        except Exception as e:                  # 画像が書けないなど。取れた分は残す
+            job.update(state="error", msg="読み込めませんでした（{}）".format(type(e).__name__))
+            return "error"
+        finally:
+            self._tl.free = False
+            try:
+                if self.changed:
+                    self.save()
+            finally:
+                self._run_lock.release()
+
+    def start_map(self, mf):
+        """画面の「読み込む」: 裏で動かす。もう動いているなら False。(返す前に「読み込み中」にして、直後の問い合わせが古い状態を読まないように)"""
+        with self.lock:
+            if self.map_job.get("state") == "loading":
+                return False
+            self.map_job = {"file": str(mf or ""), "state": "loading", "done": 0, "total": 1, "msg": "始めています"}
+        th = threading.Thread(target=lambda: self.load_map(mf), name="official-map", daemon=True)
+        th.start()
+        return True
 
     # ---------- 裏で動かす ----------
     def start(self, wanted_fn, first_delay=90, every=1800):

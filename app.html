@@ -478,7 +478,7 @@ function when(t) {
 
 // ---------- 画面 ----------
 const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
-const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["settings", "設定"]];
+const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["mapview", "マップ読み込み"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
 // 画面の描き直しでエラーが出たとき: 古い画面が残ったまま「ツールが止まっているみたい」と出ないように、エラーの中身をその場に出して、エラーログ(exe の隣の エラーログ.txt)にも記録する
@@ -526,6 +526,7 @@ function renderNow() {
   $("#view").hidden = TAB === "calc";
   if (TAB === "calc") return renderCalc(chars);
   if (TAB === "history") return renderHistory();
+  if (TAB === "mapview") return renderMapView();
   if (TAB === "nyar") return renderNyar(groups, chars, now);
   if (TAB === "event") return renderEvents(chars, now);
   if (TAB === "resist") return renderResist(chars, now);
@@ -5101,6 +5102,99 @@ function renderHistory() {
   let h = `<div class="panel tablewrap"><table class="hist"><thead><tr><th class="char">キャラ</th><th>日時</th><th>MD（内部名）</th><th>マップ</th></tr></thead><tbody>`;
   for (const x of hs) h += `<tr><td class="char">${esc(cn(x.char))}</td><td>${when(x.t)}</td><td>${esc(x.md || "")}</td><td class="muted">${esc(x.map)}</td></tr>`;
   $("#view").innerHTML = h + `</tbody></table></div>`;
+}
+
+// ---------------- マップ読み込み(歯車): 公式サイト(RO公式ツール)のマップ情報を、この PC に取り込んで見る ----------------
+// 公式サイトに負荷をかけないよう、取り込みは「読み込む」を押したときだけ・1つのマップずつ・3秒以上あけて動く。取り込んだものはこの PC にだけ置く(配らない)。
+// 将来: ファロス(やっぱROのマッピング)の map 形式との互換。いまは公式のマップ画像・マップの設定・出現モンスターを見るところまで。
+const MAPV = { q: "", file: "", cur: null, d: null, sig: "", timer: 0, msg: "" };
+const mapvJson = (u, body) => fetch(u, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : undefined).then((r) => r.json());
+function renderMapView() {
+  if ($("#mapv")) { mapvCur(); if (MAPV.file) mapvPoll(); return; }          // 作ってあるときは作り直さない(画像・検索欄・読み込みの表示が消えないように)。ほかのタブから戻ったときは、現在地と読み込みの様子だけ読み直す
+  $("#view").innerHTML = `<div id="mapv"><h2>マップ読み込み</h2>
+    <p class="hint">RO公式ツール（rotool.gungho.jp）のマップ情報（マップ画像・マップの設定・出現モンスター）を、この PC に取り込んで見ます。サイトに負荷をかけないよう、「読み込む」を押したときだけ、1つずつ時間をあけて取ります。取り込んだ内容はこの PC の中だけに置かれます（配布・公開はしません）。</p>
+    <div class="panel" style="padding:10px"><div id="mvcur" class="muted">いまいるマップを調べています…</div>
+      <div style="margin-top:8px"><input id="mvq" class="mvq" type="search" placeholder="マップ名・ファイル名で探す（例: ファロス / 星座 / 1@ct0）" style="width:min(420px,100%)"></div>
+      <div id="mvres" style="margin-top:6px"></div></div>
+    <div id="mvbody"></div></div>`;
+  $("#mvq").value = MAPV.q;
+  $("#mvq").oninput = (e) => { MAPV.q = e.target.value; mapvSearch(); };
+  $("#mapv").onclick = (e) => {
+    const b = e.target.closest("[data-mvsel]"); if (b) return mapvSelect(b.dataset.mvsel);
+    if (e.target.closest("#mvload")) return mapvLoad();
+  };
+  mapvCur(); mapvSearch(); if (MAPV.file) mapvSelect(MAPV.file);
+}
+async function mapvCur() {
+  let c; try { c = await mapvJson("/api/mapcur"); } catch (e) { return; }
+  const el = $("#mvcur"); if (!el) return;
+  if (c.off) { el.textContent = "公式サイトの機能が使えません。"; return; }
+  MAPV.cur = c;
+  if (!c.map) { el.innerHTML = "いまいるマップ: <span class=\"muted\">まだ分かりません（ROにログインしてマップを移動すると出ます）</span>"; return; }
+  const btn = (c.files || []).map(([f, n]) => `<button class="ghost" data-mvsel="${esc(f)}" title="${esc(f)}">${esc(n)} を見る</button>`).join(" ");
+  el.innerHTML = `いまいるマップ: <b>${esc(cn(c.char))}</b>${c.live ? "" : " <span class=\"muted\">（最後にいた場所）</span>"} <span class="tag">${esc(c.map)}</span> ${btn || "<span class=\"muted\">公式サイトのマップ一覧にまだ見つかりません。下の検索から（一覧が無ければ、どれか1つ読み込むと取れます）</span>"}`;
+}
+let MAPV_SEQ = 0;
+async function mapvSearch() {
+  const my = ++MAPV_SEQ;
+  let r; try { r = await mapvJson("/api/maps?q=" + encodeURIComponent(MAPV.q)); } catch (e) { return; }
+  const el = $("#mvres"); if (!el || my !== MAPV_SEQ) return;      // 遅れて届いた古い結果では上書きしない
+  if (!r.have) { el.innerHTML = `<span class="muted">マップの一覧がまだありません。どれか1つ「読み込む」と、いっしょに一覧も取り込みます。</span> <button class="ghost" data-mvsel="1@23inf">ファロス（入口）から試す</button>`; return; }
+  el.innerHTML = r.rows.length ? r.rows.map(([f, n, have]) => `<button class="ghost" data-mvsel="${esc(f)}" title="${esc(f)}">${have ? "● " : ""}${esc(n)} <span class="muted">${esc(f)}</span></button>`).join(" ") + (r.rows.length >= 60 ? ` <span class="muted">…ほかにもあります（もう少し絞ってください）</span>` : "") : `<span class="muted">見つかりません。</span>`;
+}
+async function mapvSelect(f) {
+  MAPV.file = f; MAPV.d = null; MAPV.sig = ""; MAPV.msg = "";
+  await mapvPoll();
+}
+async function mapvLoad() {
+  if (!MAPV.file) return;
+  const r = await mapvJson("/api/map", { file: MAPV.file }).catch(() => ({}));
+  MAPV.msg = r.started === false ? "いま別のマップを読み込み中です。終わるまでお待ちください。" : "";
+  MAPV.sig = "";
+  await mapvPoll();
+}
+async function mapvPoll() {
+  clearTimeout(MAPV.timer);
+  if (TAB !== "mapview" || !MAPV.file) return;
+  let d; try { d = await mapvJson("/api/map?file=" + encodeURIComponent(MAPV.file)); } catch (e) { return; }
+  const body = $("#mvbody"); if (!body) return;
+  const job = d.job && d.job.file === MAPV.file ? d.job : null;
+  const sig = JSON.stringify([d.map, job && job.state, MAPV.msg]);      // 進み具合の数字(job.done など)は含めない(帯だけ書きかえる)
+  if (sig !== MAPV.sig) {
+    const wasOpen = body.querySelector("details")?.open;
+    MAPV.sig = sig; MAPV.d = d; body.innerHTML = mapvBodyHtml(d);
+    const dt = body.querySelector("details"); if (dt && wasOpen) dt.open = true;
+    if (d.map) { mapvSearch(); mapvCur(); }
+  }
+  const bar = $("#mvbar"); if (bar) bar.innerHTML = mapvBarHtml(d);      // 変わったときだけ描き直す(画像がちらつかないように)
+  if (d.job && d.job.file === MAPV.file && d.job.state === "loading") MAPV.timer = setTimeout(mapvPoll, 2500);
+}
+function mapvBarHtml(d) {
+  const job = d.job && d.job.file === MAPV.file ? d.job : null;
+  return job && job.state === "loading" ? `<div class="busybar">${esc(job.msg || "読み込み中")}${job.total ? `（${job.done}/${job.total}）` : ""}</div>`
+    : job && job.state === "error" ? `<div class="busybar" style="background:#ffb4a8;color:#4a0d00">${esc(job.msg)}</div>` : "";
+}
+const MV_BGM = ["BGM No", "BGM Name", "アーティスト情報"];
+function mapvBodyHtml(d) {
+  const f = MAPV.file, job = d.job && d.job.file === f ? d.job : null, loading = !!job && job.state === "loading";
+  const st = d.status || {};
+  const bar = `<div id="mvbar">${mapvBarHtml(d)}</div>`;
+  const msg = MAPV.msg ? `<div class="hint warn">${esc(MAPV.msg)}</div>` : "";
+  const m = d.map;
+  const loadBtn = `<button id="mvload" class="${m ? "ghost" : ""}" ${loading ? "disabled" : ""}>${m ? "公式サイトから読み込み直す" : "公式サイトから読み込む"}</button>`;
+  if (!m) return `<div class="panel" style="padding:12px;margin-top:10px"><b>${esc(f)}</b> はまだ取り込んでいません。<div style="margin-top:8px">${loadBtn}</div>${bar}${msg}${st.paused_until ? `<div class="hint">サイトの調子が悪かったので、しばらく休んでいます。</div>` : ""}</div>`;
+  const bgm = m.props.filter(([k]) => MV_BGM.includes(k)).map(([, v]) => v).filter(Boolean).join(" / ");
+  const rows = m.props.filter(([k]) => !MV_BGM.includes(k));
+  const mons = m.mons.length
+    ? `<div class="panel tablewrap" style="margin-top:8px"><table><thead><tr><th class="l">モンスター</th><th>Lv</th><th>HP</th><th>属性</th><th>種族</th><th>サイズ</th><th>種類</th><th class="l">使うスキル</th></tr></thead><tbody>${
+      m.mons.map((x) => `<tr><td class="l"><a href="https://rotool.gungho.jp/monster/${encodeURIComponent(x.id)}" target="_blank" rel="noopener">${esc(x.jname)}</a>${x.d ? "" : ` <span class="muted" title="まだ詳細を取っていません">…</span>`}</td><td>${x.lv ? fmtN(x.lv) : "-"}</td><td>${x.hp ? fmtN(x.hp) : "-"}</td><td>${esc(x.ele || "-")}</td><td>${esc(x.race || "-")}</td><td>${esc(x.size || "-")}</td><td>${esc(x.cls || "-")}</td><td class="l muted" style="max-width:360px">${esc((x.skills || []).join("、"))}</td></tr>`).join("")}</tbody></table></div>
+      ${m.small ? "" : `<p class="hint">出現モンスターが多いマップなので、詳細（Lv・属性など）は取り込んでいません。名前を押すと公式サイトのページが開きます。</p>`}`
+    : `<p class="hint">公式サイトに、このマップの出現モンスターの情報はありませんでした（ファロスのようなマップは載っていないことがあります）。</p>`;
+  return `<div class="panel" style="padding:12px;margin-top:10px"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><b style="font-size:16px">${esc(m.title || m.name)}</b>
+      <span class="muted">${bgm ? "♪ " + esc(bgm) + " ・ " : ""}取り込み ${when(m.t)}</span> ${loadBtn} <a href="https://rotool.gungho.jp/map/${encodeURIComponent(f)}" target="_blank" rel="noopener">公式で開く</a></div>${bar}${msg}
+    ${m.img ? `<div style="margin-top:10px"><img src="/mapimg/${encodeURIComponent(m.img)}" alt="" style="max-width:100%;height:auto;border-radius:6px;background:#0002"></div>` : ""}
+    <details style="margin-top:10px"><summary>マップの設定（${rows.length + m.blocked.length}項目）</summary><div class="tablewrap"><table><tbody>${rows.map(([k, v]) => `<tr><td class="l">${esc(k)}</td><td class="l">${esc(v)}</td></tr>`).join("")}${m.blocked.map(([k, items]) => `<tr><td class="l">${esc(k)}</td><td class="l muted">${items.length ? esc(items.join("、")) : "-"}</td></tr>`).join("")}</tbody></table></div></details></div>
+    <h3 style="margin:14px 2px 0">出現モンスター（${m.mons.length}）</h3>${mons}`;
 }
 
 function renderSettings(groups) {

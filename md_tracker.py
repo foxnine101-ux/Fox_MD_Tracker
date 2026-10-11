@@ -15,6 +15,7 @@ import os
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
@@ -30,7 +31,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.52.8"
+VERSION = "2.53.0"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -430,6 +431,32 @@ def start_live_server(core, lock, cfg):
             if path == "/__show":
                 (SHOW_HOOK or open_browser)()
                 return self._send(200, "ok", "text/plain")
+            if path.startswith("/mapimg/"):           # 公式のマップの画像(この PC に取り込んだもの)
+                full = OFFICIAL.img_path(urllib.parse.unquote(path[len("/mapimg/"):])) if OFFICIAL is not None else ""
+                if not full or not os.path.isfile(full):
+                    return self._send(404, "not found", "text/plain")
+                with open(full, "rb") as f:
+                    return self._send(200, f.read(), "image/png" if full.endswith(".png") else "image/jpeg", "public, max-age=86400")
+            if path in ("/api/map", "/api/maps", "/api/mapcur"):
+                if OFFICIAL is None:
+                    return self._send(200, json.dumps({"off": True}), "application/json")
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if path == "/api/maps":            # マップの一覧から探す
+                    out = {"rows": OFFICIAL.map_search((q.get("q") or [""])[0]), "have": len(OFFICIAL.maplist)}
+                elif path == "/api/mapcur":        # いまいるマップ(通信から分かったもの) → 公式のマップの候補
+                    with lock:
+                        w = core.where()
+                        cur = [n for n in core.currents.values() if n]
+                    cand = sorted(((v["t"], n, v) for n, v in w.items()), reverse=True)
+                    cand = [c for c in cand if c[1] in cur] or cand
+                    out = {"char": "", "map": "", "files": []}
+                    if cand:
+                        _, n, v = cand[0]
+                        out = {"char": n, "map": v["map"], "md": v.get("md", ""), "live": n in cur, "files": OFFICIAL.map_files_by_suffix(v["map"])}
+                else:                              # 取り込んだマップの中身と、読み込みの様子
+                    f = (q.get("file") or [""])[0]
+                    out = {"map": OFFICIAL.map_view(f) if f else None, "job": dict(OFFICIAL.map_job), "status": OFFICIAL.status()}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/now.json":
                 with lock:
                     w = core.where()
@@ -507,6 +534,17 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/map" and self._local_only():
+                # 公式サイトからマップを1つ読み込む: {file: "1@23inf"}。裏で動かす(進み具合は GET /api/map?file=…)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 2000)).decode("utf-8"))
+                    if OFFICIAL is None:
+                        raise ValueError
+                    started = OFFICIAL.start_map(str(b.get("file") or ""))
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps({"ok": True, "started": started}), "application/json")
             if self.path.split("?")[0] == "/api/official" and self._local_only():
                 # 公式サイトからの収集: {enabled: bool} で入り切り、{run: 1} で「今すぐ調べる」(休み中でなければ)
                 try:
