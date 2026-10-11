@@ -4730,10 +4730,10 @@ function renderDmg(chars, now) {
     <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
     ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter, undefined, { numeric: true })).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(G[id].name ? G[id].name + "（" + gearText(G[id].p) + "）" : gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(cn(DMG_CHAR)) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
-  h = officialHtml() + mobGroupsHtml() + h;
+  h = officialHtml() + h;          // 名前が分からない攻撃者(mobGroupsHtml)は、表のいちばん下に出す
   if (!mds.length) {
     h += `<div class="panel empty">まだ被ダメの記録がありません。<br>Fox_MD_Tracker v2.0.0 以上を起動したまま狩りをすると、受けた攻撃がここにたまります。</div>`;
-    $("#view").innerHTML = h + skillFixHtml(); bindDmg(); return;
+    $("#view").innerHTML = h + mobGroupsHtml() + skillFixHtml(); bindDmg(); return;
   }
   for (const [w, W] of mds) {
     if (DMG_MD && w !== DMG_MD) continue;
@@ -4752,7 +4752,7 @@ function renderDmg(chars, now) {
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
-  $("#view").innerHTML = h + skillFixHtml();
+  $("#view").innerHTML = h + mobGroupsHtml() + skillFixHtml();
   bindDmg();
 }
 // 受けたスキルの一覧。名前がわからない技(「スキル123」)に名前を付けられる(この PC で見ているときだけ)
