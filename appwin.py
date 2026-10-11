@@ -57,6 +57,11 @@ class AppWindow(object):
         (そうしないと、次に開いたとき、最大化の大きさの、最大化ではない窓になってしまう)。"""
         try:
             w = self.win
+            try:
+                if str(w.native.WindowState) == "Minimized":      # 最小化中は大きさ・位置が当てにならない(最大化の印も上書きしない)
+                    return
+            except Exception:
+                pass
             mx = self._is_max()
             if mx:
                 rb = w.native.RestoreBounds

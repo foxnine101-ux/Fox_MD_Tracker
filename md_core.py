@@ -358,6 +358,11 @@ class MDCore(object):
         self.char_info = data.get("char_info", {})
         self.account_aids |= set(data.get("account_aids", []))   # ゲーム中に起動し直しても自分を見分けられるように
 
+    def forget_conn(self, key):
+        """同じ(IP・ポートの組)で新しい接続が始まった。古い接続の記録(名前・場所・アカウント)を捨てる(新しい接続の読み取りに持ち越さない)。"""
+        self.conn.pop(key, None)
+        self.conn_account.pop(key, None)
+
     # ---------- 中身 ----------
     def _c(self, key):
         c = self.conn.get(key)

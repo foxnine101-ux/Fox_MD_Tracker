@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.52.7"
+VERSION = "2.52.8"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -938,10 +938,22 @@ class Sniffer(object):
             ip, tcp = p[IP], p[TCP]
             if not ip.src.startswith(gp.RO_SERVER_PREFIX):
                 return
+            key = (ip.src, tcp.sport, ip.dst, tcp.dport)
+            if int(tcp.flags) & 0x02:          # SYN(サーバーの SYN+ACK)= 新しい接続。パソコン側のポートは使い回されるので、前の接続の続きと取り違えないよう古い記録を捨てる
+                with self.lock:
+                    old = self.scanners.pop(key, None)
+                    if old is not None:
+                        self.core.forget_conn(key)
+                        if CHARS is not None:
+                            CHARS._synced.discard(key)
+                        for k in [k for k in _EQ_WATCH if k[0] == key]:
+                            _EQ_WATCH.pop(k, None)
+                            _EQ_LOGGED.discard(k)
+                        print("[通信] 同じポートで接続し直されました。前の接続の記録を捨てます: {}:{} → {}:{}".format(*key))
+                return
             data = bytes(tcp.payload)
             if not data:
                 return
-            key = (ip.src, tcp.sport, ip.dst, tcp.dport)
             if tcp.sport in server_core.LOGIN_PORTS:
                 with self.lock:
                     SERVERS.login_data(key, data)    # ワールドの一覧(ワールド名とキャラ選択サーバーの IP)
