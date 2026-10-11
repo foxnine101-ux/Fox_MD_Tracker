@@ -932,6 +932,10 @@ details.slotc{border-color:var(--slotc)}
 .relbox>summary{font-size:13px}
 .relgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:3px 6px}
 .bfi.sm{padding:1px 6px;font-size:12px}
+.stgrid{grid-template-columns:minmax(300px,380px) 1fr !important}.stcol{display:flex;flex-direction:column;gap:10px;min-width:0}
+@media (max-width:900px){.stgrid{grid-template-columns:1fr !important}}
+.stgrid>details{min-width:0}#stp{overflow-x:auto}.stpc{white-space:nowrap}.stpbtn{padding:1px 7px;font-size:12px}.stpin{width:4.4em;text-align:center}
+.stpres{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;margin:8px 0}.stph{font-weight:700;margin:10px 0 2px;font-size:13px}
 .bfi.sw{gap:8px}.bfi.sw input[type=checkbox]{display:none}
 .bfi .swt{flex:none;width:28px;height:15px;border-radius:8px;background:var(--line);position:relative;transition:background .15s}
 .bfi .swt::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;background:#fff;transition:left .15s}
@@ -1357,7 +1361,8 @@ function engCalcRaw(model, xkinds) {         // 画面なしの計算。{c: 計�
   for (const k of ["STR", "AGI", "VIT", "INT", "DEX", "LUK"]) tot[k] = st["n_A_" + k];
   const bonus = ENG.hm.g_bonusStatus || [];
   ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { tot[k] = ((model.pureStatus || [])[6 + i] || 0) + (bonus[6 + i] || 0); });   // 特性ステータスは 素点 + 補正
-  return { c: r.charaData, core: r.coreOutput || {}, tot, x, spec: r.specData || [] };
+  const dm = ENG.xinfo && ENG.xinfo.dispDataMap;      // 計算の直後に読む(ASPD の内訳: 12 = 装備の攻撃速度+%、101 = 装備・スキルの ASPD+)
+  return { c: r.charaData, core: r.coreOutput || {}, tot, x, spec: r.specData || [], aspdU: dm ? dm.get(12) : null, aspdP: dm ? dm.get(101) : null };
 }
 // ふつうの装備のランダムオプションは model に入らず、ラトリオの中の表(g_equipRndOptTable[場所][枠] = [種類, 値])に残る(これも隠れた状態)。
 // Fox では model.foxRnd[場所 0〜10] に持ち、計算のたびに表へ書き戻す。シャドウ装備の分は model.shadowEquip.rndOpt からラトリオが自分で入れる
@@ -1905,7 +1910,7 @@ document.addEventListener("click", (e) => {       // 維持の表の「選ぶ」
   const [ri, j] = b.dataset.kfix.split(":").map(Number), x = (((SIMC.keepView || [])[ri] || {}).missRows || [])[j], c = simcCur(); if (!x || !c) return;
   const mm = x.mm || c.model;
   const opts = x.isCard ? (() => { const seen = new Set(); return simcCardOpts(x.region, mm.equip[x.region]).flat().filter((o) => o.v && !seen.has(o.v) && seen.add(o.v)); })() : simcItemOpts(mm.status.jobId, x.region, true).filter((o) => o.v !== simcNoneId(x.region));
-  pickOpen(b, opts, null, (v, o) => { SETTINGS.ratLinks = SETTINGS.ratLinks || {}; SETTINGS.ratLinks[x.gameId] = o.n || o.t; saveSettings(); SIMC.keep = null; SIMC.cmpRes = null; render(); });
+  pickOpen(b, opts, null, (v, o) => { SETTINGS.ratLinks = SETTINGS.ratLinks || {}; SETTINGS.ratLinks[x.gameId] = o.n || o.t; saveSettings(); if (SIMC.stp) { SIMC.stp.patSig = ""; SIMC.stp.rowSig = ""; SIMC.stp.sugSig = ""; SIMC.stp.effSig = ""; } SIMC.cmpRes = null; render(); });
 });
 document.addEventListener("click", (e) => { const b = e.target.closest && e.target.closest("[data-simgo]"); if (b) { try { simcGoDmg(...JSON.parse(b.dataset.simgo)); } catch (err) { console.warn(err); } } });
 function simcSchemaKick(m) {
@@ -1951,33 +1956,6 @@ async function simcTagKick(m) {
 // ---- ASPD・無詠唱の維持(旧「ステ振りの相談」と「装備セットごとの確認」を1つにまとめたもの) ----
 // 選んだ装備スロット × シャドウのスロットの全部を、いまのキャラ(ステータス・支援・習得スキルは「いまのまま」)に着せて、ラトリオの計算で ASPD・詠唱を並べる。
 // ラトリオの計算なので、装備の ASPD・変動詠唱の効果、セット効果、エンチャント、カード、ランダムオプション、精錬も、実際に着ているときと同じ状態で入る
-const simcKeepSig = (m) => JSON.stringify(m) + "|" + JSON.stringify([SIMC.opt.mainSel, SIMC.opt.shSel]);
-function simcKeepKick(m) {
-  if (SIMC.keep && SIMC.keep.sig === simcKeepSig(m)) return;
-  clearTimeout(SIMC.keepT);
-  SIMC.keepT = setTimeout(() => { const c = simcCur(); if (c) simcKeepRun(c.model); }, SIMC.keep ? 700 : 0);      // 数字を打っている最中は計算しない
-}
-function simcKeepRun(m) {
-  const sig = simcKeepSig(m);
-  if ((SIMC.keep && SIMC.keep.sig === sig) || SIMC.keepBusy === sig) return;
-  SIMC.keepBusy = sig;
-  const alive = () => { const c = simcCur(); return !!c && SIMC.keepBusy === sig && simcKeepSig(c.model) === sig; };
-  (async () => {
-    const rows = []; let total = 0;
-    try {
-      const sets = simcOptSets(m); total = sets.length;
-      for (const S of sets) {
-        await sleep(0); if (!alive()) return;
-        const r = engCalcCached(S.mm);
-        rows.push({ label: S.label, miss: S.miss, missRows: S.missRows, colors: S.colors, learned: simcLearnedList(S.mm), aspd: r.c[37], castP: (r.tot.DEX || 0) * 2 + (r.tot.INT || 0), cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp, hp: r.c[23] });
-        const el = $("#scckeep"); if (el) el.innerHTML = simcKeepTable(m, rows, total);
-      }
-      SIMC.keep = { sig, rows };
-    } catch (err) { if (err.message !== "changed") console.warn("keep", err); }
-    finally { if (SIMC.keepBusy === sig) SIMC.keepBusy = ""; }
-    const el = $("#scckeep"); if (el && SIMC.keep && SIMC.keep.sig === sig) el.innerHTML = simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length);
-  })();
-}
 // 【習】= 習得スキルのレベルで効果が変わる装備・カード(ラトリオが候補の名前の先頭に付ける)。着せ替えても習得スキルは「いまのキャラのもの」がそのまま使われる(装備セットには入っていない)ので、
 // 習得スキルが入っていないと効果が出ない → 維持の確認で、どの装備が【習】か・習得スキルが何個入っているかを出す
 function simcLearnedList(m) {
@@ -1995,22 +1973,6 @@ function simcLearnedList(m) {
 const simcLearnedCount = (m) => { const sc = simcSchema(m); return sc ? sc.filter((it) => it.g === "learn" && Number((m[it.f] || [])[it.i]) > 0).length : null; };
 // 入らなかった装備・カードの一覧(どれが入らなかったか)。「選ぶ」でラトリオの候補に結びつけると、次から入る
 const simcMissHtml = (rows, ri) => rows && rows.length ? `<div class="missdet" title="ラトリオの候補に同じ名前が無くて、計算に入っていません（その分、数字が実際と違います）。「選ぶ」で候補に結びつけると、次から入ります">入らなかった: ${rows.slice(0, 5).map((x, j) => `${esc(x.slot || "")} ${esc(x.name)}${ri === undefined ? "" : ` <button class="ghost" data-kfix="${ri}:${j}">選ぶ</button>`}`).join("、")}${rows.length > 5 ? ` ほか ${rows.length - 5} 件` : ""}</div>` : "";
-function simcKeepTable(m, rows, total) {
-  SIMC.keepView = rows;
-  const n = simcNum, O = SIMC.opt, TG = Math.max(100, Math.min(193, +O.target || 193));
-  let h = `<table class="multi"><tr><th>装備パターン</th><th>ASPD</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th><th>判定</th></tr>`
-    + rows.map((x, ri) => {
-      const okA = !O.aspd || x.aspd >= TG, okC = !O.cast || x.castP >= 530;
-      return `<tr><td>${x.colors && x.colors.length ? `<span class="setdot" style="background:${simcGrad(x.colors)}"></span>` : ""}${esc(x.label)}${x.learned && x.learned.length ? ` <span class="tag" title="【習】の装備・カード（習得スキルのレベルで効果が変わる）: ${esc(x.learned.join("、"))}">習 ${x.learned.length}</span>` : ""}${simcMissHtml(x.missRows, ri)}</td>
-        <td class="v"><span class="${x.aspd >= TG ? "good" : ""}">${n(x.aspd, 1)}</span></td><td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td>
-        <td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td>
-        <td>${okA && okC ? `<span class="good">維持できる</span>` : `<span class="warn">${[!okA ? "ASPD あと " + n(TG - x.aspd, 1) : "", !okC ? "詠唱 DEX+" + Math.ceil((530 - x.castP) / 2) + " か INT+" + (530 - x.castP) : ""].filter(Boolean).join(" ／ ")}</span>`}</td></tr>`;
-    }).join("") + `</table>`;
-  if (rows.length < total) return h + `<div class="spin">計算中… ${rows.length} / ${total}</div>`;
-  const bad = rows.filter((x) => (O.aspd && x.aspd < TG) || (O.cast && x.castP < 530));
-  h += `<div class="multisum">${bad.length ? `<span class="warn">いまのステータスでは、${bad.length} / ${rows.length} パターンで条件を満たせません。</span> 下の「いちばん余る振り方を探す」で、全部のパターンで満たせる AGI・DEX・INT を探せます。` : `<span class="good">選んだ ${rows.length} パターンの全部で、いまのステータス・支援のまま条件を満たしています。</span>`}</div>`;
-  return h;
-}
 // ---- ステータスポイント ----
 // 使うポイント = ラトリオの GetStatusTotalCost(値) の合計。もらえるポイント = 48(転生職は 100。養子は 48) + Lv ごとの GetEarningStatusPoint
 function simcPoints(m) {
@@ -2053,26 +2015,6 @@ function simcOptSets(m) {
   return out;
 }
 // 届かないとき: 上限(130)まで振った場合にどれだけ足りないか、と、上限を超えてでもいくつ要るか(AGI だけ / DEX だけ / INT だけ)
-async function simcOptShort(sets, TG, tick, O) {
-  const MAX = SIMC_STMAX, rows = [], st0 = sets[0].mm.status, clone = simcClone;
-  for (const S of sets) {
-    const row = { label: S.label };
-    const at = async (k, v, other) => { await tick("足りない分を調べています…"); const t = clone(S.mm); t.status.agi = other.agi; t.status.dex = other.dex; t.status[k] = v; return engCalcCached(t).c[37] >= TG; };
-    const t0 = clone(S.mm); t0.status.agi = MAX; t0.status.dex = MAX; row.aspd = engCalcCached(t0).c[37];
-    if (O.aspd && row.aspd < TG) {
-      for (const [k, o] of [["agi", { agi: 0, dex: MAX }], ["dex", { agi: MAX, dex: 0 }]]) {
-        if (!(await at(k, SIMC_STTOP, o))) { row[k] = null; continue; }
-        let lo = MAX + 1, hi = SIMC_STTOP;
-        while (lo < hi) { const mid = (lo + hi) >> 1; if (await at(k, mid, o)) hi = mid; else lo = mid + 1; }
-        row[k] = lo;
-      }
-    }
-    const tc = clone(S.mm); tc.status.dex = MAX; tc.status.int = MAX; const rc = engCalcCached(tc); row.castP = (rc.tot.DEX || 0) * 2 + (rc.tot.INT || 0);
-    if (O.cast && row.castP < 530) { const gap = 530 - row.castP; row.dexC = MAX + Math.ceil(gap / 2); row.intC = MAX + gap; }
-    rows.push(row);
-  }
-  return rows;
-}
 function simcSbAvg(m, over) {                // サンドバックマンの設定のメインスキルで、ステータスを over にしたときの1回のダメージ(平均)。INT を下げた影響を測る用
   try {
     if (!ENG.sb) return null;
@@ -2083,98 +2025,208 @@ function simcSbAvg(m, over) {                // サンドバックマンの設�
     const r = engSandbag(mm, cfg, mt); return r ? { avg: r.per.avg, name: item.name } : null;
   } catch (e) { return null; }
 }
-async function simcOptRun(m) {
-  const O = SIMC.opt, sig = JSON.stringify(m), st = m.status, MAX = SIMC_STMAX, cost = (v) => ENG.hm.GetStatusTotalCost(v);
-  const TG = Math.max(100, Math.min(193, +O.target || 193));
-  const clone = (x) => JSON.parse(JSON.stringify(x));
-  const alive = () => { const c = simcCur(); return !!c && O.busy && JSON.stringify(c.model) === sig; };
-  O.busy = true; O.res = null; O.prog = "準備中…"; render();
-  let n = 0;
-  const tick = async (label) => { if (++n % 4 === 0) { await sleep(0); if (!alive()) throw new Error("changed"); O.prog = label; const el = $("#sccoprog"); if (el) el.textContent = label; } };
-  try {
-    const sets = simcOptSets(m);
-    for (const S of sets) { const r = engCalcCached(S.mm); S.bD = (r.tot.DEX || 0) - st.dex; S.bI = (r.tot.INT || 0) - st.int; }
-    const lim = (k) => Math.max(1, Math.min(MAX, Math.round(+O.min[k] || 1)));     // 下限(「MATK のために INT は 120 以上」など)
-    const dLo = Math.max(lim("dex"), O.cast ? Math.max(1, ...sets.map((S) => Math.ceil((530 - (MAX + S.bI)) / 2 - S.bD))) : 1);
-    const intNeed = (d) => Math.max(lim("int"), O.cast ? Math.max(1, ...sets.map((S) => 530 - 2 * (d + S.bD) - S.bI)) : (lim("int") > 1 ? 1 : st.int));
-    const short = async (why) => { O.res = { sig, target: TG, fail: why, short: await simcOptShort(sets, TG, tick, O), aspd: O.aspd, cast: O.cast }; };
-    if (dLo > MAX) return await short("DEX と INT を上限（" + MAX + "）まで振っても、変動詠唱なし（詠唱の値 530）に届きません。");
-    const agiNeed = {};
-    for (let d = dLo; d <= MAX; d++) agiNeed[d] = O.aspd ? lim("agi") : Math.max(lim("agi"), lim("agi") > 1 ? 1 : st.agi);
-    if (O.aspd) {
-      for (let k = 0; k < sets.length; k++) {
-        const S = sets[k], label = `「${S.label}」を調べています（${k + 1} / ${sets.length}）…`;
-        const ok = async (a, d) => { await tick(label); const t = clone(S.mm); t.status.agi = a; t.status.dex = d; return engCalcCached(t).c[37] >= TG; };
-        let a = null;
-        if (!(await ok(MAX, MAX))) S.never = true;
-        else { let lo = lim("agi"), hi = MAX; while (lo < hi) { const mid = (lo + hi) >> 1; if (await ok(mid, MAX)) hi = mid; else lo = mid + 1; } a = lo; }
-        for (let d = MAX; d >= dLo; d--) {
-          if (a !== null) { while (a <= MAX && !(await ok(a, d))) a++; if (a > MAX) a = null; }
-          agiNeed[d] = a === null || agiNeed[d] === null ? null : Math.max(agiNeed[d], a);
-        }
-      }
-    }
-    const cands = [];
-    for (let d = dLo; d <= MAX; d++) { const a = agiNeed[d], i = intNeed(d); if (a === null || i > MAX) continue; cands.push({ agi: a, dex: d, int: i, cost: cost(a) + cost(d) + cost(i) }); }
-    if (!cands.length) return await short("AGI と DEX を上限（" + MAX + "）まで振っても、ASPD " + TG + " に届かない装備があります" + (sets.some((S) => S.never) ? "（" + sets.filter((S) => S.never).map((S) => S.label).join("・") + "）" : "") + "。");
-    cands.sort((x, y) => x.cost - y.cost || y.dex - x.dex);
-    // 計算係で確かめる(ステータスの値で変わる補正があると、式どおりにならないことがある → 足りなければ INT / AGI を1ずつ足す)
-    const best = cands[0];
-    for (let guard = 0; guard < 12; guard++) {
-      let okA = true, okC = true;
-      for (const S of sets) { await tick("確かめています…"); const t = clone(S.mm); Object.assign(t.status, { agi: best.agi, dex: best.dex, int: best.int }); const r = engCalcCached(t); if (O.aspd && r.c[37] < TG) okA = false; if (O.cast && (r.tot.DEX || 0) * 2 + (r.tot.INT || 0) < 530) okC = false; }
-      if (okA && okC) break;
-      if (!okC && best.int < MAX) best.int++; else if (!okA && best.agi < MAX) best.agi++; else break;
-      best.cost = cost(best.agi) + cost(best.dex) + cost(best.int);
-    }
-    const alts = [];
-    for (const c of cands.slice(1)) { if ([best].concat(alts).every((x) => Math.abs(x.dex - c.dex) >= 4)) alts.push(c); if (alts.length >= 4) break; }
-    const d0 = simcSbAvg(sets[0].mm, {});                      // メインスキル(サンドバックマンの設定)のダメージが、振り方でどれだけ変わるか
-    if (d0 && d0.avg) { d0.cur = d0.avg; for (const c of [best].concat(alts)) { const d = simcSbAvg(sets[0].mm, { agi: c.agi, dex: c.dex, int: c.int }); c.dmg = d ? d.avg : null; } }
-    O.res = { sig, best, alts, target: TG, sets: sets.map((S) => S.label), calcs: n, aspd: O.aspd, cast: O.cast, dmg0: d0 && d0.avg ? d0 : null };
-  } catch (e) { if (e.message !== "changed") { console.warn("opt", e); O.res = { sig, fail: "計算できませんでした: " + e.message }; } }
-  finally { O.busy = false; O.prog = ""; render(); }
+// ================= ステータスシミュレーター(旧「ステ振りの相談」+「装備セットごとの確認」を作り直したもの) =================
+// ラトリオの ASPD の式(status/stallcalc-magic-dmg-aspd.js)。AGI・DEX は「補正(装備・支援)込みの合計」:
+//   素 = 武器の基本 + √(AGI×(10+10/111) + DEX×9/49)×(…)  ← DEX は AGI の約 1/55 しか効かない
+//   → ポーション・スキル等で (200−素)×T、装備の「攻撃速度+%」で (200−x)×U、最後に装備の「ASPD+」を足す。上限は 193(BaseLv100 以上)
+//   つまり 合計(上限前 = core.aspdRaw) = C + k×√(AGI×AW + DEX×DW)(k・C は装備・支援で決まる)。2点を計算すれば k・C が出て、必要な AGI・DEX が式で解ける(実測と誤差 0 を確認)
+// 無詠唱 = 詠唱の値(DEX×2+INT。補正込みの合計)≧ 530。ポイントは GetStatusTotalCost(値) の合計(値が大きいほど1ポイントあたりの要求が増える)
+// 条件で効果が出る装備(「AGI 100 以上で…」など)があるので、式の答えは最後にラトリオの計算で確かめる(足りなければ1ずつ足す)
+const STP_AW = 10 + 10 / 111, STP_DW = 9 / 49, STP_KEYS = ["agi", "dex", "int", "vit", "str", "luk"], STP_LABEL = { agi: "AGI", dex: "DEX", int: "INT", vit: "VIT", str: "STR", luk: "LUK" };
+const stpS = (A, D) => Math.sqrt(STP_AW * A + STP_DW * D);
+const stpCost = (v) => ENG.hm.GetStatusTotalCost(v);
+const stpNonStatSig = (m) => JSON.stringify(Object.assign({}, m, { status: Object.assign({}, m.status, { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0 }) })) + "|" + JSON.stringify([SIMC.opt.mainSel, SIMC.opt.shSel]);
+const stpTarget = () => Math.max(100, Math.min(193, +SIMC.opt.target || 193));
+const stpText = (html) => { const el = document.createElement("div"); el.innerHTML = html || ""; return el.textContent.replace(/\s+/g, " "); };
+function stpState() {                           // 試算中のステータス(スロットごと)。触るまでは、基本ステータス欄の値についていく
+  const c = simcCur(); if (!c) return null;
+  if (!SIMC.stp || SIMC.stp.id !== SIMC.cur) SIMC.stp = { id: SIMC.cur, d: null, touched: false, pats: null, patSig: "", rows: null, rowSig: "", sug: null, sugSig: "", eff: null, effSig: "", tok: 0 };
+  const S = SIMC.stp; if (!S.touched || !S.d) S.d = Object.fromEntries(STP_KEYS.map((k) => [k, c.model.status[k] || 1]));
+  return S;
 }
-function simcOptHtml(m) {
-  const O = SIMC.opt, st = m.status, P = simcPoints(m), sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs;
-  const combos = sel.main.length * sel.sh.length;
+function stpEval(pat, d, kinds) {               // 装備パターン pat(の model)に、ステータス d を入れて計算 → ASPD の内訳・詠唱の値など
+  const t = simcClone(pat.mm); Object.assign(t.status, d);
+  const r = engCalcCached(t, kinds), raw = r.core.aspdRaw, U = r.aspdU || 0, P = r.aspdP || 0, a2 = raw - P, a1 = U < 100 ? (a2 - 2 * U) / (1 - U / 100) : a2;
+  return { r, raw, aspd: r.c[37], U, P, a1, up: a2 - a1, castP: 2 * (r.tot.DEX || 0) + (r.tot.INT || 0), hp: r.c[23], cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp,
+    bonus: Object.fromEntries(STP_KEYS.map((k) => [k, (r.tot[k.toUpperCase()] || 0) - d[k]])) };
+}
+function stpPats(m, S) {                         // 選んだ装備パターン(装備スロット × シャドウのスロット)。装備を着せた model を作って覚える
+  const sig = stpNonStatSig(m);
+  if (S.pats && S.patSig === sig) return S.pats;
+  S.patSig = sig; S.rowSig = ""; S.sugSig = ""; S.effSig = "";
+  return S.pats = simcOptSets(m);
+}
+function stpCal(pat, d) {                        // k・C と補正(装備・支援の AGI・DEX・INT)を、2回の計算で求める。使えない(ASPD が固定される効果など)ときは null
+  if (pat.cal !== undefined) return pat.cal;
+  const t0 = simcClone(pat.mm); Object.assign(t0.status, d); const r0 = engCalcCached(t0);
+  const t1 = simcClone(t0); t1.status.agi = d.agi + 12; const r1 = engCalcCached(t1);
+  const s0 = stpS(r0.tot.AGI, r0.tot.DEX), s1 = stpS(r1.tot.AGI, r1.tot.DEX), k = (r1.core.aspdRaw - r0.core.aspdRaw) / (s1 - s0);
+  return pat.cal = k > 0.05 && k < 2 ? { k, C: r0.core.aspdRaw - k * s0, bA: r0.tot.AGI - d.agi, bD: r0.tot.DEX - d.dex, bI: r0.tot.INT - d.int } : null;
+}
+function stpSolve(cals, MAXV) {                  // AGI・DEX・INT を、全パターンの条件を満たす中でいちばん安く(DEX を 1 ずつ動かして、要る AGI・INT を式で出す)
+  const O = SIMC.opt, lim = (k) => Math.max(1, Math.min(MAXV, Math.round(+O.min[k] || 1))), TG = stpTarget(), out = [];
+  for (let dx = lim("dex"); dx <= MAXV; dx++) {
+    let it = lim("int"), ag = lim("agi");
+    if (O.cast) for (const c of cals) it = Math.max(it, 530 - 2 * (dx + c.bD) - c.bI);
+    if (O.aspd) for (const c of cals) { const s = (TG - c.C) / c.k; if (s > 0) ag = Math.max(ag, Math.ceil((s * s - STP_DW * (dx + c.bD)) / STP_AW - c.bA - 1e-9)); }
+    if (it > MAXV || ag > MAXV) continue;
+    ag = Math.max(1, ag); it = Math.max(1, it);
+    out.push({ agi: ag, dex: dx, int: it, cost: stpCost(ag) + stpCost(dx) + stpCost(it) });
+  }
+  return out.sort((a, b) => a.cost - b.cost || b.dex - a.dex);
+}
+async function stpVerify(pats, c, d, tick) {      // 式の答えを、全パターンでラトリオの計算で確かめる。足りなければ INT / AGI を 1 ずつ足す
+  const O = SIMC.opt, TG = stpTarget(), MAXV = SIMC_STMAX; let rows = [];
+  for (let guard = 0; guard < 14; guard++) {
+    let okA = true, okC = true; rows = [];
+    for (const P of pats) { await tick(); const e = stpEval(P, Object.assign({}, d, { agi: c.agi, dex: c.dex, int: c.int })); rows.push(e); if (O.aspd && e.raw < TG) okA = false; if (O.cast && e.castP < 530) okC = false; }
+    c.ok = okA && okC; if (c.ok) break;
+    if (!okC && c.int < MAXV) c.int++; else if (!okA && c.agi < MAXV) c.agi++; else break;
+  }
+  c.cost = stpCost(c.agi) + stpCost(c.dex) + stpCost(c.int); c.rows = rows;
+  return c;
+}
+function stpExtra(r) {                            // 所持限界量・状態異常のステ耐性の合計(ラトリオの表から)
+  const w = stpText((r.x || {})[3]).match(/所持限界量\s*([\d,]+)\s*装備品重量合計/), rows = simcXParse((r.x || {})[8], true).filter((y) => !y.hdr);
+  const ail = rows.reduce((a, y) => { const p = String(y.val).split("／")[1]; return a + (p ? parseFloat(p) || 0 : 0); }, 0);
+  return { weight: w ? +w[1].replace(/,/g, "") : null, ail, ailN: rows.length };
+}
+// ---- 画面 ----
+function stpAspdText(e, TG) {
+  const gap = TG - e.raw, a2 = e.a1 + e.up;
+  return `<b class="${e.raw >= TG ? "good" : ""}" style="font-size:18px">${simcNum(e.aspd, 1)}</b> <span class="muted">（上限前 ${simcNum(e.raw, 1)}）</span> ${e.raw >= TG ? `<span class="good">目標 ${TG} に届いています</span>` : `<span class="warn">目標 ${TG} まで あと ${simcNum(gap, 1)}</span>`}
+    <div class="muted" style="font-size:12px">内訳: 素（武器・AGI・DEX・ポーション等）<b>${simcNum(e.a1, 1)}</b> → 装備の攻撃速度+${simcNum(e.U)}%で <b>+${simcNum(e.up, 1)}</b> → 装備・スキルの ASPD+ <b>${e.P >= 0 ? "+" : ""}${simcNum(e.P, 1)}</b> → 合計 ${simcNum(e.raw, 1)}（表示の上限は 193）</div>`;
+}
+function stpMainHtml(m, S) {
+  const O = SIMC.opt, d = S.d, e = stpEval({ mm: m }, d, [3, 8]), e0 = stpEval({ mm: m }, m.status, [3, 8]), ex = stpExtra(e.r), ex0 = stpExtra(e0.r), P = simcPoints(m), TG = stpTarget();
+  const used = STP_KEYS.reduce((a, k) => a + stpCost(d[k]), 0), remain = P ? P.earned - used : null, MAXV = SIMC_STMAX;
+  const dl = (v, v0, f = 0) => { const x = Math.round((v - v0) * Math.pow(10, f)) / Math.pow(10, f); return x ? ` <span class="${x > 0 ? "good" : "warn"}">(${x > 0 ? "+" : ""}${simcNum(x, f)})</span>` : ""; };
+  const row = (k) => { const v = d[k], tot = v + e.bonus[k], base = m.status[k] || 1;
+    return `<tr><td><b>${STP_LABEL[k]}</b></td><td class="stpc"><button class="ghost stpbtn" data-stpd="${k}:-10">−10</button><button class="ghost stpbtn" data-stpd="${k}:-1">−</button><input type="number" class="stpin" min="1" max="${MAXV}" data-stpv="${k}" value="${v}"><button class="ghost stpbtn" data-stpd="${k}:1">＋</button><button class="ghost stpbtn" data-stpd="${k}:10">＋10</button></td>
+      <td class="v">${e.bonus[k] ? `+${e.bonus[k]}` : "0"}</td><td class="v"><b>${tot}</b></td><td class="v muted">${v < MAXV ? stpCost(v + 1) - stpCost(v) : "-"}</td><td class="v muted">${stpCost(v)}</td><td class="muted">${v !== base ? `基本ステータス ${base}` : ""}</td></tr>`; };
+  return `<table class="multi"><tr><th>ステータス</th><th>素のステータス（試算）</th><th title="装備・カード・エンチャント・セット効果・支援・アイテムによる分">補正</th><th>合計</th><th title="あと1ポイント上げるのに要るポイント。上げるほど増えます">次の1ptの費用</th><th title="このステータスにここまでで使ったポイント">使用pt</th><th></th></tr>${STP_KEYS.map(row).join("")}</table>
+    <div class="opts"><span>使うポイント <b>${used}</b> ／ もらえる ${P ? P.earned : "-"} → 余り <b class="${remain !== null && remain < 0 ? "warn" : "good"}">${remain === null ? "-" : remain}</b></span>
+      <button id="stpreflect" ${STP_KEYS.every((k) => d[k] === (m.status[k] || 1)) ? "disabled" : ""} title="試算のステータスを、基本ステータスの欄に入れます">基本ステータスに反映</button><button class="ghost" id="stpreset" ${S.touched ? "" : "disabled"}>基本ステータスの値に戻す</button></div>
+    <div class="stpres"><div><div class="muted">ASPD（装備・支援の補正込み）</div>${O.aspd ? stpAspdText(e, TG) : `<b>${simcNum(e.aspd, 1)}</b>`}${dl(e.aspd, e0.aspd, 1)}</div>
+      <div><div class="muted">詠唱の値（DEX×2+INT。補正込み）</div><b class="${e.castP >= 530 ? "good" : ""}" style="font-size:18px">${simcNum(e.castP)}</b> <span class="muted">／ 530 で変動詠唱なし</span>${dl(e.castP, e0.castP)}
+        <div class="muted" style="font-size:12px">= DEX ${d.dex}+${e.bonus.dex}（補正）= ${d.dex + e.bonus.dex} の2倍 ＋ INT ${d.int}+${e.bonus.int} = ${d.int + e.bonus.int}</div></div>
+      <div><div class="muted">最大HP ／ 所持限界量 ／ 状態異常のステ耐性の合計</div>${simcNum(e.hp)}${dl(e.hp, e0.hp)} ／ ${ex.weight === null ? "-" : simcNum(ex.weight)}${ex.weight !== null && ex0.weight !== null ? dl(ex.weight, ex0.weight) : ""} ／ ${simcNum(ex.ail)}%${dl(ex.ail, ex0.ail)}</div></div>`;
+}
+function stpPatsHtml(m, rows, total) {
+  SIMC.keepView = rows;
+  const n = simcNum, O = SIMC.opt, TG = stpTarget(), sg = (v) => (v > 0 ? "+" : "") + n(v);
+  let h = `<div class="muted" style="font-size:12px;margin:4px 0">選んだ装備パターンを、上の試算のステータス・いまの支援のまま着せた結果です。装備・カード・エンチャント・セット効果・ランダムオプション・精錬の効果も、実際に着ているときと同じ状態で入ります（習得スキルはいまのキャラのもの）。</div>
+    <div style="overflow-x:auto"><table class="multi"><tr><th>装備パターン</th><th>ASPD</th><th title="武器・AGI・DEX・ポーション等">素</th><th>攻撃速度+%</th><th>ASPD+</th><th>AGI補正</th><th>DEX補正</th><th>INT補正</th><th>詠唱の値</th><th>変動詠唱の短縮</th><th>固定詠唱の短縮</th><th>ディレイ短縮</th><th>最大HP</th><th>判定</th></tr>`
+    + rows.map((x, ri) => {
+      const okA = !O.aspd || x.raw >= TG, okC = !O.cast || x.castP >= 530;
+      return `<tr><td>${x.colors && x.colors.length ? `<span class="setdot" style="background:${simcGrad(x.colors)}"></span>` : ""}${esc(x.label)}${x.learned && x.learned.length ? ` <span class="tag" title="【習】の装備・カード（習得スキルのレベルで効果が変わる）: ${esc(x.learned.join("、"))}">習 ${x.learned.length}</span>` : ""}${simcMissHtml(x.missRows, ri)}</td>
+        <td class="v"><b class="${x.raw >= TG ? "good" : ""}">${n(x.aspd, 1)}</b></td><td class="v">${n(x.a1, 1)}</td><td class="v">${n(x.U)}%</td><td class="v">${sg(x.P)}</td>
+        <td class="v">${sg(x.bonus.agi)}</td><td class="v">${sg(x.bonus.dex)}</td><td class="v">${sg(x.bonus.int)}</td><td class="v"><span class="${x.castP >= 530 ? "good" : ""}">${n(x.castP)}</span></td>
+        <td class="v">${n(x.cast)}%</td><td class="v">${n(x.fixed)}%</td><td class="v">${n(x.delay)}%</td><td class="v">${n(x.hp)}</td>
+        <td>${okA && okC ? `<span class="good">維持できる</span>` : `<span class="warn">${[!okA ? "ASPD あと " + n(TG - x.raw, 1) : "", !okC ? "詠唱 あと " + (530 - x.castP) : ""].filter(Boolean).join(" ／ ")}</span>`}</td></tr>`;
+    }).join("") + `</table></div>`;
+  if (rows.length < total) return h + `<div class="spin">計算中… ${rows.length} / ${total}</div>`;
+  const bad = rows.filter((x) => (O.aspd && x.raw < TG) || (O.cast && x.castP < 530));
+  return h + `<div class="multisum">${bad.length ? `<span class="warn">いまの試算では、${bad.length} / ${rows.length} パターンで条件を満たせません。</span>` : `<span class="good">選んだ ${rows.length} パターンの全部で、条件を満たしています。</span>`}</div>`;
+}
+function stpSugHtml(m, S) {
+  const R = S.sug && S.sugSig === stpSugSig(m, S) ? S.sug : null, O = SIMC.opt, d = S.d;
+  if (!R) return `<div class="spin">いちばん安い振り方を計算中…</div>`;
+  if (R.fail) {
+    const o = R.over, MAXV = SIMC_STMAX, ov = (k, v) => v > MAXV ? `<b class="warn">${v}</b> <span class="muted">（上限 ${MAXV} を ${v - MAXV} 超える）</span>` : `<b>${v}</b>`;
+    return `<div class="warn">${esc(R.fail)}</div>` + (o ? `<div class="muted" style="font-size:12px;margin:4px 0">上限なしで計算すると、いちばん安い振り方は <b>AGI ${ov("agi", o.agi)} ／ DEX ${ov("dex", o.dex)} ／ INT ${ov("int", o.int)}</b>。上限を超える分は、装備・支援の補正（AGI+、攻撃速度+%、ASPD+）で補う必要があります（例: 攻撃速度+% や ASPD+ の付いた装備、速度増加・ブレッシング・濃縮サラマインジュースなどの支援）。上のステッパーで、補正の効果を試せます。</div>` : "");
+  }
+  const cur = stpCost(d.agi) + stpCost(d.dex) + stpCost(d.int), P = simcPoints(m);
+  const row = (label, c, i) => { const dd = c.cost - cur, rem = P ? P.earned - (c.cost + stpCost(d.vit) + stpCost(d.str) + stpCost(d.luk)) : null;
+    return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost} <span class="muted">(${dd === 0 ? "±0" : (dd > 0 ? "+" : "") + dd})</span></td><td class="v">${rem === null ? "-" : rem}</td>
+      <td>${i === undefined ? "" : c.ok === false ? `<span class="warn">確かめると届きません</span>` : `<span class="good">全パターンOK</span>`}</td><td>${i === undefined ? "" : `<button class="ghost" data-stpapply="${i}">試算に入れる</button>`}</td></tr>`; };
+  return `<div class="muted" style="font-size:12px;margin:4px 0">条件（${[O.aspd ? "ASPD " + stpTarget() : "", O.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}）を、選んだ全部の装備パターンで満たす AGI・DEX・INT のうち、使うポイントがいちばん少ない振り方です（式で出して、ラトリオの計算で確かめています）。ポイントは上げるほど1ポイントあたりが重くなるので、ふつうは「条件に要る分だけ」で止めるのが得です。</div>
+    <table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>AGI・DEX・INT に使うポイント<br>（いまの試算との差）</th><th title="この振り方にして、VIT・STR・LUK は試算のままのときの、余りのポイント">余り</th><th>確認</th><th></th></tr>
+    ${row("いまの試算", { agi: d.agi, dex: d.dex, int: d.int, cost: cur })}${R.list.map((c, i) => row(i === 0 ? "<b>いちばん安い</b>" : "ほかの候補", c, i)).join("")}</table>
+    <div class="muted" style="font-size:12px">AGI が効く理由: ASPD の式で AGI は DEX の約55倍効きます。DEX は主に詠唱の値（DEX×2+INT）のために振ります。${R.hint ? esc(R.hint) : ""}</div>`;
+}
+function stpEffHtml(m, S) {
+  const R = S.eff && S.effSig === stpEffSig(m, S) ? S.eff : null;
+  if (!R) return `<div class="spin">ポイントを足したときの影響を調べています…</div>`;
+  const n = simcNum, dl = (v, v0, f = 0) => { const x = Math.round((v - v0) * Math.pow(10, f)) / Math.pow(10, f); return x ? `<span class="${x > 0 ? "good" : "warn"}">${x > 0 ? "+" : ""}${n(x, f)}</span>` : `<span class="muted">±0</span>`; };
+  return `<div class="muted" style="font-size:12px;margin:4px 0">各ステータスを +10 したときの変化です（いまの試算が基準）。ポイントは上げるほど重いので、条件（ASPD・無詠唱）に要る分のあとは、費用に見合う効果があるものだけ足すのが得です。${R.dmgName ? `ダメージは、サンドバックマンの枠で選んでいるスキル（${esc(R.dmgName)}）の1回の平均です。` : ""}</div>
+    <table class="multi"><tr><th>+10 するステータス</th><th>かかるポイント</th><th>ASPD</th><th>詠唱の値</th><th>最大HP</th><th>所持限界量</th><th>状態異常のステ耐性の合計</th><th>${R.dmgName ? "ダメージ" : ""}</th><th>効率</th></tr>
+    ${R.rows.map((x) => `<tr><td><b>${STP_LABEL[x.k]}</b> ${x.v}→${x.v + x.step}</td><td class="v">${x.cost}</td><td class="v">${dl(x.aspd, R.base.aspd, 1)}</td><td class="v">${dl(x.castP, R.base.castP)}</td><td class="v">${dl(x.hp, R.base.hp)}</td><td class="v">${x.weight === null ? "-" : dl(x.weight, R.base.weight)}</td><td class="v">${dl(x.ail, R.base.ail)}</td>
+      <td class="v">${R.dmgName ? (x.dmg === null || R.base.dmg === null ? "-" : `${n(x.dmg)} <span class="${x.dmg > R.base.dmg ? "good" : "muted"}">(${x.dmg >= R.base.dmg ? "+" : ""}${n((x.dmg / R.base.dmg - 1) * 100, 2)}%)</span>`) : ""}</td>
+      <td class="muted">${x.hp > R.base.hp ? `HP +${n(((x.hp - R.base.hp) / x.cost) | 0)}/pt` : ""}</td></tr>`).join("")}</table>`;
+}
+const stpSugSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify([SIMC.opt.aspd, SIMC.opt.cast, SIMC.opt.target, SIMC.opt.min, S.d.vit, S.d.str, S.d.luk]);
+const stpEffSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
+function stpHtml(m) {
+  const S = stpState(), O = SIMC.opt, sel = simcOptSel(m), tM = simcSetList(m, false).tabs, tS = simcSetList(m, true).tabs, combos = sel.main.length * sel.sh.length;
   const chip = (attr, id, text, on, st2) => `<button class="settab${on ? " on" : ""}" ${attr}="${esc(id)}" ${st2 ? `style="--c:${tagColor(st2)}"` : ""}>${esc(text)}</button>`;
-  let h = `<div class="bfbar"><span class="muted">条件</span>
+  const oc = simcOptColors(m), okRows = S.rows && S.rowSig === stpRowSig(m, S);
+  return `<div id="stp"><div class="bfbar"><span class="muted">条件</span>
       <label><input type="checkbox" id="soa" ${O.aspd ? "checked" : ""}> ASPD を維持</label><label>目標 <input type="number" id="sotg" min="100" max="193" step="0.1" value="${esc(O.target)}" style="width:5.5em"></label>
       <label><input type="checkbox" id="soc" ${O.cast ? "checked" : ""}> 変動詠唱なし（詠唱の値 530）</label>
       <span class="muted" title="これより下げない値。たとえば MATK のために INT は 120 以上にしたいとき">下限</span>${["agi", "dex", "int"].map((k) => `<label>${k.toUpperCase()} <input type="number" min="1" max="${SIMC_STMAX}" data-optmin="${k}" value="${O.min[k] || 1}"></label>`).join("")}</div>
     <div class="bfbar"><div class="settabs"><span class="muted">装備スロット</span>${chip("data-optm", "now", "いまの装備", sel.main.includes("now"))}${tM.map(({ sid, st: s2 }) => chip("data-optm", sid, s2.tag, sel.main.includes(sid), s2)).join("")}</div>
       <div class="settabs"><span class="muted">シャドウのスロット</span>${chip("data-opts", "now", "いまのシャドウ", sel.sh.includes("now"))}${tS.map(({ sid, st: s2 }) => chip("data-opts", sid, s2.tag, sel.sh.includes(sid), s2)).join("")}</div>
-      <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ調べます）</span>` : ""}</span></div>
-    <div class="muted" style="font-size:12px;margin:4px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（上の「よく使う支援」と「支援・アイテム・スキル」の枠のオンのもの。ステータス・習得スキルも、いまのまま）。装備の ASPD・詠唱の効果、セット効果、エンチャント、カード、ランダムオプションも入れて、実際に着ているときと同じ状態で計算します。</div>
+      <span class="muted">${combos} 通り${combos > SIMC_OPT_COMBO_MAX ? `<span class="warn">（多いので先頭の ${SIMC_OPT_COMBO_MAX} 通りだけ）</span>` : ""}</span></div>
+    <div class="muted" style="font-size:12px;margin:2px 0">想定している支援・アイテム: <b>${esc(simcBuffSum(m).replace(/^オン \d+個: /, "") || "なし")}</b>（「支援・アイテム・スキル」の枠のオンのもの）</div>
+    <div id="stpmain">${stpMainHtml(m, S)}</div>
     ${(() => { const L = simcLearnedList(m), n = simcLearnedCount(m); return L.length || n === 0 ? `<div class="muted" style="font-size:12px;margin:4px 0">【習】の装備（習得スキルのレベルで効果が変わる）: <b>${L.length ? esc(L.join("、")) : "いまの装備には無し"}</b>。習得スキルは、いまのキャラのものを使います（${n === null ? "確認中" : n === 0 ? `<span class="warn">入っていません。【習】の効果が出ません。「現在のキャラを反映」で入れてください</span>` : n + " 個入っています"}）。</div>` : ""; })()}
-    <div id="scckeep" class="${simcOptColors(m).length ? "setframe" : ""}" style="--fc:${simcGrad(simcOptColors(m))}">${SIMC.keep && SIMC.keep.sig === simcKeepSig(m) ? simcKeepTable(m, SIMC.keep.rows, SIMC.keep.rows.length) : `<div class="spin">計算中…</div>`}</div>
-    <div class="bfbar"><button id="sogo" ${O.busy || !(O.aspd || O.cast) ? "disabled" : ""}>${O.busy ? "計算中…" : "いちばん余る振り方を探す"}</button><span class="muted" id="sccoprog">${esc(O.prog || "")}</span></div>`;
-  const R = O.res;
-  if (!R) return h + `<div class="muted">AGI・DEX・INT の振り方のうち、条件を満たして、使うステータスポイントがいちばん少ないものを探します。ほかのステータス・支援は、いまのままで計算します。シャドウ装備も計算に入っています（「いまのシャドウ」= 計算機にいま入っているもの）。選んだ装備スロット × シャドウのスロットの全部で条件を満たす振り方を探します（1通りにつき30秒ほどかかります）。</div>`;
-  if (R.sig !== JSON.stringify(m)) h += `<div class="warn" style="margin-bottom:4px">ステータスや装備を変えたので、下の結果は前の状態のものです。もう一度探してください。</div>`;
-  if (R.fail) {
-    const MAXV = SIMC_STMAX, ov = (v) => v === null || v === undefined ? `<span class="warn">${SIMC_STTOP} でも届かない</span>` : `<b class="warn">${v}</b> <span class="muted">（上限 ${MAXV} を ${v - MAXV} 超える）</span>`;
-    const rows = (R.short || []).map((x) => `<tr><td>${esc(x.label)}</td>
-      ${R.aspd ? `<td class="v">${simcNum(x.aspd, 1)}</td><td class="v">${x.aspd >= R.target ? `<span class="good">届いている</span>` : "あと " + simcNum(R.target - x.aspd, 1)}</td><td>${x.aspd >= R.target ? "-" : ov(x.agi)}</td><td>${x.aspd >= R.target ? "-" : ov(x.dex)}</td>` : ""}
-      ${R.cast ? `<td class="v">${simcNum(x.castP)}</td><td class="v">${x.castP >= 530 ? `<span class="good">届いている</span>` : "あと " + (530 - x.castP)}</td><td>${x.castP >= 530 ? "-" : ov(x.dexC)}</td><td>${x.castP >= 530 ? "-" : ov(x.intC)}</td>` : ""}</tr>`).join("");
-    return h + `<div class="warn">${esc(R.fail)}</div>` + (rows ? `<div class="muted" style="margin:6px 0 2px">AGI・DEX・INT をそれぞれ ${MAXV} まで振った場合の結果と、届かせるために要る値です（ふつうの上限 ${MAXV} を超える分は、装備・支援・ステータスの補正などで足す必要があります）。</div>
-      <table class="multi"><tr><th>対象</th>${R.aspd ? `<th>ASPD（AGI・DEX ${MAXV}）</th><th>目標 ${esc(R.target)} まで</th><th>AGI だけなら</th><th>DEX だけなら</th>` : ""}${R.cast ? `<th>詠唱の値（DEX・INT ${MAXV}）</th><th>530 まで</th><th>DEX だけなら</th><th>INT だけなら</th>` : ""}</tr>${rows}</table>` : "");
-  }
-  const cost = (v) => ENG.hm.GetStatusTotalCost(v), curCost = cost(st.agi) + cost(st.dex) + cost(st.int);
-  const D = R.dmg0, dcell = (c) => { if (!D) return ""; const v = c === null ? D.avg : c.dmg; if (v === null || v === undefined) return `<td class="muted">-</td>`; const pc = D.avg ? (v / D.avg - 1) * 100 : 0; return `<td class="v">${simcNum(v)} ${c === null ? "" : `<span class="${pc < -0.05 ? "warn" : pc > 0.05 ? "good" : "muted"}">(${pc > 0 ? "+" : ""}${simcNum(pc, 1)}%)</span>`}</td>`; };
-  // 余るポイント = いま残っているポイント − (この振り方に使う分 − いま使っている分)。ほかのステータスに回せる量が、この機能の目的
-  const roomFor = (k, rem) => { let v = st[k] || 1; const c0 = cost(v); while (v < SIMC_STMAX && cost(v + 1) - c0 <= rem) v++; return v; };
-  const row = (label, c, i) => {
-    const rem = P ? P.remain - (c.cost - curCost) : null, d = c.cost - curCost;
-    const use = rem === null ? "" : rem < 0 ? `<span class="warn">ポイントが足りません</span>` : rem === 0 ? `<span class="muted">余りなし</span>` : ["str", "vit", "luk"].map((k) => { const to = roomFor(k, rem); return to > st[k] ? `${k.toUpperCase()} ${st[k]}→<b>${to}</b>` : ""; }).filter(Boolean).join(" ／ ") || `<span class="muted">上げられるものなし（上限）</span>`;
-    return `<tr><td>${label}</td><td class="v">${c.agi}</td><td class="v">${c.dex}</td><td class="v">${c.int}</td><td class="v">${c.cost}${i === undefined ? "" : ` <span class="muted">(${d === 0 ? "±0" : (d > 0 ? "+" : "") + d})</span>`}</td>
-      <td class="v leftover ${rem === null ? "" : rem < 0 ? "warn" : rem > 0 ? "good" : ""}">${rem === null ? "-" : rem}</td><td class="sub">${use}</td>${dcell(i === undefined ? null : c)}<td>${i === undefined ? "" : `<button class="ghost" data-optapply="${i}">この振り方にする</button>`}</td></tr>`;
-  };
-  h += `<table class="multi"><tr><th>振り方</th><th>AGI</th><th>DEX</th><th>INT</th><th>AGI・DEX・INT に使うポイント<br>（いまとの差）</th><th title="いま残っているステータスポイント + 浮いた分。STR・VIT・LUK など、ほかに回せる量です">余るポイント</th><th>余りで上げられる（どれか1つに振る場合）</th>${D ? `<th title="サンドバックマンの枠で選んでいるメインスキル（${esc(D.name)}）を、サンドバックマンの設定で使ったときの1回のダメージ。INT を下げると MATK が下がる影響を測ります">${esc(D.name)}のダメージ</th>` : ""}<th></th></tr>
-    ${row("いま", { agi: st.agi, dex: st.dex, int: st.int, cost: curCost })}${row("<b>いちばん余る</b>", R.best, 0)}${R.alts.map((c, i) => row("ほかの候補", c, i + 1)).join("")}</table>`;
-  h += `<div class="multisum">${P && R.best.cost - curCost > P.remain ? `<span class="warn">ポイントが足りません（BaseLv やほかのステータスを見直してください）。</span><br>` : ""}<span class="muted">条件: ${[R.aspd ? "ASPD " + R.target : "", R.cast ? "変動詠唱なし" : ""].filter(Boolean).join(" と ")}／対象: ${esc(R.sets.join("・"))}／${R.calcs} 回計算。INT を下げると MATK も下がります。下げたくないときは、上の「下限」に入れてから探してください。</span></div>`;
-  return h;
+    <div class="stph">装備パターンごとの確認</div><div id="stppats" class="${oc.length ? "setframe" : ""}" style="--fc:${simcGrad(oc)}">${okRows ? stpPatsHtml(m, S.rows, S.rows.length) : `<div class="spin">計算中…</div>`}</div>
+    <div class="stph">いちばん安い振り方（提案）</div><div id="stpsug">${stpSugHtml(m, S)}</div>
+    <div class="stph">ポイントを足したときの影響（余りの使い道）</div><div id="stpeff">${stpEffHtml(m, S)}</div></div>`;
+}
+const stpRowSig = (m, S) => stpNonStatSig(m) + "|" + JSON.stringify(S.d);
+function stpRefreshMain(m) { const S = stpState(), el = $("#stpmain"); if (S && el) el.innerHTML = stpMainHtml(m, S); }
+function stpKick(m) {                            // 重い計算(装備パターンの表 → 提案 → 影響の表)は、入力が落ち着いてから、1回ずつ息つぎしながら
+  const mf = $("#view").querySelector('details[data-fold="opt"]'); if (!mf || !mf.open || !$("#stp") || !ENG.ready) return;
+  const S = stpState(); if (!S) return;
+  const need = !(S.rows && S.rowSig === stpRowSig(m, S)) || !(S.sug && S.sugSig === stpSugSig(m, S)) || !(S.eff && S.effSig === stpEffSig(m, S));
+  if (!need) return;
+  clearTimeout(S.kt); S.kt = setTimeout(() => stpHeavy(), S.rows ? 700 : 0);
+}
+async function stpHeavy() {
+  const c = simcCur(), S = stpState(); if (!c || !S) return;
+  const m = c.model, tok = ++S.tok, alive = () => SIMC.stp === S && S.tok === tok && simcCur() === c;
+  const tick = async () => { await sleep(0); if (!alive()) throw new Error("changed"); };
+  const put = (id, html) => { const el = $("#" + id); if (el) el.innerHTML = html; };
+  try {
+    const pats = stpPats(m, S), d = Object.assign({}, S.d), MAXV = SIMC_STMAX;
+    // 1) 装備パターンの表
+    if (!(S.rows && S.rowSig === stpRowSig(m, S))) {
+      const rows = [];
+      for (const P of pats) { await tick(); const e = stpEval(P, d); rows.push(Object.assign(e, { label: P.label, miss: P.miss, missRows: P.missRows, colors: P.colors, learned: simcLearnedList(P.mm) })); put("stppats", stpPatsHtml(m, rows, pats.length)); }
+      S.rows = rows; S.rowSig = stpRowSig(m, S); put("stppats", stpPatsHtml(m, rows, rows.length));
+    }
+    // 2) いちばん安い振り方
+    if (!(S.sug && S.sugSig === stpSugSig(m, S))) {
+      const cals = [];
+      for (const P of pats) { await tick(); cals.push(stpCal(P, d)); }
+      let R;
+      if (cals.some((x) => !x)) R = { fail: "ASPD が装備・スキルの効果で固定される（式が使えない）パターンがあります。ステッパーで試算してください。" };
+      else {
+        const all = stpSolve(cals, MAXV), pick = [];
+        for (const c1 of all) { if (pick.every((x) => Math.abs(x.dex - c1.dex) >= 6)) pick.push(Object.assign({}, c1)); if (pick.length >= 4) break; }
+        if (!pick.length) {
+          const over = stpSolve(cals, SIMC_STTOP)[0];
+          R = { fail: `AGI・DEX・INT をふつうの上限（${MAXV}）まで振っても、条件を満たせないパターンがあります。`, over, cals };
+        }
+        else { const list = []; for (const c1 of pick) list.push(await stpVerify(pats, c1, d, tick)); list.sort((a, b) => (b.ok - a.ok) || a.cost - b.cost); R = { list }; }
+      }
+      S.sug = R; S.sugSig = stpSugSig(m, S); put("stpsug", stpSugHtml(m, S));
+    }
+    // 3) ポイントを足したときの影響
+    if (!(S.eff && S.effSig === stpEffSig(m, S))) {
+      const P0 = pats[0], withX = (dd) => stpEval(P0, dd, [3, 8]), b = withX(d), bx = stpExtra(b.r), sb0 = simcSbAvg(Object.assign(simcClone(P0.mm), { status: Object.assign({}, P0.mm.status, d) }), {});
+      const base = { aspd: b.aspd, castP: b.castP, hp: b.hp, weight: bx.weight, ail: bx.ail, dmg: sb0 ? sb0.avg : null }, rows = [];
+      for (const k of ["agi", "dex", "int", "vit", "str", "luk"]) {
+        await tick(); const step = Math.min(10, MAXV - d[k]); if (step <= 0) continue;
+        const dd = Object.assign({}, d, { [k]: d[k] + step }), e = withX(dd), x = stpExtra(e.r), mm = simcClone(P0.mm); Object.assign(mm.status, dd);
+        const sb = sb0 ? simcSbAvg(mm, {}) : null;
+        rows.push({ k, v: d[k], step, cost: stpCost(d[k] + step) - stpCost(d[k]), aspd: e.aspd, castP: e.castP, hp: e.hp, weight: x.weight, ail: x.ail, dmg: sb ? sb.avg : null });
+      }
+      S.eff = { base, rows, dmgName: sb0 ? sb0.name : "" }; S.effSig = stpEffSig(m, S); put("stpeff", stpEffHtml(m, S));
+    }
+  } catch (err) { if (err.message !== "changed") console.warn("stp", err); }
 }
 // ---- 装備セットを並べて比べる(ASPD・詠唱・ディレイ / 耐性 / 補助情報 の3つの枠で共通) ----
 // 見出しの右の「比べる」で選んだ装備セットを、いまのキャラに着せた場合を横に並べる。ステータス・シャドウ装備・支援はいまのまま
@@ -3084,15 +3136,14 @@ function renderSimChara() {
     const stat = (k, key) => `<tr><td>${k}</td><td><input type="number" min="1" max="200" data-st="${key}" value="${m.status[key] ?? 1}">${bon(k, m.status[key])}</td></tr>`;
     const TR = ["POW", "STA", "WIS", "SPL", "CON", "CRT"];
     h += `<div class="simc simc2" id="sccmain">
-      <div class="simrow2">${simcFold("base", "基本ステータス", `<table>
+      <div class="simrow2 stgrid"><div class="stcol">${simcFold("base", "基本ステータス", `<table>
           <tr><td>職業</td><td><select id="sccjob">${ENG.jobs.map(([v, t]) => `<option value="${esc(v)}" ${String(v) === String(m.status.jobId) ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></td></tr>
           <tr><td>BaseLv / JobLv</td><td><input type="number" min="1" max="300" data-st="baseLv" value="${m.status.baseLv ?? 1}"> / <input type="number" min="1" max="100" data-st="jobLv" value="${m.status.jobLv ?? 1}"></td></tr>
           ${stat("STR", "str")}${stat("AGI", "agi")}${stat("VIT", "vit")}${stat("INT", "int")}${stat("DEX", "dex")}${stat("LUK", "luk")}</table><div id="sccpt" style="margin-top:6px;font-size:13px">${simcPointsHtml(m)}</div>`)}
         ${simcFold("trait", "特性ステータス", `<table>
-          ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>
+          ${TR.map((k, i) => `<tr><td>${k}</td><td><input type="number" min="0" max="200" data-pure="${6 + i}" value="${(m.pureStatus || [])[6 + i] ?? 0}">${bon(k, (m.pureStatus || [])[6 + i])}</td></tr>`).join("")}</table>`)}</div>${simcFold("opt", "ステータスシミュレーター", stpHtml(m), ` <span class="muted">（試算のステータスで、装備・支援の補正込みの ASPD・詠唱・HP を見ながら、いちばん安い振り方を探す）</span>`, true)}</div>
       ${simcFold("res", "ステータス（計算結果）", `<div id="sccres">${simcResultHtml(m, r)}</div>`, ` <span class="muted" id="sccsum">${simcSumText(r)}</span>`, false)}
       ${simcFold("key", "ASPD・詠唱・ディレイ", `<div id="scckey">${simcKeyHtml(m, r)}</div>${simcRelHtml(m, "ac", "relkey", "ASPD・詠唱・ディレイに効く支援・アイテム・スキル")}<div id="scckeycmp" class="cmpbox">${simcCmpKeyHtml(m, r)}</div>`, ` <span class="muted foldsum" id="sccksum">${esc(simcKeySum(r))}</span>${simcCmpChips(m)}`)}
-      ${simcFold("opt", "ASPD・無詠唱の維持（装備パターン × ステ振り）", simcOptHtml(m), ` <span class="muted">（選んだ全部の装備パターンで目標を満たせるか・満たす最も安い AGI・DEX・INT）</span>`, false)}
       ${simcFold("resist", "耐性", `<div class="xwrap" id="sccresist">${simcResistBody(r)}</div>${simcRelHtml(m, "d", "relres", "耐久に効く支援・アイテム・スキル")}<div id="sccresistcmp" class="cmpbox">${simcCmpXHtml(m, r, ENG_RKINDS)}</div>`, ` <span class="muted foldsum" id="sccrsum">${esc(simcResistSum(r))}</span>${simcCmpChips(m)}`)}
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
@@ -3196,7 +3247,7 @@ function renderSimChara() {
       if (g("sccksum")) g("sccksum").textContent = simcKeySum(SIMC.res);
       simcCmpFill(ch.model); simcCmpKick(ch.model);
       g("sccres").innerHTML = simcResultHtml(ch.model, SIMC.res); g("scckey").innerHTML = simcKeyHtml(ch.model, SIMC.res); g("sccsum").textContent = simcSumText(SIMC.res); simcNeedKick(); if (g("sccpt")) g("sccpt").innerHTML = simcPointsHtml(ch.model);
-      { const mf = $("#view").querySelector('details[data-fold="opt"]'); if (mf && mf.open && g("scckeep")) simcKeepKick(ch.model); }
+      if (g("stp")) { stpRefreshMain(ch.model); stpKick(ch.model); }
       const base = { STR: ch.model.status.str, AGI: ch.model.status.agi, VIT: ch.model.status.vit, INT: ch.model.status.int, DEX: ch.model.status.dex, LUK: ch.model.status.luk };
       ["POW", "STA", "WIS", "SPL", "CON", "CRT"].forEach((k, i) => { base[k] = (ch.model.pureStatus || [])[6 + i] || 0; });
       $("#view").querySelectorAll("[data-bon]").forEach((el) => { const k = el.dataset.bon; el.textContent = "+" + ((SIMC.res.tot[k] || 0) - (base[k] || 0)); });
@@ -3225,9 +3276,16 @@ function renderSimChara() {
       const tog = (arr, id) => { const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id); rr(); };
       V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog(O.mainSel, el.dataset.optm));
       V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog(O.shSel, el.dataset.opts));
-      g("sogo").onclick = () => simcOptRun(m);
+      const S = stpState(), me = () => { stpRefreshMain(m); stpKick(m); };
+      const setV = (k, v) => { S.d[k] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+v || 1))); S.touched = true; me(); };
+      g("stp").onclick = (e) => {
+        const b = e.target.closest("[data-stpd]"); if (b) { const [k, dv] = b.dataset.stpd.split(":"); setV(k, S.d[k] + (+dv)); return; }
+        const a = e.target.closest("[data-stpapply]"); if (a) { const c = (S.sug && S.sug.list || [])[+a.dataset.stpapply]; if (c) { S.d.agi = c.agi; S.d.dex = c.dex; S.d.int = c.int; S.touched = true; render(); } return; }
+        if (e.target.closest("#stpreflect")) { Object.assign(m.status, S.d); S.touched = false; SIMC.msg = "試算のステータスを、基本ステータスに入れました。"; changed(); return; }
+        if (e.target.closest("#stpreset")) { S.touched = false; render(); }
+      };
+      g("stp").onchange = (e) => { const i = e.target.closest("[data-stpv]"); if (i) setV(i.dataset.stpv, i.value); };
       V.querySelectorAll("[data-optmin]").forEach((el) => el.onchange = () => { O.min[el.dataset.optmin] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+el.value || 1))); });
-      V.querySelectorAll("[data-optapply]").forEach((el) => el.onclick = () => { const i = +el.dataset.optapply, c = i ? O.res.alts[i - 1] : O.res.best; Object.assign(m.status, { agi: c.agi, dex: c.dex, int: c.int }); O.res.sig = JSON.stringify(m); SIMC.msg = `AGI ${c.agi}・DEX ${c.dex}・INT ${c.int} にしました。`; changed(); });
     }
     // 支援・アイテム・スキル
     if (simcSchema(m)) {
@@ -3275,8 +3333,8 @@ function renderSimChara() {
     }
     const two = (el, key) => el.dataset[key].split(":").map(Number);
     const touched = () => { };                // 手で替えても「どの装備セットを着ているか」は残す(タブに ＊ が付き、右クリックで上書きできる)
-    foldBind(V, (el) => { if (el.dataset.fold === "opt" && el.open && g("scckeep")) simcKeepKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
-    { const mf = V.querySelector('details[data-fold="opt"]'); if (mf && mf.open && g("scckeep")) simcKeepKick(m); }
+    foldBind(V, (el) => { if (el.dataset.fold === "opt" && el.open && g("stp")) stpKick(m); if (el.dataset.fold === "sb" && el.open) { sbxLoad().then(render); } });
+    if (g("stp")) stpKick(m);
     const part = (shadow) => (shadow ? "シャドウ装備" : "装備");
     const wearAsk = async (sid, shadow, label) => { if (await askOnce("wear", `計算機の${part(shadow)}を「${label}」に切りかえます。\nスロットに保存していない、いまの${part(shadow)}（変更したところ）は消えます。`, "切りかえる")) simcWearSet(sid, shadow); };
     V.querySelectorAll("[data-slot]").forEach((el) => {
