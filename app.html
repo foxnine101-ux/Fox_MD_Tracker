@@ -1211,6 +1211,7 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
   ENG.ready = false; ENG.err = "";
   ENG.loading = (async () => {
     if (ENG.frame) ENG.frame.remove();
+    ENG.sb = null;                           // 前の計算係(消した窓)の部品を持ち越さない
     const f = ENG.frame = document.createElement("iframe");
     f.style.cssText = "position:fixed;left:-4000px;top:0;width:1400px;height:900px;visibility:hidden";
     f.setAttribute("aria-hidden", "true");
@@ -1258,7 +1259,7 @@ function engInit(query) {                 // 計算係(隠したラトリオ)を
     if (!query) { const b = ENG.reg.extractModelFromDom(); ENG.blank = (b.equip || []).slice(); ENG.blankShadow = ((b.shadowEquip || {}).itemId || []).slice(); }   // 「なし」のときの番号(開いた直後の状態)
     ENG.blank = ENG.blank || []; ENG.blankShadow = ENG.blankShadow || [];
     ENG.x.jobh = await imp("data/mig.job.h.js");
-    await engSbInit();
+    try { await engSbInit(); } catch (e) { ENG.sb = null; engLog("サンドバックマンの部品を読めませんでした(ほかの機能はふつうに使えます): " + e.message); }      // ラトリオの更新で入口の名前が変わっても、計算機は起動する
     try { ENG.xinfo = (await imp("ui/CExtraInfoAreaComponentManager.js")).CExtraInfoAreaComponentManager; } catch (e) { ENG.xinfo = null; }
     ENG.cache = {};
     ENG.jobs = [...f.contentDocument.querySelector("#OBJID_SELECT_JOB").options].map((o) => [o.value, o.text]).filter(([, t]) => t);
@@ -2308,7 +2309,7 @@ async function engSbInit() {
 }
 // そのキャラが使える攻撃方法(メインスキルの候補)。職業・装備ごとにラトリオが決める。各方法は「レベル → ほかの設定…」の選択の鎖(tree)を持つ
 function engAttackMethods(model) {
-  const S = ENG.sb, key = "atkm:" + JSON.stringify([model.status.jobId, model.equip, (model.weapon || {}).type, model.learnedSkill, (model.shadowEquip || {}).itemId]);
+  const S = ENG.sb, key = "atkm:" + JSON.stringify([model.status.jobId, model.equip, model.card, (model.weapon || {}).type, model.learnedSkill, (model.shadowEquip || {}).itemId]);
   if (ENG.cache[key]) return ENG.cache[key];
   engCalc(model);                                         // 計算係の中の職業・装備を model に合わせる(攻撃方法の一覧は、そのときの状態から作られる)
   const lst = (ol) => {
@@ -2332,9 +2333,11 @@ function sbChain(root, vals) {                            // 選んだ値(vals)�
   }
   return out;
 }
-function engSandbag(model, cfg, mt) {                     // {per:{min,avg,max}, unit:[…], hits:[…], cast, delay, cool, interval, perSec, hitRate, noDmg} か、計算できなければ null
+function engSandbag(model, cfg, mt, dbg) {                     // {per:{min,avg,max}, unit:[…], hits:[…], cast, delay, cool, interval, perSec, hitRate, noDmg} か、計算できなければ null
   const S = ENG.sb, E = S.EN, mk = (k) => E["MOB_CONF_INPUT_DATA_INDEX_" + k];
   const old = SB_MOB_KEYS.map((k) => S.MC.GetMobConfInput(mk(k))), origId = S.CM.GetMonsterId, before = ENG.sw.map((x) => x.m[x.get]);
+  // ダメージの計算は、補助情報の表が読む値(物理特化の STR・DEX の分 `STRDEX_BONUS` など = `dispDataMap`)も書きかえる。キャラの計算に残さないよう、終わったら元に戻す
+  const dm = ENG.xinfo && ENG.xinfo.dispDataMap, dmSnap = dm ? new Map(dm) : null;
   const set = { LV: SB_FIXED.lv, HP: SB_FIXED.hp, STR: 1, INT: 1, VIT: 1, DEX: 1, AGI: 1, LUK: 1, ATK: 1, MATK: 1, RANGE: 1, DEF: SB_FIXED.def, MDEF: SB_FIXED.mdef, BASE_EXP: 1, JOB_EXP: 1,
     SIZE: cfg.size, ELEMENT: cfg.ele * 10 + cfg.lv, RACE: cfg.race, BOSS_TYPE: cfg.kind ? 1 : 0, GRASS_TYPE: 0, RES: 0, MRES: 0 };
   let r = null;
@@ -2349,11 +2352,12 @@ function engSandbag(model, cfg, mt) {                     // {per:{min,avg,max},
     const a = (r.activeResultArray || [])[0];
     if (!a) return null;
     const g = (n) => { try { return r[n](); } catch (e) { return null; } };
-    return { per: { min: g("GetDamageSummaryMinPerAtk"), avg: g("GetDamageSummaryAvePerAtk"), max: g("GetDamageSummaryMaxPerAtk") },
+    return { mob: dbg ? (r.mobData || []).slice() : undefined, per: { min: g("GetDamageSummaryMinPerAtk"), avg: g("GetDamageSummaryAvePerAtk"), max: g("GetDamageSummaryMaxPerAtk") },
       unit: ((a.dmgUnitArray || [])[0] || []).slice(0, 3), hits: ((a.hitCountArray || [])[0] || []).slice(0, 3),
       cast: g("GetCastTime"), delay: g("GetDelayTime"), cool: g("GetCoolTime"), interval: g("GetAttackInterval"), perSec: g("GetDamageSummaryAvePerSec"), hitRate: a.hitRate, noDmg: !!a.bNoDamage };
   } finally {
     S.CM.GetMonsterId = origId;
+    if (dm) { dm.clear(); dmSnap.forEach((v, k) => dm.set(k, v)); }
     SB_MOB_KEYS.forEach((k, i) => S.MC.SetMobConfInput(mk(k), old[i]));
     ENG.sw.forEach((x, i) => x.m[x.set](before[i]));
   }
@@ -2376,7 +2380,14 @@ function simcSbState(m) {                                 // 枠を開いてい�
     const optText = chain.slice(1).map((c) => (c.ol.label ? c.ol.label + ":" : "") + (c.ol.type === 0 ? ((c.ol.opts.find((o) => o[0] === c.v) || [])[1] ?? c.v) : c.v)).join(" ");
     S.item = item; S.chain = chain; S.mt = { skill: item.skill, src: item.src, lv, opts, name: item.name, optText };
     const sig = JSON.stringify([simcStripSb(m), cfg.kind, cfg.race, cfg.ele, cfg.lv, cfg.size, item.full, cfg.vals]);
-    if (S.sig !== sig) { S.res = engSandbag(m, cfg, S.mt); S.sig = sig; S.key = hash53(sig); if (!S.res) S.err = "このスキルは、サンドバッグマンに対して計算できませんでした"; }
+    if (S.sig !== sig) {
+      S.res = engSandbag(m, cfg, S.mt); S.sig = sig; S.key = hash53(sig); S.zero = "";
+      if (!S.res) S.err = "このスキルは、サンドバッグマンに対して計算できませんでした";
+      else if (!S.res.per.avg && !S.res.noDmg) {      // 0 のとき: 別の属性(火1。いまが火なら水1)なら出るか → 出るなら属性の相性、出ないなら「自分のスキル」の設定
+        const alt = Object.assign({}, cfg, cfg.ele === 3 ? { ele: 1, lv: 1 } : { ele: 3, lv: 1 }), r2 = engSandbag(m, alt, S.mt);
+        S.zero = r2 && r2.per.avg > 0 ? "elem" : "buff";
+      }
+    }
   } catch (e) { S.err = "計算できませんでした: " + e.message; S.res = null; }
 }
 function simcSbNums(res) {                                // 数字の表(画面と記録で同じ形)
@@ -2395,6 +2406,7 @@ function simcSbHtml(m) {
   let h = `<div class="muted" style="margin-bottom:6px">ゲームのお試し道場の「サンドバッグマン」と同じ設定のモンスターに、メインスキルを使ったときのダメージを、簡易に計算します（数字のみ・目安）。固定の強さ: <b>Lv ${SB_FIXED.lv} ／ HP ${fmtN(SB_FIXED.hp)} ／ DEF ${SB_FIXED.def} ／ MDEF ${SB_FIXED.mdef}</b>（RES・MRES はゲームの画面に出ないので 0 として計算）。キャラは、いま開いているスロットのものです。</div>
     <div class="bfbar"><label>種類 ${sel("kind", SB_KINDS, cfg.kind)}</label><label>種族 ${sel("race", SB_RACES, cfg.race)}</label><label>属性 ${sel("ele", SB_ELES, cfg.ele)}</label>
       <label>属性Lv <select data-sbc="lv">${[1, 2, 3, 4].map((i) => `<option value="${i}" ${i === cfg.lv ? "selected" : ""}>Lv${i}</option>`).join("")}</select></label><label>サイズ ${sel("size", SB_SIZES, cfg.size)}</label></div>`;
+  if (!ENG.sb) return `<div class="warn">サンドバックマンは使えません（ラトリオの更新で、計算の入口が変わった可能性があります）。ほかの機能はふつうに使えます。</div>`;
   if (!(simcFoldState().sb)) return h + `<div class="muted">この枠を開くと、メインスキルを選んで計算できます。</div>`;
   simcSbState(m);
   if (S.methods && S.item) {
@@ -2407,7 +2419,9 @@ function simcSbHtml(m) {
   if (S.res) {
     const known = (SBX.recs || []).find((x) => x.key === S.key);
     h += `<div class="sbres">${simcSbNums(S.res)}</div>`
-      + (S.res.per.avg === 0 && !S.res.noDmg ? `<div class="warn">ダメージが 0 になりました。このスキルは、「支援・アイテム・スキル」の「自分のスキル」の設定（エレメンタルマスターなら精霊の召喚など）が要る場合があります。</div>` : "")
+      + (S.res.per.avg === 0 && !S.res.noDmg ? (S.zero === "elem"
+        ? `<div class="warn">ダメージが 0 になりました。このスキルの属性は、いまのサンドバッグマンの属性（${esc(sbDesc(cfg))}）には効きません（属性の相性）。別の属性を選ぶと出ます。</div>`
+        : `<div class="warn">ダメージが 0 になりました。このスキルは、「支援・アイテム・スキル」の「自分のスキル」の設定（エレメンタルマスターなら精霊の召喚など）が要る場合があります。</div>`) : "")
       + `<div class="opts"><button id="sbrec">${known ? "もう一度記録する（日時を更新）" : "この結果を記録する"}</button>${known ? `<button class="ghost" data-sbgo="${esc(known.id)}">記録を見る →</button>` : ""}<span class="muted">記録は「サンドバックマン」のタブで見られます。</span></div>`;
   }
   return h;
