@@ -977,5 +977,9 @@ def install_npcap():
     print("インストーラーを開きます。画面の案内どおり「I Agree」→「Install」で進めてください。")
     print("(「Administrators only」のチェックは入れないでね)")
     if os.name == "nt":
-        os.startfile(dst)  # noqa  (Windows専用)
+        import subprocess
+        try:
+            return subprocess.Popen([dst])         # 終わるのを待てるように、プロセスを返す(終わる前に wpcap.dll だけ先に現れるため、ファイルの有無では終わりが分からない)
+        except OSError:
+            os.startfile(dst)  # noqa  (管理者の許可が要るときなど。Windows専用。終わりは待てない)
     return dst

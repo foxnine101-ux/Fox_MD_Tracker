@@ -30,7 +30,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.51.1"
+VERSION = "2.51.2"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1125,14 +1125,17 @@ def main():
             import tray
             if tray.message("通信を読むための部品「Npcap」が入っていません。\nインストール画面を開きますか？\n(画面の案内どおりに進めてOK)",
                             yesno=True):
+                proc = None
                 try:
-                    gp.install_npcap()
+                    proc = gp.install_npcap()
                 except Exception as e:
                     tray.message("自動で開けませんでした。https://npcap.com/ から入れてください。\n" + str(e), kind="warn")
-                for _ in range(400):                    # 最大20分、入るのを待つ
-                    if gp.npcap_available():
+                for _ in range(400):                    # 最大20分、入るのを待つ。インストーラーが終わるまで待つ(途中で wpcap.dll だけ先に現れても、まだ使えない)
+                    done = proc.poll() is not None if hasattr(proc, "poll") else gp.npcap_available()
+                    if done and gp.npcap_available():
                         break
                     time.sleep(3)
+                time.sleep(2)                           # 入れ終わった直後は、ドライバの準備が済むのを少し待つ
             if not gp.npcap_available():
                 tray.message("Npcap が入っていないので終了します。入れてからもう一度起動してね。", kind="warn")
                 return
@@ -1156,7 +1159,15 @@ def main():
         OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
     try:
-        sn.start()
+        for _try in range(10):                          # Npcap を入れた直後や、インストール中は、すぐには始められないことがある → 少し待って何度か試す
+            try:
+                sn.start()
+                break
+            except Exception as e:
+                if _try == 9:
+                    raise
+                print("通信の読み取りを始められませんでした。3秒後にもう一度試します:", e)
+                time.sleep(3)
     except Exception as e:
         print(e)
         fail("通信の読み取りを始められませんでした。\nNpcap が入っているか確認してね (https://npcap.com/)\n\n{}".format(e))
