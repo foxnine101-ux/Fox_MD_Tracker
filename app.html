@@ -2439,7 +2439,7 @@ function simcCmpIds(m) { const ok = new Set(simcSetList(m, false).tabs.map((x) =
 function simcCmpChips(m) {
   const tabs = simcSetList(m, false).tabs; if (!tabs.length) return "";
   const on = simcCmpIds(m);
-  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、いまの装備と、このスロットの装備を着た場合を、横に並べます。複数選べます）">${esc(st.tag)}</button>`).join("")}</span>`;
+  return `<span class="settabs right"><span class="muted">比べる</span>${tabs.map(({ sid, st }) => `<button class="settab${on.includes(sid) || sid === stpNowSid(m, false) ? " on" : ""}" data-cmp="${esc(sid)}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、いまの装備と、このスロットの装備を着た場合を、横に並べます。複数選べます）">${esc(st.tag)}</button>`).join("")}</span>`;
 }
 const simcCmpSig = (m) => simcCmpIds(m).join(",") + "|" + simcAllKinds().join(",") + "|" + JSON.stringify(m);
 function simcCmpKick(m) {
@@ -3244,7 +3244,8 @@ function simcResistSum(r) {
   const top = (list) => { const mx = Math.max(0, ...list.map((x) => x[1])); return mx > 0 ? `${list.filter((x) => x[1] === mx).map((x) => x[0]).join("・")} ${mx}%` : ""; };
   let sec = ""; const dmg = [];
   for (const c of rows(7)) { if (c.length === 1) { sec = c[0]; continue; } if (c.length >= 2 && /%$/.test(c[1]) && !/^\(/.test(c[1])) dmg.push([(sec === "ボス" || sec === "特殊" ? "" : sec) + c[0], num(c[1])]); }
-  const ele = rows(6).slice(1).map((c) => [c[0], num(c[1])]);
+  const num1 = (t) => { const mm = String(t || "").match(/-?[\d.]+/); return mm ? parseFloat(mm[0]) : NaN; };      // 「95% [過 10%]」のように後ろに別の数字が付くので、先頭の数字
+  const ele = rows(6).slice(1).map((c) => [c[0], num1(c[1])]);
   const immune = rows(8).slice(1).filter((c) => num(c[1]) >= 100 || num(c[2]) >= 100).map((c) => c[0])
     .concat(rows(9).slice(1).filter((c) => num(c[1]) >= 100 || num(c[2]) >= 100).map((c) => c[0]));
   const a = top(dmg), b = top(ele);
@@ -3275,6 +3276,8 @@ function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履�
   if (shadow) { m.foxShadow = link; m.foxShadowSig = simcFragSig(m, true); } else { m.foxSet = link; m.foxSetSig = simcFragSig(m, false); }
   if (sid.startsWith("now:") && !shadow) { const e = (EQ.chars || {})[sid.slice(4)], st = e && e.status || {}; ch.name = simcSlotName(sid.slice(4), { lv: m.status.baseLv || st.lv, jobName: (ENG.jobs.find(([v]) => String(v) === String(m.status.jobId)) || [])[1] || st.jobName }, ((EQ.sets || {})[e && e.cur] || {}).tag); }
   SIMC.report = { id: SIMC.cur, rows: old.concat(rows), rnd: SIMC.rndMiss.length, rndOk: SIMC.rndOk, rndMiss: SIMC.rndMiss.slice(0, 12) };
+  // 装備を替えると、装備で数字が変わる枠は計算し直しでガクガク動く → 閉じる(見たいときに開くと、そのとき計算する)
+  const fs = simcFoldState(); ["res", "key", "resist", "x", "stppat", "stpsb", "stpsw", "stpeff", "stpgame"].forEach((k) => { fs[k] = false; }); store.set("md_simfold", JSON.stringify(fs));
   SIMC.res = null; simcSave(); render();
 }
 async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
