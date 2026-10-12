@@ -472,13 +472,7 @@ def start_live_server(core, lock, cfg):
                 return self._send(200, json.dumps({"records": load_sandbag()}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
                 try:
-                    if os.path.exists(SIM_CHARS_FILE):           # あるのに読めないとき(OneDrive の一瞬のロックなど)は「空」と答えずエラーにする(同期が空と勘違いして相手の分を消さないように)
-                        with open(SIM_CHARS_FILE, "r", encoding="utf-8") as f:
-                            d = json.load(f)
-                        if not isinstance(d, dict):
-                            raise ValueError("形が違います")
-                    else:
-                        d = {}
+                    d = load_sim_chars_strict()
                 except (OSError, ValueError) as e:
                     return self._send(503, json.dumps({"error": str(e)}), "application/json; charset=utf-8")
                 return self._send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
@@ -725,7 +719,7 @@ def start_live_server(core, lock, cfg):
                     b = json.loads(self.rfile.read(min(n, 800000)).decode("utf-8"))
                     cid = str(b["id"])[:40]
                     with lock:
-                        chars = load_sim_chars()
+                        chars = load_sim_chars_strict()          # 読めないときは書かない(1スロットだけ書いて、ほかを消さないように)
                         if b.get("delete"):
                             chars.pop(cid, None)
                         else:
@@ -735,6 +729,10 @@ def start_live_server(core, lock, cfg):
                             if isinstance(b.get("saved"), dict):      # スロットに「保存」したときの中身(model は作業中の中身)
                                 chars[cid]["saved"] = b["saved"]
                         _write_json(SIM_CHARS_FILE, chars)
+                except (OSError, ValueError) as e:
+                    if isinstance(e, json.JSONDecodeError) or isinstance(e, OSError) or str(e).startswith("計算機"):
+                        return self._send(503, json.dumps({"error": str(e)}), "application/json; charset=utf-8")
+                    return self._send(400, "bad data", "text/plain")
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
@@ -1055,6 +1053,17 @@ def apply_shared_links(d=None):
             CHARS.set_shared_links((d or load_shared_links()).get("links") or {})
     except Exception as e:
         print("[共有の結びつけ] 反映できませんでした:", e)
+
+
+def load_sim_chars_strict():
+    """計算機のキャラ.json。あるのに読めない(OneDrive の一瞬のロックなど)ときは「空」と答えず例外にする(空と勘違いして、ほかの分を消さないように)"""
+    if not os.path.exists(SIM_CHARS_FILE):
+        return {}
+    with open(SIM_CHARS_FILE, "r", encoding="utf-8") as f:
+        d = json.load(f)
+    if not isinstance(d, dict):
+        raise ValueError("計算機のキャラの形が違います")
+    return d
 
 
 def load_sim_chars():

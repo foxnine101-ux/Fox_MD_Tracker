@@ -1547,7 +1547,12 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
 }
 const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, sb: { methods: null, res: null, sig: "", err: "", mt: null, item: null, chain: null, recId: "" }, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
-async function simcLoad() { SIMC.chars = await fetch("/api/simchars").then((r) => (r.ok ? r.json() : Promise.reject(new Error("read")))).catch(() => (SIMC.chars || {})); if (!SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || ""; }
+async function simcLoad() {
+  SIMC.chars = await fetch("/api/simchars").then((r) => (r.ok ? r.json() : Promise.reject(new Error("read")))).then((j) => { SIMC.loadErr = ""; return j; }).catch(() => { SIMC.loadErr = SIMC.chars ? "" : "計算機のスロットを読めませんでした。"; return SIMC.chars || null; });      // 読めなかったとき、空の一覧に見せない(新しく作って、ほかを消さないように)
+  if (SIMC.chars && !SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || "";
+}
+const simcLoadingHtml = () => SIMC.loadErr ? `<div class="panel empty">${esc(SIMC.loadErr)} <button class="ghost" id="simcretry">もう一度読み込む</button></div>` : `<div class="panel empty"><span class="spin">読み込み中…</span></div>`;
+function simcLoadingBind() { const b = $("#simcretry"); if (b) b.onclick = () => { SIMC.loadErr = ""; render(); }; }
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
 // いまログインしているキャラ(複数つながっているときは、いちばん最近動きがあったもの)。「いま着ている装備」は、このキャラの装備だけを指す
 // いまログインしているキャラ。キャラ選択画面に戻っている間は空 → 「現在のキャラ」のボタンは、最後にログインしていたキャラ(装備・職業を覚えている中で、いちばん新しいもの)で使えるようにする
@@ -1558,7 +1563,7 @@ const simcStripSb = (m) => { if (!m || !m.foxSb) return m; const c = Object.assi
 const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(simcStripSb(c.model)) !== JSON.stringify(simcStripSb(c.saved));
 function simcSave() {                     // 少しまとめてから保存
   clearTimeout(SIMC.saveT);
-  SIMC.saveT = setTimeout(() => { const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }); }, 600);
+  SIMC.saveT = setTimeout(() => { SIMC.saveT = null; const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }); }, 600);
 }
 function simcSelect(id) { SIMC.cur = id; store.set("md_simchar", id); SIMC.res = null; }
 const simcPut = (id) => fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: SIMC.chars[id].name, model: SIMC.chars[id].model, saved: SIMC.chars[id].saved || SIMC.chars[id].model }) });
@@ -3338,7 +3343,7 @@ function renderAtkTab() {
   if (!(typeof LOCAL !== "undefined" && LOCAL)) { V.innerHTML = simNav() + `<div class="panel empty">与ダメシミュは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
   if (!RAT) { V.innerHTML = simNav() + `<div class="panel empty"><span class="spin">確認中…</span></div>`; bindSimNav(); ratStatus().then(render); return; }
   if (!RAT.installed) { V.innerHTML = simNav() + `<div class="panel empty">ラトリオの計算を使います。先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
-  if (!SIMC.chars) { V.innerHTML = simNav() + `<div class="panel empty"><span class="spin">読み込み中…</span></div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (!SIMC.chars) { V.innerHTML = simNav() + simcLoadingHtml(); bindSimNav(); simcLoadingBind(); if (!SIMC.loadErr) simcLoad().then(render); return; }
   if (ENG.err && !ENG.loading && !ENG.retried) { ENG.retried = true; ENG.err = ""; }
   if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const ids = Object.keys(SIMC.chars), ch = simcCur();
@@ -3642,7 +3647,7 @@ function renderSimChara() {
   if (!(typeof LOCAL !== "undefined" && LOCAL)) { $("#view").innerHTML = simNav() + `<div class="panel empty">キャラ・装備のシミュレーターは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`; bindSimNav(); return; }
   if (!RAT) { $("#view").innerHTML = simNav() + `<div class="panel empty"><span class="spin">確認中…</span></div>`; bindSimNav(); ratStatus().then(render); return; }
   if (!RAT.installed) { $("#view").innerHTML = simNav() + `<div class="panel empty">このシミュレーターは、ROラトリオHub のデータと計算を使います。<br>先に「ラトリオ」タブで「ラトリオを取り込む」を押してください。</div>`; bindSimNav(); return; }
-  if (!SIMC.chars) { $("#view").innerHTML = simNav() + `<div class="panel empty"><span class="spin">読み込み中…</span></div>`; bindSimNav(); simcLoad().then(render); return; }
+  if (!SIMC.chars) { $("#view").innerHTML = simNav() + simcLoadingHtml(); bindSimNav(); simcLoadingBind(); if (!SIMC.loadErr) simcLoad().then(render); return; }
   if (ENG.err && !ENG.loading && !ENG.retried) { ENG.retried = true; ENG.err = ""; }      // 前もっての起動に失敗していたら、タブを開いたときに1回だけ自動でやり直す
   if (!ENG.ready && !ENG.loading && !ENG.err) engInit().then(render);
   const ch = simcCur(), ids = Object.keys(SIMC.chars);
@@ -5555,21 +5560,24 @@ function syncGuard(base, loc, merged, rem) {      // 大事なものが消えそ
     if (!syncN(loc.simchars) && syncN(base.simchars)) return "この PC の計算機のスロットが空になっています(読み込みに失敗した可能性があります)。";
   }
   const lost = (a, b) => Object.keys(a || {}).filter((k) => !(k in (b || {}))).length;
-  for (const [what, src] of [["この PC", loc], ["ほかの PC", rem]]) {
+  // src の項目の半分以上が、混ぜた結果で消える(src = loc: ほかの PC の変更で、この PC のものが減る / src = rem: この PC の削除が、ほかの PC に広がる)
+  for (const [src, msg] of [[loc, "ほかの PC の変更で、この PC のスロット・設定が大きく減ります。"], [rem && rem !== base ? rem : null, "この PC で消した分が、ほかの PC からも大きく消えます。"]]) {
     if (!src) continue;
     const ns = syncN(src.simchars), nk = syncN(src.settings);
-    if ((ns >= 3 && lost(src.simchars, merged.simchars) >= Math.ceil(ns / 2)) || (nk >= 4 && lost(src.settings, merged.settings) >= Math.ceil(nk / 2)))
-      return what + "のスロット・設定が、同期で大きく減ります。";
+    if ((ns >= 3 && lost(src.simchars, merged.simchars) >= Math.ceil(ns / 2)) || (nk >= 4 && lost(src.settings, merged.settings) >= Math.ceil(nk / 2))) return msg;
   }
   return null;
 }
 async function syncApply(m, loc) {       // 混ぜた結果を、この PC に書く
   if (!syncJeq(SETTINGS, loc.settings)) throw new Error("設定を操作中だったため、次の同期に回します");
+  if (typeof SIMC !== "undefined" && SIMC.saveT) throw new Error("計算機を操作中だったため、次の同期に回します");      // 保存待ちの編集が残っている間は書かない
   if (!syncJeq(m.settings, loc.settings)) { Object.keys(SETTINGS).forEach((k) => delete SETTINGS[k]); Object.assign(SETTINGS, m.settings); saveSettings(); }
   const raw = await syncRawSlots();
   for (const id of new Set([...Object.keys(m.simchars), ...Object.keys(loc.simchars)])) {
     const a = m.simchars[id], o = loc.simchars[id];
     if (syncSlotEq(a, o)) continue;
+    const nowRaw = (await syncRawSlots())[id];       // 書く直前にもう一度読み、集めたあとに変わっていたら止める(操作中の編集を上書きしない)
+    if (!syncSlotEq(nowRaw ? syncStripSlot(nowRaw) : undefined, o)) throw new Error("計算機を操作中だったため、次の同期に回します");
     let body;
     if (a) {            // この PC の装備セットの印は、この PC のものを残す
       const keep = (src) => { const x = {}; SYNC_SLOT_LOCAL.forEach((k) => { if (src && src[k] !== undefined) x[k] = src[k]; }); return x; };
@@ -5597,7 +5605,7 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
       const loc = await syncCollect();
       let rem, merged;
       if (r.empty) { rem = null; merged = loc; }
-      else if (r.same) { rem = base; merged = loc; }
+      else if (r.same) { rem = base; merged = (loc.ui === undefined && base && base.ui !== undefined) ? { ...loc, ui: base.ui } : loc; }      // 画面の記憶を揃えない PC は、預けてある ui をそのまま残す
       else {
         rem = await syncDec(r.data);
         merged = (!base && opt && opt.take) ? rem : syncMergePayload(base, loc, rem);
@@ -5627,7 +5635,13 @@ async function syncReset() {           // 合言葉を忘れたとき: この PC
   catch (e) { SYNC.msg = "できませんでした: " + e.message; }
   SYNC.busy = false; syncPaint();
 }
-function syncPaint() { const el = document.querySelector("#syncmsg"); if (el) { el.innerHTML = syncStatusHtml(); syncBindStatus(); } const b = document.querySelector("#syncnow"); if (b) b.disabled = SYNC.busy; }
+function syncBanner() {      // 止まっているときは、どの画面でも気づけるように上に出す
+  let b = document.querySelector("#syncbanner");
+  if (!SYNC.hold) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement("div"); b.id = "syncbanner"; b.style.cssText = "position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9999;background:#7a4b00;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;max-width:90vw;box-shadow:0 2px 8px rgba(0,0,0,.4)"; b.onclick = () => { TAB = "settings"; store.set("md_tab", TAB); render(); }; document.body.appendChild(b); }
+  b.textContent = "同期が止まっています: " + SYNC.hold + "（クリックして設定タブで確認）";
+}
+function syncPaint() { syncBanner(); const el = document.querySelector("#syncmsg"); if (el) { el.innerHTML = syncStatusHtml(); syncBindStatus(); } const b = document.querySelector("#syncnow"); if (b) b.disabled = SYNC.busy; }
 function syncStatusHtml() {
   const when = SYNC.t ? new Date(SYNC.t).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "まだ";
   return `${SYNC.busy ? '<span class="spin"></span> ' : ""}${esc(SYNC.msg || "")} <span class="muted">（最後に同期: ${esc(when)}）</span>${SYNC.hold ? ' <button class="ghost" id="syncforce">それでも同期する</button>' : ""}${SYNC.badPw ? ' <button class="ghost" id="syncreset">同期データを作り直す</button>' : ""}`;
