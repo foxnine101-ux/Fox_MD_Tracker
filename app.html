@@ -1546,7 +1546,7 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
   await engSettle(3000);
   return engFullModel();
 }
-const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, sb: { methods: null, res: null, sig: "", err: "", mt: null, item: null, chain: null, recId: "" }, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
+const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, sb: { methods: null, res: null, sig: "", err: "", mt: null, item: null, chain: null, recId: "", resF: null, fsig: "", kind: "b", expInfo: null }, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, sbCmp: null, sbCmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
 async function simcLoad() {
   SIMC.chars = await fetch("/api/simchars").then((r) => (r.ok ? r.json() : Promise.reject(new Error("read")))).then((j) => { SIMC.loadErr = ""; return j; }).catch(() => { SIMC.loadErr = SIMC.chars ? "" : "計算機のスロットを読めませんでした。"; return SIMC.chars || null; });      // 読めなかったとき、空の一覧に見せない(新しく作って、ほかを消さないように)
@@ -3096,7 +3096,13 @@ function simcSbState(m) {                                 // 枠を開いてい�
         S.zero = r2 && r2.per.avg > 0 ? "elem" : "buff";
       }
     }
-  } catch (e) { S.err = "計算できませんでした: " + e.message; S.res = null; }
+    // 時限効果(与ダメシミュ・小型サンドバックマンと共通のオン・オフ)を入れた結果。オンの効果が無いときは出さない
+    try { S.kind = stpSbKind(simcClone(m), cfg, S.mt); } catch (e) { S.kind = "b"; }
+    if (S.res && atkActiveIds(null).length) {
+      const fs = S.sig + "|" + atkFxSig();
+      if (S.fsig !== fs) { const ev = atkEval(m, cfg, S.mt, cfg.kind === 1, S.kind); S.resF = ev.r; S.expInfo = ev.exp; S.fsig = fs; }
+    } else { S.resF = null; S.expInfo = null; S.fsig = ""; }
+  } catch (e) { S.err = "計算できませんでした: " + e.message; S.res = null; S.resF = null; }
 }
 function simcSbNums(res) {                                // 数字の表(画面と記録で同じ形)
   const n = (v, f = 0) => simcNum(v, f), row = (l, v, note = "") => `<tr><td>${l}</td><td class="v">${v}</td><td class="muted">${note}</td></tr>`;
@@ -3126,14 +3132,50 @@ function simcSbHtml(m) {
   }
   if (S.err) h += `<div class="warn">${esc(S.err)}</div>`;
   if (S.res) {
+    const kind = S.kind || "b", fx = atkFxAll().filter((e) => e.kind === "b" || e.kind === kind || kind === "b"), owned = atkOwnedNames(m);
+    h += `${atkFxCtlHtml(S.expInfo)}<div class="atkfxl" style="margin:4px 0"><span class="muted">時限効果（「時限効果込み」に出します。「与ダメシミュ」「ステータスシミュレーター」と共通。左クリックで個数 +1・右クリックで −1。グレーの文字は、いまの装備に付いていません）</span>${fx.map((e) => atkChip(e, owned)).join("")}</div>`;
+  }
+  if (S.res) {
     const known = (SBX.recs || []).find((x) => x.key === S.key);
     h += `<div class="sbres">${simcSbNums(S.res)}</div>`
+      + (S.resF ? `<div class="sbres" style="margin-top:8px"><div class="muted" style="margin-bottom:2px"><b>時限効果込み</b>（${(atkFxSet().mode || "exp") === "exp" ? "発動率と持続時間から出した期待値" : "オンの効果が全部かかっているとき"}）</div>${simcSbNums(S.resF)}</div>` : "")
       + (S.res.per.avg === 0 && !S.res.noDmg ? (S.zero === "elem"
         ? `<div class="warn">ダメージが 0 になりました。このスキルの属性は、いまのサンドバッグマンの属性（${esc(sbDesc(cfg))}）には効きません（属性の相性）。別の属性を選ぶと出ます。</div>`
         : `<div class="warn">ダメージが 0 になりました。このスキルは、「支援・アイテム・スキル」の「自分のスキル」の設定（エレメンタルマスターなら精霊の召喚など）が要る場合があります。</div>`) : "")
       + `<div class="opts"><button id="sbrec">${known ? "もう一度記録する（日時を更新）" : "この結果を記録する"}</button>${known ? `<button class="ghost" data-sbgo="${esc(known.id)}">記録を見る →</button>` : ""}<span class="muted">記録は「サンドバックマン」のタブで見られます。</span></div>`;
+    h += `<div id="sccsbcmp" class="cmpbox">${simcSbCmpHtml(m)}</div>`;
+    simcSbCmpKick(m);
   }
   return h;
+}
+// 比べる: いまの設定(スキル・敵・時限効果)のまま、選んだ装備スロットに入れかえて、サンドバックマンのダメージを並べる
+const simcSbCmpSig = (m) => { const S = SIMC.sb; return JSON.stringify([simcCmpIds(m), S.sig, S.fsig]); };
+function simcSbCmpHtml(m) {
+  if (!simcCmpIds(m).length) return "";
+  const R = SIMC.sbCmp, S = SIMC.sb; if (!S.res) return "";
+  if (!R || R.sig !== simcSbCmpSig(m)) return `<div class="muted">比べています…</div>`;
+  const dl = (v, b) => { const d = (v || 0) - (b || 0); return d ? ` <span class="${d > 0 ? "good" : "warn"}">(${d > 0 ? "+" : ""}${simcNum(d)}${b ? "・" + (d > 0 ? "+" : "") + (100 * d / b).toFixed(1) + "%" : ""})</span>` : ""; };
+  const rows = [["1回の平均ダメージ", (x) => x.per.avg], ["1回の最大", (x) => x.per.max], ["DPS", (x) => x.perSec]];
+  const part = (title, base, key) => `<tr class="cmpk"><td colspan="${2 + R.cols.length}"><b>${title}</b></td></tr>` + rows.map(([l, f]) => `<tr><td>${l}</td><td class="v">${simcNum(f(base))}</td>${R.cols.map((c) => { const r = c[key]; return `<td class="v">${r ? simcNum(f(r)) + dl(f(r), f(base)) : "-"}</td>`; }).join("")}</tr>`).join("");
+  return `<table class="multi cmp">${simcCmpHead(R.cols)}${part("メインスキル1回（時限効果なし）", S.res, "r")}${S.resF ? part("時限効果込み", S.resF, "rf") : ""}</table><div class="muted" style="font-size:12px">いまの設定（スキル・敵・時限効果）のまま、装備スロットだけを入れかえて計算しています。</div>`;
+}
+function simcSbCmpFill(m) { const el = $("#sccsbcmp"); if (el) el.innerHTML = simcSbCmpHtml(m); }
+function simcSbCmpKick(m) {
+  const S = SIMC.sb; if (!simcFoldState().sb || !ENG.sb || !S.res || !S.mt || !simcCmpIds(m).length) return;
+  const sig = simcSbCmpSig(m); if (SIMC.sbCmp && SIMC.sbCmp.sig === sig) return;
+  clearTimeout(SIMC.sbCmpT);
+  SIMC.sbCmpT = setTimeout(async () => {
+    const cols = [], T = (DATA.equip || {}).sets || {}, cfg = simcSbCfg(m), mt = S.mt, boss = cfg.kind === 1, kind = S.kind, withFx = !!S.resF;
+    for (const sid of SIMC.cmp.slice()) {
+      const st = T[sid]; if (!st) continue;
+      const mm = JSON.parse(JSON.stringify(m)); let missRows = [];
+      if (st.sim) simcApplyFrag(mm, st.sim, false); else missRows = simcWear(mm, st.items || [], false);
+      await sleep(0);
+      const c = simcCur(); if (!c || simcSbCmpSig(c.model) !== sig) return;
+      try { engCalc(mm); cols.push({ sid, st, missRows, r: engSandbag(mm, cfg, mt), rf: withFx ? atkEval(mm, cfg, mt, boss, kind).r : null }); } catch (e) { console.warn("sbcmp", e); }
+    }
+    SIMC.sbCmp = { sig, cols }; simcSbCmpFill(m);
+  }, 300);
 }
 async function simcSbRecord(m) {
   const S = SIMC.sb, cfg = simcSbCfg(m); if (!S.res || !S.mt) return;
@@ -3769,7 +3811,7 @@ function renderSimChara() {
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
       ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}
-      ${simcFold("sb", "サンドバックマン", simcSbHtml(m), ` <span class="muted foldsum">${esc(sbDesc(simcSbCfg(m)))}</span>`, false)}</div>
+      ${simcFold("sb", "サンドバックマン", simcSbHtml(m), ` <span class="muted foldsum">${esc(sbDesc(simcSbCfg(m)))}</span>${simcCmpChips(m)}`, false)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
