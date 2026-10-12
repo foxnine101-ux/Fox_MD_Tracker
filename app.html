@@ -3523,7 +3523,7 @@ function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履�
 }
 async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
   const ch = simcCur(); if (!ch) return;
-  const links = {}; Object.entries(SETTINGS.ratLinks || {}).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm) links[String(nm).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "")] = +id; });
+  const links = {}; Object.entries({ ...(SHARED.links || {}), ...(SETTINGS.ratLinks || {}) }).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm) links[String(nm).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "")] = +id; });
   const m = ch.model; SIMC.busy = "装備スロットに登録しています…"; render();
   const r = await postSet({ sim: { shadow, items: simcFragItems(m, shadow), data: simcGearFrag(m, shadow) }, take: take || "", links });
   SIMC.busy = "";
@@ -3535,7 +3535,7 @@ async function simcRegister(shadow, take) {     // いまの計算機の装備�
 const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
 const SIMC_FOXSH = [[65536, 19], [131072, 14], [262144, 15], [524288, 21], [1048576, 22], [2097152, 23]];
 function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して。候補の名前の先頭の「【習】」などは外して比べる(「【習】デイヴィッドシールド」= ゲームの「デイヴィッドシールド」)。【】の無い候補があれば、そちらを先に選ぶ
-  const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = (SETTINGS.ratLinks || {})[gameId];
+  const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = ratLinkOf(gameId);
   if (link) { const o = opts.find((x) => nm(x) === link); if (o) return o; }
   const n = ratNorm(name);
   if (!n || /^ID\d+$/.test(n)) return null;
@@ -4249,7 +4249,7 @@ function ratNone(sel) {                    // 「なし」の選択肢(検索つ
 }
 function ratFindOption(sel, name, gameId, isCard) {   // 選択肢を探す: 結びつけ → 同じ名前 → [3] などを外して同じ → カードは「カード」を外して
   if (!sel) return null;
-  const opts = [...sel.options], link = (SETTINGS.ratLinks || {})[gameId];
+  const opts = [...sel.options], link = ratLinkOf(gameId);
   if (link) { const o = opts.find((x) => x.text === link); if (o) return o; }
   const n = ratNorm(name);
   if (!n || /^ID\d+$/.test(n)) return null;
@@ -5254,8 +5254,18 @@ function renderSettings(groups) {
       <span class="muted">${u.state === "none" ? "（最新です）" : u.state === "available" ? `（新しい版 v${esc(u.latest.version)} があります）` : u.state === "error" ? "（" + esc(u.error) + "）" : ""}</span></span>
       <button class="ghost" id="upchk">アップデートを確認</button></div></div>`;
   }
+  if (typeof LOCAL !== "undefined" && LOCAL && LICST.state !== "off") {
+    const mine = Object.keys(myUnsharedLinks()).length, n = Object.keys(SHARED.links || {}).length;
+    const when = SHARED.t ? new Date(SHARED.t * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "まだ取っていません";
+    h += `<h2>共有の結びつけ</h2><div class="panel list"><div class="row"><span class="nm">ゲームのアイテムと計算機の名前の結びつけを、みんなで共有します。<span class="muted">（共有の表: ${n}件・最後に更新 ${esc(when)}。自分で決めた結びつけが先に使われます）</span></span>
+      <button class="ghost" id="lnkref">今すぐ更新</button></div>
+      <div class="row"><span class="nm">自分で結びつけたもののうち、共有の表にまだ無いもの: <b>${mine}件</b> <span class="muted">（提案すると、配布元が確認してから全員に配られます。名前の組だけが送られます）</span></span>
+      <button class="ghost" id="lnkprop" ${mine ? "" : "disabled"}>提案する</button></div><div class="muted" id="lnkmsg" style="padding:4px 8px"></div></div>`;
+  }
   h += `<div class="err" id="serr"></div>`;
   $("#view").innerHTML = h;
+  if ($("#lnkref")) $("#lnkref").onclick = async () => { $("#lnkmsg").textContent = "更新中…"; try { const j = await (await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh: 1 }) })).json(); await sharedLoad(); render(); const m = $("#lnkmsg"); if (m) m.textContent = j.ok ? (j.msg || "") : "できませんでした: " + (j.error || ""); } catch (e) { $("#lnkmsg").textContent = "つながりませんでした。"; } };
+  if ($("#lnkprop")) $("#lnkprop").onclick = async () => { $("#lnkmsg").textContent = "送信中…"; try { const j = await (await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propose: myUnsharedLinks() }) })).json(); $("#lnkmsg").textContent = j.ok ? `提案しました(新しく ${j.added} 件)。承認されると全員に配られます。` : "できませんでした: " + (j.error || ""); } catch (e) { $("#lnkmsg").textContent = "つながりませんでした。"; } };
   if ($("#upchk")) $("#upchk").onclick = async () => { $("#upchk").textContent = "確認中…"; await checkUpdate(true); render(); };
   $("#rzsheet").onchange = (e) => { SETTINGS.resistSheet = e.target.value.trim(); saveSettings(); RZ.t = 0; };
 
@@ -5378,6 +5388,16 @@ function showLicense() {
   document.body.appendChild(d);
 }
 // ---------------- 利用キー(初回だけ入力。サーバーで確認。停止・台数超過もここに出る) ----------------
+// ---------------- 共有の結びつけ(配布元が承認した 番号 → ラトリオの名前。自分の結びつけが優先) ----------------
+let SHARED = { links: {}, v: -1, t: 0 };
+const ratLinkOf = (id) => (SETTINGS.ratLinks || {})[id] ?? (SHARED.links || {})[id];
+async function sharedLoad() {
+  try { const j = await (await fetch("/api/links")).json(); if (j && j.links) SHARED = j; } catch (e) {}
+}
+function myUnsharedLinks() {      // 自分の結びつけのうち、共有の表と違うもの(提案できるもの)
+  const out = {}; Object.entries(SETTINGS.ratLinks || {}).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm && (SHARED.links || {})[id] !== nm) out[id] = nm; });
+  return out;
+}
 let LICST = { state: "off" };
 const LIC_TEXT = { none: "利用キーを入力してください(初回だけです)。", ok: "確認できています。", grace: "サーバーに確認できていません(オフラインでも猶予の間は使えます)。", expired: "長い間サーバーに確認できていません。ネットにつないで「今すぐ確認」を押してください。", revoked: "このキーは使えなくなっています。配布した人に聞いてください。" };
 async function licLoad(show) {
@@ -5438,6 +5458,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && DA
 
 // この PC のツール(Fox_MD_Tracker)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
+if (LOCAL) { sharedLoad().then(() => { if (DATA && TAB === "settings") render(); }); setInterval(sharedLoad, 3600000); }      // 共有の結びつけ(配布元が承認した表)
 // ---------- アップデート(この PC のツールだけ) ----------
 let UPDATE = null;
 async function checkUpdate(force) {

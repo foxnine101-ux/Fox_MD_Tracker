@@ -44,6 +44,7 @@ DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
 OFFICIAL_FILE = os.path.join(HERE, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
 SANDBAG_FILE = os.path.join(HERE, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
 SANDBAG_MAX = 200
+SHARED_LINKS_FILE = os.path.join(HERE, "共有の結びつけ.json")      # 配布元が承認した、ゲームのアイテム番号 → ラトリオの名前 {v, links, t}
 SIM_CHARS_FILE = os.path.join(HERE, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
 ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
 SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
@@ -411,6 +412,9 @@ def start_live_server(core, lock, cfg):
                 return self._file("app.html", "text/html; charset=utf-8")
             if DEV and path in ("/live", "/live.html"):   # 耐性リアルタイムは開発版だけ
                 return self._file("live.html", "text/html; charset=utf-8")
+            if path == "/api/links" and self._local_only():
+                d = load_shared_links()
+                return self._send(200, json.dumps({"v": d.get("v"), "links": d.get("links"), "t": d.get("t")}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/license" and self._local_only():
                 return self._send(200, json.dumps(LIC.status() if LIC else {"state": "off"}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/data":
@@ -580,6 +584,21 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/links" and self._local_only():
+                # 共有の結びつけ: {propose: {番号: 名前}} で提案 / {refresh: 1} で今すぐ取り直す
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 200000)).decode("utf-8"))
+                    out = {"ok": True}
+                    if isinstance(b.get("propose"), dict):
+                        out["added"] = LIC.links_propose(b["propose"])
+                    if b.get("refresh"):
+                        out["msg"] = refresh_shared_links(True)
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
+                d = load_shared_links()
+                out.update({"v": d.get("v"), "n": len(d.get("links") or {}), "t": d.get("t")})
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/license" and self._local_only():
                 # 利用キー: {key} で登録 / {release: 1} でこの PC をはずす / {check: 1} で今すぐ確認
                 try:
@@ -970,6 +989,37 @@ def load_sandbag():
         return []
 
 
+def load_shared_links():
+    """共有の結びつけ.json → {v, links, t}"""
+    try:
+        with open(SHARED_LINKS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict) and isinstance(d.get("links"), dict):
+            return d
+    except (OSError, ValueError):
+        pass
+    return {"v": -1, "links": {}, "t": 0}
+
+
+def refresh_shared_links(force=False):
+    """配布元から承認ずみの表を取る(1日1回。変わっていなければ何もしない)。返り値 = 状態の文"""
+    if LIC is None:
+        return "利用キーの機能が使えません"
+    d = load_shared_links()
+    if not force and time.time() - d.get("t", 0) < 20 * 3600:
+        return "最近確認ずみです"
+    try:
+        r = LIC.links_get(d.get("v", -1))
+    except Exception as e:
+        return str(e)
+    d["t"] = int(time.time())
+    if r is not None:
+        d["v"], d["links"] = r["v"], r["links"]
+        print("[共有の結びつけ] 更新しました: {}件(版 {})".format(len(d["links"]), d["v"]))
+    _write_json(SHARED_LINKS_FILE, d)
+    return "更新しました" if r is not None else "変わりありません"
+
+
 def load_sim_chars():
     """計算機のキャラ.json → {ID: {name, model, updated}}"""
     try:
@@ -1325,6 +1375,18 @@ def main():
     stop = threading.Event()
     if LIC is not None:
         LIC.start_background(stop)
+
+        def _links_loop():
+            if stop.wait(60):
+                return
+            while True:
+                try:
+                    refresh_shared_links()
+                except Exception as e:
+                    print("[共有の結びつけ] 取れませんでした:", e)
+                if stop.wait(6 * 3600):
+                    return
+        threading.Thread(target=_links_loop, daemon=True).start()
     if GUI:
         global TRAY
         import tray
