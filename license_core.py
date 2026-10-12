@@ -147,19 +147,20 @@ class License:
         return added
 
     # ---- 2台の同期(中身は画面側で暗号化ずみ。ここは預けて受け取るだけ) ----
-    def sync_get(self, since):
+    def sync_get(self, since, slot=""):
         self._need()
         b = self._body()
         b["since"] = since
+        b["slot"] = slot
         r = self._post("/sync/get", b)
         if not r.get("ok"):
             raise RuntimeError("同期できません: " + str(r.get("reason")))
         return r        # {v, empty} / {v, same} / {v, data}
 
-    def sync_put(self, base, data):
+    def sync_put(self, base, data, slot=""):
         self._need()
         b = self._body()
-        b["base"], b["data"] = base, data
+        b["base"], b["data"], b["slot"] = base, data, slot
         r = self._post("/sync/put", b)
         if not r.get("ok") and r.get("reason") != "conflict":
             raise RuntimeError("同期できません: " + {"size": "データが大きすぎます"}.get(r.get("reason"), str(r.get("reason"))))

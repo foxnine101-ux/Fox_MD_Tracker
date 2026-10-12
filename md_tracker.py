@@ -591,19 +591,23 @@ def start_live_server(core, lock, cfg):
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
             if self.path.split("?")[0] == "/api/records" and self._local_only():
-                # 2台の同期の記録の窓口: {op: "export"} / {op: "merge", remote: {md, cs}, base: {指紋の表}} → {records, hashes, changed, remote_hashes}
+                # 記録(キャラ・装備・MD)を預ける・取り込む窓口(手動): {op: "export"} / {op: "preview", remote} / {op: "apply", mode: "add"|"replace", remote}
                 try:
-                    import records_sync
                     n = int(self.headers.get("Content-Length") or 0)
                     b = json.loads(self.rfile.read(min(n, 6000000)).decode("utf-8"))
                     with lock:
-                        if b.get("op") == "merge":
+                        op = b.get("op")
+                        if op == "export":
+                            out = {"ok": True, "records": records_export(core)}
+                        elif op in ("preview", "apply"):
                             if not isinstance(b.get("remote"), dict):
-                                raise ValueError("remote")
-                            rec, changed, rh = records_merge(core, b["remote"], b.get("base") if isinstance(b.get("base"), dict) else {})
+                                raise ValueError("預けてある記録の形が違います")
+                            if op == "preview":
+                                out = dict(records_preview(core, b["remote"]), ok=True)
+                            else:
+                                out = dict(records_apply(core, b["remote"], "replace" if b.get("mode") == "replace" else "add"), ok=True)
                         else:
-                            rec, changed, rh = records_export(core), False, None
-                    out = {"ok": True, "records": rec, "hashes": records_sync.hashes(rec), "changed": changed, "remote_hashes": rh}
+                            raise ValueError("op")
                 except Exception as e:
                     return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
@@ -614,7 +618,8 @@ def start_live_server(core, lock, cfg):
                     b = json.loads(self.rfile.read(min(n, 4000000)).decode("utf-8"))
                     if LIC is None:
                         raise RuntimeError("利用キーの機能が使えません")
-                    out = LIC.sync_get(b.get("since")) if b.get("op") == "get" else LIC.sync_put(b.get("base"), str(b.get("data") or ""))
+                    slot = "rec" if b.get("slot") == "rec" else ""
+                    out = LIC.sync_get(b.get("since"), slot) if b.get("op") == "get" else LIC.sync_put(b.get("base"), str(b.get("data") or ""), slot)
                 except Exception as e:
                     return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
@@ -971,7 +976,7 @@ def save_dmg():
 
 
 def records_export(core):
-    """同期に出す記録(MD の記録・キャラ・装備)。lock の中で呼ぶ。キーを並べた形にそろえ、その PC 限りの値(持ち物の番号・名前の分からない通信の置き場)は外す"""
+    """預ける記録(MD の記録・キャラ・装備)。lock の中で呼ぶ。キーを並べた形にそろえ、その PC 限りの値(持ち物の番号・名前の分からない通信の置き場)は外す"""
     import records_sync
     cs = CHARS.snapshot() if CHARS is not None else {}
     cs.pop("updated", None)            # 保存のたびに変わる時刻は、中身ではないので外す
@@ -979,69 +984,71 @@ def records_export(core):
 
 
 def records_backup():
-    """同期で記録を書きかえる前に、いまのファイルを「同期前のバックアップ」に写す。直前のバックアップから1日以内なら作らない
-    (混ぜ方に問題があったとき、元の記録がすぐ流れてしまわないように)。新しい7つだけ残す"""
-    try:
-        import shutil
-        root = os.path.join(HERE, "同期前のバックアップ")
-        os.makedirs(root, exist_ok=True)
-        olds = sorted(os.listdir(root))
-        if olds:
-            last = os.path.getmtime(os.path.join(root, olds[-1]))
-            if time.time() - last < 20 * 3600:
-                return
-        dst = os.path.join(root, time.strftime("%Y%m%d_%H%M%S"))
-        os.makedirs(dst, exist_ok=True)
-        for f in (STATE_FILE, CHAR_STATE_FILE):
-            if os.path.exists(f):
-                shutil.copy2(f, dst)
-        for old in sorted(os.listdir(root))[:-7]:
-            shutil.rmtree(os.path.join(root, old), ignore_errors=True)
-    except Exception as e:
-        print("[同期] バックアップを作れませんでした:", e)
+    """記録を書きかえる前に、いまのファイルを「同期前のバックアップ」に写す(新しい7つだけ残す)"""
+    import shutil
+    root = os.path.join(HERE, "同期前のバックアップ")
+    stamp, n = time.strftime("%Y%m%d_%H%M%S"), 0
+    dst = os.path.join(root, stamp)
+    while os.path.exists(dst):                     # 同じ秒にもう一度作るときは、上書きせず番号をつける
+        n += 1
+        dst = os.path.join(root, "{}_{}".format(stamp, n))
+    os.makedirs(dst)
+    for f in (STATE_FILE, CHAR_STATE_FILE):
+        if os.path.exists(f):
+            shutil.copy2(f, dst)
+    for old in sorted(os.listdir(root))[:-7]:
+        shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+    return dst
 
 
-def records_merge(core, remote, base):
-    """ほかの PC の記録を、いまの記録に混ぜて書く(前回同期した内容の指紋 base との3者比べ)。
-    返り値 = (混ぜた結果, 変わったか, 相手の記録の指紋)。lock の中で呼ぶ。途中で失敗したら元に戻す"""
+def records_preview(core, remote):
+    """取り込む前の確認用: いまの数・預けてある数・足されるキャラの名前・いま遊んでいるキャラ。lock の中で呼ぶ"""
+    import records_sync
+    local, remote = records_export(core), records_sync.prepare(remote)
+    live = sorted({n for n in core.currents.values() if n})
+    added = sorted(set((remote.get("cs") or {}).get("chars") or {}) - set((local.get("cs") or {}).get("chars") or {}))
+    return {"local": records_sync.counts(local), "remote": records_sync.counts(remote), "add_chars": added[:30], "n_add_chars": len(added), "live": live}
+
+
+def records_apply(core, remote, mode):
+    """預けてある記録を、この PC に取り込む。mode = "add"(無いものだけ足す) / "replace"(置きかえる)。lock の中で呼ぶ。
+    書きかえる前にバックアップを取り、途中で失敗したら元に戻す。いま遊んでいるキャラと、名前の分からない通信の置き場は、元の記録を残す"""
     import copy
     import records_sync
     local = records_export(core)
     remote = records_sync.prepare(remote)
-    remote_hashes = records_sync.hashes(remote)
-    protect = {n for n in core.currents.values() if n}          # いま遊んでいるキャラは、相手の記録で置きかえない
-    merged = records_sync.merge_records(local, remote, base, protect)
-    if records_sync.prepare(merged) == local:
-        return local, False, remote_hashes
-    for a_, b_ in (("md", "chars"), ("cs", "chars"), ("cs", "sets")):      # 安全装置: この PC の記録が半分以上消えるなら、取り込まない(相手が空・壊れているときなど)
-        nl, nm = len(local[a_].get(b_) or {}), len(merged[a_].get(b_) or {})
-        if nl >= 3 and nm * 2 < nl:
-            raise ValueError("ほかの PC の記録で、この PC の{}が半分以上消えるため、取り込みを止めました".format({"chars": "キャラの記録", "sets": "装備セット"}[b_]))
-    if records_sync.UNKNOWN in core.chars:          # 名前の分からない通信の置き場は、その PC 限り: 同期に出さないが、書きかえで消さない
-        merged["md"]["chars"][records_sync.UNKNOWN] = copy.deepcopy(core.chars[records_sync.UNKNOWN])
-    if CHARS is not None and records_sync.UNKNOWN in CHARS.chars:
-        merged["cs"]["chars"][records_sync.UNKNOWN] = copy.deepcopy(CHARS.chars[records_sync.UNKNOWN])
-    for n in protect:        # 遊んでいるキャラは、持ち物の番号つきの元の記録をそのまま残す(書き出し用に外した番号を、書き戻さない)
-        if n in core.chars and n in merged["md"]["chars"]:
+    merged = records_sync.replace_with(local, remote) if mode == "replace" else records_sync.add_only(local, remote)
+    # 変わらない項目と、遊んでいるキャラ・名前の分からない置き場は、持ち物の番号つきの元の記録をそのまま残す
+    live = {n for n in core.currents.values() if n} | {records_sync.UNKNOWN}
+    for n, e in list(merged["md"]["chars"].items()):
+        if n in core.chars and (n in live or e == local["md"]["chars"].get(n)):
             merged["md"]["chars"][n] = copy.deepcopy(core.chars[n])
-        if CHARS is not None and n in CHARS.chars and n in merged["cs"]["chars"]:
+    for n, e in list(merged["cs"]["chars"].items()):
+        if CHARS is not None and n in CHARS.chars and (n in live or e == local["cs"]["chars"].get(n)):
             merged["cs"]["chars"][n] = copy.deepcopy(CHARS.chars[n])
+    for sect, src in (("md", core.chars), ("cs", CHARS.chars if CHARS is not None else {})):
+        if records_sync.UNKNOWN in src:
+            merged[sect]["chars"][records_sync.UNKNOWN] = copy.deepcopy(src[records_sync.UNKNOWN])
+    if records_sync.prepare(merged) == local:
+        return {"changed": False}
     old_md, old_cs = copy.deepcopy(core.snapshot()), (copy.deepcopy(CHARS.snapshot()) if CHARS is not None else None)
-    records_backup()
+    backup = records_backup()
     try:
         core.restore(merged["md"])
         if CHARS is not None:
             CHARS.restore(merged["cs"])
             CHARS.changed = True
         save_state(core)
-        save_chars()
+        if CHARS is not None:
+            _write_json(CHAR_STATE_FILE, CHARS.snapshot())          # 保存の失敗を、ここでは握りつぶさない(失敗したら元に戻す)
     except Exception:
-        core.restore(old_md)             # 途中で失敗したら、中途半端なまま残さない
+        core.restore(old_md)
         if CHARS is not None and old_cs is not None:
             CHARS.restore(old_cs)
         raise
-    print("[同期] ほかの PC の記録を取り込みました: MD {}人・キャラ {}人・装備セット {}個".format(len(merged["md"]["chars"]), len(merged["cs"]["chars"]), len(merged["cs"]["sets"])))
-    return records_export(core), True, remote_hashes
+    print("[同期] 預けてある記録を取り込みました({}): MD {}人・キャラ {}人・装備セット {}個(バックアップ: {})".format(
+        "置きかえ" if mode == "replace" else "足す", len(merged["md"]["chars"]), len(merged["cs"]["chars"]), len(merged["cs"]["sets"]), os.path.basename(backup)))
+    return {"changed": True}
 
 
 def save_chars():
