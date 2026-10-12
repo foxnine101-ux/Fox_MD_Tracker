@@ -5516,6 +5516,7 @@ async function syncRecordsApi(body) {      // 記録の書き出し・混ぜ込�
   return j;
 }
 const syncHash = (s) => { let h1 = 0xdeadbeef, h2 = 0x41c6ce57; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); } h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909); return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36); };
+const syncHEq = (a, b) => { const ka = Object.keys(a || {}), kb = Object.keys(b || {}); return ka.length === kb.length && ka.every((k) => (b || {})[k] === (a || {})[k]); };
 const syncNoRec = (p) => { const { records, ...rest } = p || {}; return rest; };      // 記録は大きいので、「前回の内容」には入れない(印だけ覚える)
 async function syncRawSlots() {          // 読めなかったときは例外(空と区別する)
   const r = await fetch("/api/simchars");
@@ -5533,7 +5534,9 @@ async function syncCollect() {           // いまのこの PC の同期する�
   if (!DATA) throw new Error("画面の読み込みが終わっていません");
   const chars = await syncRawSlots();
   const slots = {}; Object.entries(chars).forEach(([id, c]) => { slots[id] = syncStripSlot(c); });
-  const out = { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots, records: await syncRecordsApi({ op: "export" }).then((j) => j.records) };
+  const rj = await syncRecordsApi({ op: "export" });
+  const out = { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots, records: rj.records };
+  Object.defineProperty(out, "_rh", { value: rj.hashes, enumerable: false });      // 記録の指紋(預けるものには入れない)
   if (syncUiOn()) { out.ui = {}; SYNC_UI_KEYS.forEach((k) => { const v = store.get(k); if (v != null) out.ui[k] = v; }); }      // 画面の記憶を揃えない PC は ui を持たない(相手の ui を消さない)
   return out;
 }
@@ -5623,20 +5626,25 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
       if (why) { SYNC.hold = why; SYNC.msg = "安全のため、同期を止めました。" + why; break; }
       if (!syncPayloadEq(merged, loc)) { await syncApply(merged, loc); changed = true; }
       // 記録(キャラ・装備・MD): ほかの PC のものがあれば、Python がいまの記録に混ぜて書く(足すだけ・新しいほうを採るだけ)
-      if (rem && rem.records) { const mr = await syncRecordsApi({ op: "merge", remote: rem.records }); merged.records = mr.records; if (mr.changed) changed = true; }
-      else merged.records = loc.records;
-      const recStr = JSON.stringify(merged.records), recHash = syncHash(recStr);
-      const recDiff = rem && rem.records ? recStr !== JSON.stringify(rem.records) : recHash !== store.get("md_syncrechash");
+      // 項目ごとの3者比べ(前回同期した内容の指紋 md_syncrecbase との比べ)は Python 側でやる。消した・変えたが相手にも届き、遊んでいるキャラは置きかえない
+      const recBase = JSON.parse(store.get("md_syncrecbase") || "{}");
+      let rh, remoteH = null;
+      if (rem && rem.records) { const mr = await syncRecordsApi({ op: "merge", remote: rem.records, base: recBase }); merged.records = mr.records; rh = mr.hashes; remoteH = mr.remote_hashes; if (mr.changed) changed = true; }
+      else { merged.records = loc.records; rh = loc._rh; }
+      const recDiff = remoteH ? !syncHEq(rh, remoteH) : !syncHEq(rh, recBase);      // 預けてある内容と違うか(その PC 限りの値は指紋に入れていない)
       const restDiff = !rem || !syncPayloadEq(merged, rem, true);
-      let newVer = r.v;
+      let newVer = r.v, agreed = !recDiff;
       if (restDiff || recDiff) {
-        // 記録だけが違うときは、書き込みの回数を減らすため、自動では10分に1回まで(「今すぐ同期」はすぐ)
-        if (!restDiff && !(opt && (opt.manual || opt.force || opt.take)) && Date.now() - (+store.get("md_syncpusht") || 0) < 600000) { SYNC.t = Date.now(); SYNC.msg = changed ? "ほかの PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false; done = true; break; }
-        const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(merged) });
-        if (p.ok === false) continue;           // 先に別の PC が書いた → もう一度(取り込んで混ぜ直す)
-        newVer = p.v; store.set("md_syncpusht", String(Date.now()));
+        // 記録だけが違うときは、書き込みの回数を減らすため、自動では30分に1回まで(「今すぐ同期」はすぐ)
+        if (!restDiff && !(opt && (opt.manual || opt.force || opt.take)) && Date.now() - (+store.get("md_syncpusht") || 0) < 1800000) { /* 預けるのは次の機会に */ }
+        else {
+          const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(merged) });
+          if (p.ok === false) continue;           // 先に別の PC が書いた → もう一度(取り込んで混ぜ直す)
+          newVer = p.v; agreed = true; store.set("md_syncpusht", String(Date.now()));
+        }
       }
-      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(syncNoRec(merged))); store.set("md_syncrechash", recHash);      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
+      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(syncNoRec(merged)));      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
+      if (agreed) store.set("md_syncrecbase", JSON.stringify(rh));      // 記録の指紋は、預けてある内容と一致したときだけ覚える(預けていない変更を、相手の内容で置きかえないように)
       SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); SYNC.msg = changed ? "ほかの PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false; done = true;
     }
     if (!done && !SYNC.hold) SYNC.msg = "混み合っていて同期できませんでした。もう一度試してください。";
@@ -5648,7 +5656,7 @@ async function syncReset() {           // 合言葉を忘れたとき: この PC
   if (!confirm("預けてある同期データを、この PC の内容で作り直します(合言葉・利用キーが合わず読めなくなったときに使います)。\n\nこの PC に無いスロット・設定は、同期している ほかの PC からも消える場合があります(消える前に確認が出ます)。よろしいですか?")) return;
   if (!DATA) return;
   SYNC.busy = true; syncPaint();
-  try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(syncNoRec(loc))); store.set("md_syncrechash", syncHash(JSON.stringify(loc.records))); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
+  try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(syncNoRec(loc))); store.set("md_syncrecbase", JSON.stringify(loc._rh)); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
   catch (e) { SYNC.msg = "できませんでした: " + e.message; }
   SYNC.busy = false; syncPaint();
 }
@@ -5681,7 +5689,7 @@ function syncBind() {
     if (v && v.length < 8) { alert("合言葉は8文字以上にしてください(使わないときは空にします)。"); e.target.value = old; return; }
     if (v === old) return;
     store.set("md_syncpw", v); SYNC.key = null;
-    if (syncOn()) { store.set("md_sync", "0"); store.del("md_syncbase"); store.del("md_syncver"); SYNC.msg = "合言葉を変えたので、同期を止めました。もう一度「同期する」にしてください(ほかの PC のデータと合うか確認します)。"; render(); }
+    if (syncOn()) { store.set("md_sync", "0"); store.del("md_syncbase"); store.del("md_syncver"); store.del("md_syncrecbase"); SYNC.msg = "合言葉を変えたので、同期を止めました。もう一度「同期する」にしてください(ほかの PC のデータと合うか確認します)。"; render(); }
   };
   $("#syncuicb").onchange = (e) => { store.set("md_syncui", e.target.checked ? "1" : "0"); };
   cb.onchange = async () => {
