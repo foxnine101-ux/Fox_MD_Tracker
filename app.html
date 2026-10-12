@@ -5207,6 +5207,22 @@ function renderSettings(groups) {
   groups.sort((a, b) => (KO[a.kind] - KO[b.kind]) || (a.order - b.order) || a.label.localeCompare(b.label, "ja"));
   const mdNames = groups.map((G) => G.name);
   const md = SETTINGS.md || {};
+  let top = "";      // いちばん上に出す枠(アップデート・共有の結びつけ・2台の同期・記録の引っ越し)
+  if (typeof LOCAL !== "undefined" && LOCAL) {
+    const u = UPDATE || {};
+    top += `<h2>アップデート</h2><div class="panel list"><div class="row"><span class="nm">いまの版 v${esc(u.current || DATA.version || "?")}${DATA.edition ? "（" + esc(DATA.edition) + "）" : ""}
+      <span class="muted">${u.state === "none" ? "（最新です）" : u.state === "available" ? `（新しい版 v${esc(u.latest.version)} があります）` : u.state === "error" ? "（" + esc(u.error) + "）" : ""}</span></span>
+      <button class="ghost" id="upchk">アップデートを確認</button></div></div>`;
+  }
+  if (typeof LOCAL !== "undefined" && LOCAL && LICST.state !== "off") {
+    const mine = Object.keys(myUnsharedLinks()).length, n = Object.keys(SHARED.links || {}).length;
+    const when = SHARED.t ? new Date(SHARED.t * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "まだ取っていません";
+    top += `<h2>共有の結びつけ</h2><div class="panel list"><div class="row"><span class="nm">ゲームのアイテムと計算機の名前の結びつけを、みんなで共有します。<span class="muted">（共有の表: ${n}件・最後に更新 ${esc(when)}。自分で決めた結びつけが先に使われます）</span></span>
+      <button class="ghost" id="lnkref">今すぐ更新</button></div>
+      <div class="row"><span class="nm">自分で結びつけたもののうち、共有の表にまだ無いもの: <b>${mine}件</b> <span class="muted">（提案すると、配布元が確認してから全員に配られます。名前の組だけが送られます）</span></span>
+      <button class="ghost" id="lnkprop" ${mine ? "" : "disabled"}>提案する</button></div><div class="muted" id="lnkmsg" style="padding:4px 8px"></div></div>`;
+  }
+  if (LOCAL && LICST.state !== "off") top += syncSettingsHtml();
   let h = `<h2>MDの分類と表示名</h2><p class="hint">「自動」は、名前に「週間」がある・明ける時刻がちょうど12:00・CTが26時間より長い → 週次、それ以外 → デイリー で分けています。違っていたらここで直してね。⋮⋮ をつかんで上下に動かすと、表の列の並びが変わります。</p>
     <div class="sortbar"><button class="ghost" id="mdreset">MDの並びを名前順に戻す</button></div><div class="panel list" id="mdlist">`;
   for (const G of groups) {
@@ -5253,22 +5269,7 @@ function renderSettings(groups) {
   }
   h += `<h2>耐性シート</h2><div class="panel list"><div class="row"><span class="nm">GoogleスプレッドシートのURL（空欄 = 最初に作った「MD耐性一覧」）</span>
     <input class="lbl" id="rzsheet" style="flex:1;min-width:240px" placeholder="https://docs.google.com/spreadsheets/d/…" value="${esc(SETTINGS.resistSheet || "")}"></div></div>`;
-  if (typeof LOCAL !== "undefined" && LOCAL) {
-    const u = UPDATE || {};
-    h += `<h2>アップデート</h2><div class="panel list"><div class="row"><span class="nm">いまの版 v${esc(u.current || DATA.version || "?")}${DATA.edition ? "（" + esc(DATA.edition) + "）" : ""}
-      <span class="muted">${u.state === "none" ? "（最新です）" : u.state === "available" ? `（新しい版 v${esc(u.latest.version)} があります）` : u.state === "error" ? "（" + esc(u.error) + "）" : ""}</span></span>
-      <button class="ghost" id="upchk">アップデートを確認</button></div></div>`;
-  }
-  if (typeof LOCAL !== "undefined" && LOCAL && LICST.state !== "off") {
-    const mine = Object.keys(myUnsharedLinks()).length, n = Object.keys(SHARED.links || {}).length;
-    const when = SHARED.t ? new Date(SHARED.t * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "まだ取っていません";
-    h += `<h2>共有の結びつけ</h2><div class="panel list"><div class="row"><span class="nm">ゲームのアイテムと計算機の名前の結びつけを、みんなで共有します。<span class="muted">（共有の表: ${n}件・最後に更新 ${esc(when)}。自分で決めた結びつけが先に使われます）</span></span>
-      <button class="ghost" id="lnkref">今すぐ更新</button></div>
-      <div class="row"><span class="nm">自分で結びつけたもののうち、共有の表にまだ無いもの: <b>${mine}件</b> <span class="muted">（提案すると、配布元が確認してから全員に配られます。名前の組だけが送られます）</span></span>
-      <button class="ghost" id="lnkprop" ${mine ? "" : "disabled"}>提案する</button></div><div class="muted" id="lnkmsg" style="padding:4px 8px"></div></div>`;
-  }
-  if (LOCAL && LICST.state !== "off") h += syncSettingsHtml();
-  h += `<div class="err" id="serr"></div>`;
+  h = top + h + `<div class="err" id="serr"></div>`;
   $("#view").innerHTML = h;
   syncBind();
   if ($("#lnkref")) $("#lnkref").onclick = async () => { $("#lnkmsg").textContent = "更新中…"; try { const j = await (await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh: 1 }) })).json(); await sharedLoad(); render(); const m = $("#lnkmsg"); if (m) m.textContent = j.ok ? (j.msg || "") : "できませんでした: " + (j.error || ""); } catch (e) { $("#lnkmsg").textContent = "つながりませんでした。"; } };
@@ -5474,7 +5475,10 @@ const SYNC_UI_KEYS = ["md_simfold", "md_simx", "md_evopen", "md_onlyok", "md_sim
 const SYNC_SLOT_LOCAL = ["foxSet", "foxShadow", "foxSetSig", "foxShadowSig", "foxSetTag", "foxShadowTag"];      // PC ごとに決まる(その PC の装備セットの記号)ので同期しない
 const SYNC = { busy: false, msg: "", hold: "", t: +store.get("md_synct") || 0, keyPw: "", keySalt: "", key: null, badPw: false };
 const syncOn = () => store.get("md_sync") === "1";
-const syncUiOn = () => store.get("md_syncui") === "1";
+const syncUiOn = () => store.get("md_syncui") === "1";      // 画面の記憶(標準でオフ)
+const syncSetOn = () => store.get("md_syncset") !== "0";        // 表示の設定(標準でオン)
+const syncSlotsOn = () => store.get("md_syncslots") !== "0";    // 計算機のスロット(標準でオン)
+const recDmgOn = () => store.get("md_recdmg") === "1";          // 記録の引っ越しに被ダメの記録も含める(標準でオフ)
 const syncJeq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const syncIsObj = (x) => x && typeof x === "object" && !Array.isArray(x);
 const syncN = (o) => Object.keys(o || {}).length;
@@ -5522,9 +5526,9 @@ function syncStripSlot(c) {              // 同期する形(PC ごとの印は�
 }
 async function syncCollect() {           // いまのこの PC の同期するものを集める
   if (!DATA) throw new Error("画面の読み込みが終わっていません");
-  const chars = await syncRawSlots();
-  const slots = {}; Object.entries(chars).forEach(([id, c]) => { slots[id] = syncStripSlot(c); });
-  const out = { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots };
+  const out = {};
+  if (syncSetOn()) out.settings = JSON.parse(JSON.stringify(SETTINGS || {}));      // オフの項目は持たない(預けてある分をそのまま残す)
+  if (syncSlotsOn()) { const chars = await syncRawSlots(); const slots = {}; Object.entries(chars).forEach(([id, c]) => { slots[id] = syncStripSlot(c); }); out.simchars = slots; }
   if (syncUiOn()) { out.ui = {}; SYNC_UI_KEYS.forEach((k) => { const v = store.get(k); if (v != null) out.ui[k] = v; }); }      // 画面の記憶を揃えない PC は ui を持たない(相手の ui を消さない)
   return out;
 }
@@ -5544,36 +5548,40 @@ function syncMerge3(base, loc, rem, depth, opt) {      // 変えたほうを採�
 const syncSlotEq = (a, b) => (a === undefined || b === undefined) ? a === b : syncJeq({ n: a.name, m: a.model, s: a.saved }, { n: b.name, m: b.model, s: b.saved });
 function syncMergePayload(base, loc, rem) {
   const b = base || { settings: {}, simchars: {}, ui: {} };
-  const out = {
-    settings: syncMerge3(b.settings, loc.settings, rem.settings, 2),
-    simchars: syncMerge3(b.simchars, loc.simchars, rem.simchars, 1, { eq: syncSlotEq, pick: (l, r) => ((r.updated || 0) > (l.updated || 0) ? r : l) }),
+  const one = (k, f) => (loc[k] === undefined ? rem[k] : rem[k] === undefined ? loc[k] : f(b[k], loc[k], rem[k]));      // どちらかがその項目を持たないとき(オフ)は、持っているほうをそのまま
+  const out = {}, parts = {
+    settings: one("settings", (bb, l, r) => syncMerge3(bb, l, r, 2)),
+    simchars: one("simchars", (bb, l, r) => syncMerge3(bb, l, r, 1, { eq: syncSlotEq, pick: (x, y) => ((y.updated || 0) > (x.updated || 0) ? y : x) })),
+    ui: one("ui", (bb, l, r) => syncMerge3(bb, l, r, 1)),
   };
-  const ui = loc.ui === undefined ? rem.ui : rem.ui === undefined ? loc.ui : syncMerge3(b.ui, loc.ui, rem.ui, 1);
-  if (ui !== undefined) out.ui = ui;
+  Object.entries(parts).forEach(([k, v]) => { if (v !== undefined) out[k] = v; });
   return out;
 }
 // strictUi: 預ける側の比べ方(こちらに画面の記憶があって相手に無ければ「違う」)。ふつうは、どちらかが画面の記憶を揃えない PC なら ui は比べない
-const syncPayloadEq = (a, b, strictUi) => syncJeq(a.settings, b.settings) && (a.ui === undefined || (b.ui === undefined && !strictUi) || syncJeq(a.ui, b.ui || {})) && Object.keys({ ...a.simchars, ...b.simchars }).every((id) => syncSlotEq(a.simchars[id], b.simchars[id]));
+const syncPartEq = (x, y, strict, eq) => x === undefined || (y === undefined && !strict) || eq(x, y === undefined ? {} : y);      // その項目を持たない側(オフ)は比べない
+const syncSlotsEq = (x, y) => Object.keys({ ...x, ...y }).every((id) => syncSlotEq(x[id], y[id]));
+const syncPayloadEq = (a, b, strict) => syncPartEq(a.settings, b.settings, strict, syncJeq) && syncPartEq(a.ui, b.ui, strict, syncJeq) && syncPartEq(a.simchars, b.simchars, strict, syncSlotsEq);
 function syncGuard(base, loc, merged, rem) {      // 大事なものが消えそうなら理由を返す(なければ null)
   if (base) {
-    if (!syncN(loc.settings) && syncN(base.settings)) return "この PC の設定が空になっています(読み込みに失敗した可能性があります)。";
-    if (!syncN(loc.simchars) && syncN(base.simchars)) return "この PC の計算機のスロットが空になっています(読み込みに失敗した可能性があります)。";
+    if (loc.settings !== undefined && !syncN(loc.settings) && syncN(base.settings)) return "この PC の設定が空になっています(読み込みに失敗した可能性があります)。";
+    if (loc.simchars !== undefined && !syncN(loc.simchars) && syncN(base.simchars)) return "この PC の計算機のスロットが空になっています(読み込みに失敗した可能性があります)。";
   }
   const lost = (a, b) => Object.keys(a || {}).filter((k) => !(k in (b || {}))).length;
   // src の項目の半分以上が、混ぜた結果で消える(src = loc: ほかの PC の変更で、この PC のものが減る / src = rem: この PC の削除が、ほかの PC に広がる)
   for (const [src, msg] of [[loc, "ほかの PC の変更で、この PC のスロット・設定が大きく減ります。"], [rem && rem !== base ? rem : null, "この PC で消した分が、ほかの PC からも大きく消えます。"]]) {
     if (!src) continue;
     const ns = syncN(src.simchars), nk = syncN(src.settings);
-    if ((ns >= 3 && lost(src.simchars, merged.simchars) >= Math.ceil(ns / 2)) || (nk >= 4 && lost(src.settings, merged.settings) >= Math.ceil(nk / 2))) return msg;
+    if ((src.simchars !== undefined && merged.simchars !== undefined && ns >= 3 && lost(src.simchars, merged.simchars) >= Math.ceil(ns / 2)) || (src.settings !== undefined && merged.settings !== undefined && nk >= 4 && lost(src.settings, merged.settings) >= Math.ceil(nk / 2))) return msg;
   }
   return null;
 }
 async function syncApply(m, loc) {       // 混ぜた結果を、この PC に書く
-  if (!syncJeq(SETTINGS, loc.settings)) throw new Error("設定を操作中だったため、次の同期に回します");
+  const doSet = syncSetOn() && m.settings !== undefined && loc.settings !== undefined, doSlots = syncSlotsOn() && m.simchars !== undefined && loc.simchars !== undefined;
+  if (doSet && !syncJeq(SETTINGS, loc.settings)) throw new Error("設定を操作中だったため、次の同期に回します");
   if (typeof SIMC !== "undefined" && SIMC.saveT) throw new Error("計算機を操作中だったため、次の同期に回します");      // 保存待ちの編集が残っている間は書かない
-  if (!syncJeq(m.settings, loc.settings)) { Object.keys(SETTINGS).forEach((k) => delete SETTINGS[k]); Object.assign(SETTINGS, m.settings); saveSettings(); }
-  const raw = await syncRawSlots();
-  for (const id of new Set([...Object.keys(m.simchars), ...Object.keys(loc.simchars)])) {
+  if (doSet && !syncJeq(m.settings, loc.settings)) { Object.keys(SETTINGS).forEach((k) => delete SETTINGS[k]); Object.assign(SETTINGS, m.settings); saveSettings(); }
+  const raw = doSlots ? await syncRawSlots() : {};
+  for (const id of doSlots ? new Set([...Object.keys(m.simchars), ...Object.keys(loc.simchars)]) : []) {
     const a = m.simchars[id], o = loc.simchars[id];
     if (syncSlotEq(a, o)) continue;
     const nowRaw = (await syncRawSlots())[id];       // 書く直前にもう一度読み、集めたあとに変わっていたら止める(操作中の編集を上書きしない)
@@ -5652,9 +5660,13 @@ function syncSettingsHtml() {
     <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロットを揃えます（自動）。<span class="muted">（中身は暗号化して預けます。利用キーを持つ PC だけが読めます。通信の記録（被ダメなど）は対象外です。計算機のスロットに着せた装備セットの記号は、PC ごとのものを使います）</span></span></div>
     <div class="row"><label class="nm"><input type="checkbox" id="synccb" ${on ? "checked" : ""}> 同期する</label></div>
     <div class="row"><span class="nm">合言葉（任意）<span class="muted">（入れると、サーバーの管理者にも読めなくなります。使うなら2台とも同じものを入れます。8文字以上・長めの文章がおすすめ。空のままでも同期できます）</span></span><input class="lbl" type="password" id="syncpw" autocomplete="off" value="${esc(store.get("md_syncpw") || "")}" style="min-width:200px"></div>
-    <div class="row"><label class="nm"><input type="checkbox" id="syncuicb" ${ui ? "checked" : ""}> 枠の開け閉めなど画面の記憶も揃える</label></div>
+    <div class="row"><span class="nm">同期する項目（自動）:</span>
+      <label class="nm"><input type="checkbox" id="syncsetcb" ${syncSetOn() ? "checked" : ""}> 表示の設定（並び順・非表示・色・結びつけなど）</label>
+      <label class="nm"><input type="checkbox" id="syncslotscb" ${syncSlotsOn() ? "checked" : ""}> 計算機のスロット</label>
+      <label class="nm"><input type="checkbox" id="syncuicb" ${ui ? "checked" : ""}> 枠の開け閉めなど画面の記憶</label></div>
     <div class="row"><span class="nm" id="syncmsg">${syncStatusHtml()}</span><button class="ghost" id="syncnow" ${on ? "" : "disabled"}>今すぐ同期</button></div></div>` + `    <h2>記録（キャラ・装備・MD）の引っ越し</h2><div class="panel list">
-    <div class="row"><span class="nm">ゲームの通信から集めた記録は、<b>自動では同期しません</b>（同じキャラを2台で別々に遊ぶと、回数などを正しく混ぜられないため）。サブ PC に記録をコピーしたいときは、記録のある PC で「記録を預ける」→ ほかの PC で「足す」か「置きかえる」を押します。取り込む前に、元の記録のバックアップを取ります。被ダメの記録は対象外です。</span></div>
+    <div class="row"><span class="nm">ゲームの通信から集めた記録は、<b>自動では同期しません</b>（同じキャラを2台で別々に遊ぶと、回数などを正しく混ぜられないため）。サブ PC に記録をコピーしたいときは、記録のある PC で「記録を預ける」→ ほかの PC で「足す」か「置きかえる」を押します。取り込む前に、元の記録のバックアップを取ります。被ダメの記録は、標準では対象外です（下のチェックで含められます）。</span></div>
+    <div class="row"><label class="nm"><input type="checkbox" id="recdmgcb" ${recDmgOn() ? "checked" : ""}> 被ダメの記録も含める <span class="muted">（標準はオフ。含めるときは、預けるときと取り込むときの両方でオンにします。「足す」では、この PC に無いキャラの分だけ足し、「置きかえる」では被ダメの記録ごと置きかえます）</span></label></div>
     <div class="row"><button class="ghost" id="recput">この PC の記録を預ける</button> <button class="ghost" id="recadd">預けてある記録を足す（無いものだけ）</button> <button class="ghost" id="recrep">預けてある記録で置きかえる</button></div>
     <div class="row"><span class="nm muted" id="recmsg">${esc(REC.msg || "")}</span></div></div>`;
 }
@@ -5670,6 +5682,9 @@ function syncBind() {
     if (syncOn()) { store.set("md_sync", "0"); store.del("md_syncbase"); store.del("md_syncver"); SYNC.msg = "合言葉を変えたので、同期を止めました。もう一度「同期する」にしてください(ほかの PC のデータと合うか確認します)。"; render(); }
   };
   $("#syncuicb").onchange = (e) => { store.set("md_syncui", e.target.checked ? "1" : "0"); };
+  $("#syncsetcb").onchange = (e) => { store.set("md_syncset", e.target.checked ? "1" : "0"); };
+  $("#syncslotscb").onchange = (e) => { store.set("md_syncslots", e.target.checked ? "1" : "0"); };
+  $("#recdmgcb").onchange = (e) => { store.set("md_recdmg", e.target.checked ? "1" : "0"); };
   cb.onchange = async () => {
     if (!cb.checked) { store.set("md_sync", "0"); SYNC.msg = "同期を止めました。"; render(); return; }
     const pw = $("#syncpw").value; if (pw && pw.length < 8) { cb.checked = false; alert("合言葉は8文字以上にしてください(使わないときは空にします)。"); return; }
@@ -5712,11 +5727,11 @@ async function recPut() {
       try { const d = await syncDec(cur.data); when = recWhen(d.t); } catch (e) {}
       if (!confirm("預けてある記録（" + when + "）を、この PC の記録で上書きします。よろしいですか?")) { recMsg(""); return; }
     }
-    const rj = await syncRecordsApi({ op: "export" });
+    const rj = await syncRecordsApi({ op: "export", dmg: recDmgOn() });
     const p = await syncApi({ op: "put", slot: "rec", base: cur.empty ? 0 : cur.v, data: await syncEnc({ kind: "records", t: Date.now(), records: rj.records }) });
     if (p.ok === false) throw new Error("ほかの PC が同時に預けました。もう一度試してください");
     const c = rj.records;
-    recMsg("預けました（キャラ " + Object.keys((c.cs || {}).chars || {}).length + "人・装備セット " + Object.keys((c.cs || {}).sets || {}).length + "個）。ほかの PC で「足す」か「置きかえる」を押すと取り込めます。");
+    recMsg((c.dmg ? "被ダメの記録つきで" : "") + "預けました（キャラ " + Object.keys((c.cs || {}).chars || {}).length + "人・装備セット " + Object.keys((c.cs || {}).sets || {}).length + "個）。ほかの PC で「足す」か「置きかえる」を押すと取り込めます。");
   } catch (e) { recMsg("できませんでした: " + e.message); }
 }
 async function recPull(mode) {
@@ -5728,13 +5743,16 @@ async function recPull(mode) {
     if (r.empty) { recMsg("預けてある記録がありません。先に、記録のある PC で「記録を預ける」を押してください。"); return; }
     const d = await syncDec(r.data);
     if (!d || !d.records) throw new Error("預けてある記録の形が違います");
-    const pv = await syncRecordsApi({ op: "preview", remote: d.records });
+    const useDmg = recDmgOn() && !!d.records.dmg;
+    const pv = await syncRecordsApi({ op: "preview", remote: d.records, dmg: useDmg });
     let text;
     if (mode === "replace") text = "この PC の記録（キャラ " + pv.local.chars + "人・装備セット " + pv.local.sets + "個）を、預けてある記録（" + recWhen(d.t) + "・キャラ " + pv.remote.chars + "人・装備セット " + pv.remote.sets + "個）で置きかえます。\n\nこの PC だけにあるキャラ・装備セットは消えます（元の記録は「同期前のバックアップ」フォルダに残ります）。";
     else text = "預けてある記録（" + recWhen(d.t) + "）から、この PC に無いものを足します。\n\n足されるキャラ: " + (pv.n_add_chars ? pv.n_add_chars + "人（" + pv.add_chars.map((n) => n.replace(/@.*$/, "")).slice(0, 8).join("、") + (pv.n_add_chars > 8 ? "…" : "") + "）" : "なし") + "\nこの PC にある記録は変わりません。";
+    if (recDmgOn() && !d.records.dmg) text += "\n\n※ 預けてある記録に被ダメの記録は入っていません（預ける側でも「被ダメの記録も含める」をオンにして預け直してください）。";
+    if (useDmg) text += mode === "replace" ? "\n\n被ダメの記録（キャラ " + pv.dmg_remote_chars + "人分）も、預けてある記録で置きかえます。この PC の被ダメの記録は、バックアップに残ります。" : "\n\n被ダメの記録は、この PC に無いキャラの分（" + pv.dmg_add_chars + "人）だけ足します。";
     if (pv.live && pv.live.length) text += "\n\n※ いまログイン中のキャラ（" + pv.live.map((n) => n.replace(/@.*$/, "")).join("、") + "）の記録は置きかえません。ゲームを終了している場合は、そのまま進めて大丈夫です。";
     if (!confirm(text + "\n\nよろしいですか?")) { recMsg(""); return; }
-    const a = await syncRecordsApi({ op: "apply", mode, remote: d.records });
+    const a = await syncRecordsApi({ op: "apply", mode, remote: d.records, dmg: useDmg });
     recMsg(a.changed ? "取り込みました。" : "変わるものはありませんでした。");
     if (a.changed) { await load(); render(); }
   } catch (e) { recMsg(e.badPw ? "取り込めません: 合言葉の有無・内容、または利用キーが、預けた PC と合いません。" : "できませんでした: " + e.message); }

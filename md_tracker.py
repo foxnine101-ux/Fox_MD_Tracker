@@ -598,14 +598,14 @@ def start_live_server(core, lock, cfg):
                     with lock:
                         op = b.get("op")
                         if op == "export":
-                            out = {"ok": True, "records": records_export(core)}
+                            out = {"ok": True, "records": records_export(core, bool(b.get("dmg")))}
                         elif op in ("preview", "apply"):
                             if not isinstance(b.get("remote"), dict):
                                 raise ValueError("預けてある記録の形が違います")
                             if op == "preview":
-                                out = dict(records_preview(core, b["remote"]), ok=True)
+                                out = dict(records_preview(core, b["remote"], bool(b.get("dmg"))), ok=True)
                             else:
-                                out = dict(records_apply(core, b["remote"], "replace" if b.get("mode") == "replace" else "add"), ok=True)
+                                out = dict(records_apply(core, b["remote"], "replace" if b.get("mode") == "replace" else "add", bool(b.get("dmg"))), ok=True)
                         else:
                             raise ValueError("op")
                 except Exception as e:
@@ -975,12 +975,15 @@ def save_dmg():
         print("[被ダメ] 保存に失敗:", e)
 
 
-def records_export(core):
-    """預ける記録(MD の記録・キャラ・装備)。lock の中で呼ぶ。キーを並べた形にそろえ、その PC 限りの値(持ち物の番号・名前の分からない通信の置き場)は外す"""
+def records_export(core, dmg=False):
+    """預ける記録(MD の記録・キャラ・装備。dmg=True なら被ダメの記録も)。lock の中で呼ぶ。キーを並べた形にそろえ、その PC 限りの値(持ち物の番号・名前の分からない通信の置き場)は外す"""
     import records_sync
     cs = CHARS.snapshot() if CHARS is not None else {}
     cs.pop("updated", None)            # 保存のたびに変わる時刻は、中身ではないので外す
-    return records_sync.prepare({"md": core.snapshot(), "cs": cs})
+    rec = {"md": core.snapshot(), "cs": cs}
+    if dmg and DMG is not None:
+        rec["dmg"] = DMG.snapshot()
+    return records_sync.prepare(rec)
 
 
 def records_backup():
@@ -993,7 +996,7 @@ def records_backup():
         n += 1
         dst = os.path.join(root, "{}_{}".format(stamp, n))
     os.makedirs(dst)
-    for f in (STATE_FILE, CHAR_STATE_FILE):
+    for f in (STATE_FILE, CHAR_STATE_FILE, DMG_FILE):
         if os.path.exists(f):
             shutil.copy2(f, dst)
     for old in sorted(os.listdir(root))[:-7]:
@@ -1001,23 +1004,30 @@ def records_backup():
     return dst
 
 
-def records_preview(core, remote):
+def records_preview(core, remote, dmg=False):
     """取り込む前の確認用: いまの数・預けてある数・足されるキャラの名前・いま遊んでいるキャラ。lock の中で呼ぶ"""
     import records_sync
-    local, remote = records_export(core), records_sync.prepare(remote)
+    local, remote = records_export(core, dmg), records_sync.prepare(remote)
     live = sorted({n for n in core.currents.values() if n})
     added = sorted(set((remote.get("cs") or {}).get("chars") or {}) - set((local.get("cs") or {}).get("chars") or {}))
-    return {"local": records_sync.counts(local), "remote": records_sync.counts(remote), "add_chars": added[:30], "n_add_chars": len(added), "live": live}
+    out = {"local": records_sync.counts(local), "remote": records_sync.counts(remote), "add_chars": added[:30], "n_add_chars": len(added), "live": live}
+    if dmg and DMG is not None and remote.get("dmg"):
+        out["dmg_remote_chars"] = records_sync.dmg_counts(remote["dmg"])
+        out["dmg_add_chars"] = len(records_sync.dmg_new_chars(local.get("dmg"), remote["dmg"]))
+    return out
 
 
-def records_apply(core, remote, mode):
+def records_apply(core, remote, mode, dmg=False):
     """預けてある記録を、この PC に取り込む。mode = "add"(無いものだけ足す) / "replace"(置きかえる)。lock の中で呼ぶ。
     書きかえる前にバックアップを取り、途中で失敗したら元に戻す。いま遊んでいるキャラと、名前の分からない通信の置き場は、元の記録を残す"""
     import copy
     import records_sync
-    local = records_export(core)
+    use_dmg = bool(dmg and DMG is not None and remote.get("dmg"))           # 被ダメの記録は、含めると指定したときだけ
+    local = records_export(core, use_dmg)
     remote = records_sync.prepare(remote)
     merged = records_sync.replace_with(local, remote) if mode == "replace" else records_sync.add_only(local, remote)
+    if use_dmg:
+        merged["dmg"] = remote["dmg"] if mode == "replace" else records_sync.dmg_add_only(local.get("dmg"), remote["dmg"])
     # 変わらない項目と、遊んでいるキャラ・名前の分からない置き場は、持ち物の番号つきの元の記録をそのまま残す
     live = {n for n in core.currents.values() if n} | {records_sync.UNKNOWN}
     for n, e in list(merged["md"]["chars"].items()):
@@ -1032,6 +1042,7 @@ def records_apply(core, remote, mode):
     if records_sync.prepare(merged) == local:
         return {"changed": False}
     old_md, old_cs = copy.deepcopy(core.snapshot()), (copy.deepcopy(CHARS.snapshot()) if CHARS is not None else None)
+    old_dmg = copy.deepcopy(DMG.snapshot()) if use_dmg else None
     backup = records_backup()
     try:
         core.restore(merged["md"])
@@ -1041,10 +1052,16 @@ def records_apply(core, remote, mode):
         save_state(core)
         if CHARS is not None:
             _write_json(CHAR_STATE_FILE, CHARS.snapshot())          # 保存の失敗を、ここでは握りつぶさない(失敗したら元に戻す)
+        if use_dmg:
+            DMG.restore(merged["dmg"])
+            DMG.changed = True
+            _write_json(DMG_FILE, DMG.snapshot())
     except Exception:
         core.restore(old_md)
         if CHARS is not None and old_cs is not None:
             CHARS.restore(old_cs)
+        if old_dmg is not None:
+            DMG.restore(old_dmg)
         raise
     print("[同期] 預けてある記録を取り込みました({}): MD {}人・キャラ {}人・装備セット {}個(バックアップ: {})".format(
         "置きかえ" if mode == "replace" else "足す", len(merged["md"]["chars"]), len(merged["cs"]["chars"]), len(merged["cs"]["sets"]), os.path.basename(backup)))

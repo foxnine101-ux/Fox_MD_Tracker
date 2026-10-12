@@ -111,3 +111,26 @@ def replace_with(local, remote):
     _fix_tags(out["cs"]["sets"])
     _fix_tags(out["cs"]["shadows"])
     return out
+
+
+# ---- 被ダメの記録(dmg): 標準では引っ越しに含めない。含めるときだけ ----
+DMG_PER_CHAR = ("stats", "gstats", "ails", "acts")       # キャラ → 中身
+DMG_PER_KEY = ("seen", "sets", "mob_seen")                # キー → 中身(この PC に無いキーだけ足す)
+
+
+def dmg_counts(dmg):
+    return len((dmg or {}).get("stats") or {})
+
+
+def dmg_add_only(local, remote):
+    """この PC に無いキャラの分(と、無いキー)だけ足す。この PC にある記録は変えない。足し算の集計なので、同じキャラの数字は混ぜない"""
+    local, remote = dict(norm(local or {})), norm(remote or {})
+    out = dict(local)
+    for k in DMG_PER_CHAR + DMG_PER_KEY:
+        out[k] = _union_add(local.get(k), remote.get(k))
+    out["monnames"] = sorted(set(local.get("monnames") or []) | set(remote.get("monnames") or []))
+    return out
+
+
+def dmg_new_chars(local, remote):
+    return sorted(set((remote or {}).get("stats") or {}) - set((local or {}).get("stats") or {}))
