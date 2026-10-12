@@ -471,7 +471,17 @@ def start_live_server(core, lock, cfg):
             if path == "/api/sandbag":            # サンドバックマンの記録(この PC に保存)
                 return self._send(200, json.dumps({"records": load_sandbag()}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
-                return self._send(200, json.dumps(load_sim_chars(), ensure_ascii=False), "application/json; charset=utf-8")
+                try:
+                    if os.path.exists(SIM_CHARS_FILE):           # あるのに読めないとき(OneDrive の一瞬のロックなど)は「空」と答えずエラーにする(同期が空と勘違いして相手の分を消さないように)
+                        with open(SIM_CHARS_FILE, "r", encoding="utf-8") as f:
+                            d = json.load(f)
+                        if not isinstance(d, dict):
+                            raise ValueError("形が違います")
+                    else:
+                        d = {}
+                except (OSError, ValueError) as e:
+                    return self._send(503, json.dumps({"error": str(e)}), "application/json; charset=utf-8")
+                return self._send(200, json.dumps(d, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/ratorio":
                 st = RATORIO.check() if "check=1" in self.path else RATORIO.status()
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
