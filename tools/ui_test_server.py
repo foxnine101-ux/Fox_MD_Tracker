@@ -56,6 +56,7 @@ mt.DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(mt.resource("skill_nam
                           mobs=dmg_core.load_mob_info(mt.resource("mob_info.json")))
 mt.DMG.hits_info = dmg_core.load_json(mt.resource("skill_hits.json") or "", lambda d: {int(k): v for k, v in d.items()})
 mt.DMG.counter = dmg_core.load_json(mt.resource("skill_counter.json") or "")
+mt.DMG.ail_counter = dmg_core.load_json(mt.resource("ail_counter.json") or "")
 mt.DMG.mob_ids = dmg_core.load_mob_ids(mt.resource("mob_ids.json") or "")
 if rd("被ダメ記録.json"):
     mt.DMG.restore(rd("被ダメ記録.json"))

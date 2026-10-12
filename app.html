@@ -2134,7 +2134,7 @@ function stpSbMt(m) {                           // サンドバックマンの�
 function simcSbAvg(m, over, useFx) {
   try {
     if (!ENG.sb) return null;
-    const mm = simcClone(m); Object.assign(mm.status, over || {});
+    const mm = simcClone(m); Object.assign(mm.status, over || {}); stpFoldTrait(mm);
     const key = "sbd:" + (useFx ? atkFxSig() : "-") + JSON.stringify(mm);
     if (ENG.cache[key] !== undefined) return ENG.cache[key];
     const T = stpSbMt(mm); if (!T) return null;
@@ -2159,6 +2159,12 @@ const stpDmgSig = (m) => JSON.stringify([simcSbCfg(m), atkFxSig()]);
 // 無詠唱 = 詠唱の値(DEX×2+INT。補正込みの合計)≧ 530。ポイントは GetStatusTotalCost(値) の合計(値が大きいほど1ポイントあたりの要求が増える)
 // 条件で効果が出る装備(「AGI 100 以上で…」など)があるので、式の答えは最後にラトリオの計算で確かめる(足りなければ1ずつ足す)
 const STP_AW = 10 + 10 / 111, STP_DW = 9 / 49, STP_KEYS = ["agi", "dex", "int", "vit", "str", "luk"], STP_LABEL = { agi: "AGI", dex: "DEX", int: "INT", vit: "VIT", str: "STR", luk: "LUK" };
+// 特性ステータス(試算に入れる。素点は model.pureStatus[6..11])。状態異常の持続時間・耐性・RES/MRES に効く(ラトリオの式)
+const STP_TRAIT = ["pow", "sta", "wis", "spl", "con", "crt"], STP_TLABEL = { pow: "POW", sta: "STA", wis: "WIS", spl: "SPL", con: "CON", crt: "CRT" }, STP_TMAX = 200;
+// 状態異常ごとに、何のステータスが効くか(ラトリオ engine/ui/CExtraInfoAreaComponentManagerCalc.js の式から)
+const STP_AILSTAT = { "毒": "VIT", "スタン": "VIT", "凍結": "MDEF（無視を除く）", "呪い": "LUK", "暗黒": "INT", "睡眠": "AGI", "沈黙": "INT", "混乱": "LUK", "出血": "AGI", "石化": "MDEF（無視を除く）",
+  "冷凍": "VIT（時間）", "氷結": "VIT（時間）", "発火": "BaseLv・AGI", "恐怖": "BaseLv・INT", "深い眠り": "INT・LUK", "精神衝撃": "VIT・LUK", "魅了": "不明", "狂乱": "不明",
+  "無気力": "POW（時間）", "漆黒": "STA（時間）", "強毒": "STA（時間）", "激流": "WIS（時間）", "憂鬱": "WIS（時間）", "静寂": "SPL（時間）", "火災": "SPL（時間）", "急冷": "CRT（時間）", "結晶化": "CRT（時間）", "不幸": "CRT（時間）" };
 const stpS = (A, D) => Math.sqrt(STP_AW * A + STP_DW * D);
 const stpCost = (v) => ENG.hm.GetStatusTotalCost(v);
 const stpNonStatSig = (m) => JSON.stringify(Object.assign({}, m, { status: Object.assign({}, m.status, { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0 }) })) + "|" + JSON.stringify([SIMC.opt.mainSel, SIMC.opt.shSel]);
@@ -2167,11 +2173,15 @@ const stpText = (html) => { const el = document.createElement("div"); el.innerHT
 function stpState() {                           // 試算中のステータス(スロットごと)。触るまでは、基本ステータス欄の値についていく
   const c = simcCur(); if (!c) return null;
   if (!SIMC.stp || SIMC.stp.id !== SIMC.cur) SIMC.stp = { id: SIMC.cur, d: null, touched: false, pats: null, patSig: "", rows: null, rowSig: "", sug: null, sugSig: "", eff: null, effSig: "", sw: { stat: "int", dir: -1, step: 10, n: 8 }, swR: null, swSig: "", tok: 0 };
-  const S = SIMC.stp; if (!S.touched || !S.d) S.d = Object.fromEntries(STP_KEYS.map((k) => [k, c.model.status[k] || 1]));
+  const S = SIMC.stp; if (!S.touched || !S.d) S.d = Object.fromEntries(STP_KEYS.map((k) => [k, c.model.status[k] || 1]).concat(STP_TRAIT.map((k, i) => [k, (c.model.pureStatus || [])[6 + i] || 0])));
   return S;
+}
+function stpFoldTrait(t) {                      // 試算のステータス(d)に混ざっている特性ステータスを、model の素点(pureStatus[6..11])へ移す
+  STP_TRAIT.forEach((k, i) => { if (k in t.status) { t.pureStatus = (t.pureStatus || []).slice(); while (t.pureStatus.length < 12) t.pureStatus.push(0); t.pureStatus[6 + i] = t.status[k]; delete t.status[k]; } });
 }
 function stpEval(pat, d, kinds) {               // 装備パターン pat(の model)に、ステータス d を入れて計算 → ASPD の内訳・詠唱の値など
   const t = simcClone(pat.mm); Object.assign(t.status, d);
+  stpFoldTrait(t);
   const r = engCalcCached(t, kinds), raw = r.core.aspdRaw, U = r.aspdU || 0, P = r.aspdP || 0, a2 = raw - P, a1 = U < 100 ? (a2 - 2 * U) / (1 - U / 100) : a2;
   return { r, raw, aspd: r.c[37], U, P, a1, up: a2 - a1, castP: 2 * (r.tot.DEX || 0) + (r.tot.INT || 0), hp: r.c[23], cast: r.core.n_CastCutForDisp, fixed: r.c[41], delay: r.core.delayDownForDisp,
     bonus: Object.fromEntries(STP_KEYS.map((k) => [k, (r.tot[k.toUpperCase()] || 0) - d[k]])) };
@@ -2234,6 +2244,20 @@ async function stpVerify(pats, c, d, tick) {      // 式の答えを、全パタ
   c.cost = stpCost(c.agi) + stpCost(c.dex) + stpCost(c.int); c.rows = rows;
   return c;
 }
+function stpAilBlock(e, e0) {                    // RES/MRES と、状態異常(旧・新)の耐性・持続時間(ラトリオの式。特性ステータスも効く)
+  const resOf = (E) => { const r = E.r, sp = r.spec || [], t = (k) => r.tot[k] || 0; return [(sp[254] || 0) + t("STA") + Math.floor(t("STA") / 3) * 5, (sp[255] || 0) + t("WIS") + Math.floor(t("WIS") / 3) * 5]; };
+  const [rs, ms] = resOf(e), [rs0, ms0] = resOf(e0), dl = (v, v0, u = "") => { const x = Math.round((v - v0) * 100) / 100; return x ? ` <span class="${x > 0 ? "good" : "warn"}">(${x > 0 ? "+" : ""}${x}${u})</span>` : ""; };
+  const num = (x) => { const m = String(x || "").match(/-?[\d.]+/g); return m ? m.map(parseFloat) : []; };
+  const tab = (E, k) => Object.fromEntries(simcXParse((E.r.x || {})[k], true).filter((y) => !y.hdr).map((y) => [y.label, num(y.val)]));
+  const o8 = tab(e, 8), p8 = tab(e0, 8), o9 = tab(e, 9), p9 = tab(e0, 9);
+  const r8 = Object.keys(o8).map((k) => { const a = o8[k], b = p8[k] || [0, 0]; return `<tr><td class="l">${esc(k)}</td><td class="l muted">${esc(STP_AILSTAT[k] || "")}</td><td>${a[0] || 0}%</td><td>${a[1] || 0}%${dl(a[1] || 0, b[1] || 0, "%")}</td></tr>`; }).join("");
+  const r9 = Object.keys(o9).map((k) => { const a = o9[k], b = p9[k] || [0, 0, 0]; return `<tr><td class="l">${esc(k)}</td><td class="l muted">${esc(STP_AILSTAT[k] || "")}</td><td>${a[0] || 0}%</td><td>${a[1] || 0}%${dl(a[1] || 0, b[1] || 0, "%")}</td><td>${a[2] || 0}秒${dl(a[2] || 0, b[2] || 0, "秒")}</td></tr>`; }).join("");
+  return `<div><div class="muted">RES（物理の状態異常・ダメージ） ／ MRES（魔法）</div><b>${rs}</b>${dl(rs, rs0)} ／ <b>${ms}</b>${dl(ms, ms0)} <span class="muted" style="font-size:12px">（装備 + STA・WIS の分。目安）</span>
+    <details style="margin-top:4px"><summary class="muted">状態異常の耐性・持続時間（旧・新。特性ステータスも効きます）</summary>
+      <div class="tablewrap"><table class="multi"><tr><th class="l">状態異常</th><th class="l">効くもの</th><th>装備耐性</th><th>ステ耐性</th></tr>${r8}</table></div>
+      <div class="tablewrap" style="margin-top:6px"><table class="multi"><tr><th class="l">新状態異常</th><th class="l">効くもの</th><th>装備耐性</th><th>ステ耐性</th><th>持続時間</th></tr>${r9}</table></div>
+      <p class="hint" style="margin:4px 0 0">ラトリオの式です。新しい状態異常（無気力・漆黒・強毒など）の耐性は「術者とターゲットのBaseLv差」で決まり、特性ステータスは持続時間を縮めます（開発中のため参考程度）。</p></details></div>`;
+}
 function stpExtra(r) {                            // 所持限界量・状態異常のステ耐性の合計(ラトリオの表から)
   const w = stpText((r.x || {})[3]).match(/所持限界量\s*([\d,]+)\s*装備品重量合計/), rows = simcXParse((r.x || {})[8], true).filter((y) => !y.hdr);
   const ail = rows.reduce((a, y) => { const p = String(y.val).split("／")[1]; return a + (p ? parseFloat(p) || 0 : 0); }, 0);
@@ -2246,19 +2270,23 @@ function stpAspdText(e, TG) {
     <div class="muted" style="font-size:12px">内訳: 素（武器・AGI・DEX・ポーション等）<b>${simcNum(e.a1, 1)}</b> → 装備の攻撃速度+${simcNum(e.U)}%で <b>+${simcNum(e.up, 1)}</b> → 装備・スキルの ASPD+ <b>${e.P >= 0 ? "+" : ""}${simcNum(e.P, 1)}</b> → 合計 ${simcNum(e.raw, 1)}（表示の上限は 193）</div>`;
 }
 function stpMainHtml(m, S) {
-  const O = SIMC.opt, d = S.d, e = stpEval({ mm: m }, d, [3, 8]), e0 = stpEval({ mm: m }, m.status, [3, 8]), ex = stpExtra(e.r), ex0 = stpExtra(e0.r), P = simcPoints(m), TG = stpTarget();
+  const O = SIMC.opt, d = S.d, e = stpEval({ mm: m }, d, [3, 8, 9]), e0 = stpEval({ mm: m }, Object.assign({}, m.status, Object.fromEntries(STP_TRAIT.map((k, i) => [k, (m.pureStatus || [])[6 + i] || 0]))), [3, 8, 9]), ex = stpExtra(e.r), ex0 = stpExtra(e0.r), P = simcPoints(m), TG = stpTarget();
   const used = STP_KEYS.reduce((a, k) => a + stpCost(d[k]), 0), remain = P ? P.earned - used : null, MAXV = SIMC_STMAX;
   const dl = (v, v0, f = 0) => { const x = Math.round((v - v0) * Math.pow(10, f)) / Math.pow(10, f); return x ? ` <span class="${x > 0 ? "good" : "warn"}">(${x > 0 ? "+" : ""}${simcNum(x, f)})</span>` : ""; };
   const row = (k) => { const v = d[k], tot = v + e.bonus[k], base = m.status[k] || 1;
     return `<tr><td><b>${STP_LABEL[k]}</b></td><td class="stpc"><button class="ghost stpbtn" data-stpd="${k}:-10">−10</button><button class="ghost stpbtn" data-stpd="${k}:-1">−</button><input type="number" class="stpin" min="1" max="${MAXV}" data-stpv="${k}" value="${v}"><button class="ghost stpbtn" data-stpd="${k}:1">＋</button><button class="ghost stpbtn" data-stpd="${k}:10">＋10</button></td>
       <td class="v">${e.bonus[k] ? `+${e.bonus[k]}` : "0"}</td><td class="v"><b>${tot}</b></td><td class="v muted">${v < MAXV ? stpCost(v + 1) - stpCost(v) : "-"}</td><td class="v muted">${stpCost(v)}</td><td class="muted">${v !== base ? `基本ステータス ${base}` : ""}</td></tr>`; };
-  return `<div class="stpmainw"><div><table class="multi"><tr><th>ステータス</th><th>素のステータス（試算）</th><th title="装備・カード・エンチャント・セット効果・支援・アイテムによる分">補正</th><th>合計</th><th title="あと1ポイント上げるのに要るポイント。上げるほど増えます">次の1ptの費用</th><th title="このステータスにここまでで使ったポイント">使用pt</th><th></th></tr>${STP_KEYS.map(row).join("")}</table>
+  const trow = (k, i) => { const v = d[k], K = STP_TLABEL[k], bon = (e.r.tot[K] || 0) - v, base = (m.pureStatus || [])[6 + i] || 0;
+    return `<tr><td><b>${K}</b></td><td class="stpc"><button class="ghost stpbtn" data-stpd="${k}:-10">−10</button><button class="ghost stpbtn" data-stpd="${k}:-1">−</button><input type="number" class="stpin" min="0" max="${STP_TMAX}" data-stpv="${k}" value="${v}"><button class="ghost stpbtn" data-stpd="${k}:1">＋</button><button class="ghost stpbtn" data-stpd="${k}:10">＋10</button></td>
+      <td class="v">${bon ? `+${bon}` : "0"}</td><td class="v"><b>${v + bon}</b></td><td class="muted" colspan="3">${v !== base ? `特性ステータス ${base}` : ""}</td></tr>`; };
+  return `<div class="stpmainw"><div><table class="multi"><tr><th>ステータス</th><th>素のステータス（試算）</th><th title="装備・カード・エンチャント・セット効果・支援・アイテムによる分">補正</th><th>合計</th><th title="あと1ポイント上げるのに要るポイント。上げるほど増えます">次の1ptの費用</th><th title="このステータスにここまでで使ったポイント">使用pt</th><th></th></tr>${STP_KEYS.map(row).join("")}<tr><td colspan="7" class="muted" style="padding-top:8px">特性ステータス（状態異常の耐性・持続時間、RES/MRES に効きます。ポイントは別枠のため、費用は出しません）</td></tr>${STP_TRAIT.map(trow).join("")}</table>
     <div class="opts"><span>使うポイント <b>${used}</b> ／ もらえる ${P ? P.earned : "-"} → 余り <b class="${remain !== null && remain < 0 ? "warn" : "good"}">${remain === null ? "-" : remain}</b></span>
-      <button id="stpreflect" ${STP_KEYS.every((k) => d[k] === (m.status[k] || 1)) ? "disabled" : ""} title="試算のステータスを、基本ステータスの欄に入れます">基本ステータスに反映</button><button class="ghost" id="stpreset" ${S.touched ? "" : "disabled"}>基本ステータスの値に戻す</button></div></div>
+      <button id="stpreflect" ${STP_KEYS.every((k) => d[k] === (m.status[k] || 1)) && STP_TRAIT.every((k, i) => d[k] === ((m.pureStatus || [])[6 + i] || 0)) ? "disabled" : ""} title="試算のステータスを、基本ステータスの欄に入れます">基本ステータスに反映</button><button class="ghost" id="stpreset" ${S.touched ? "" : "disabled"}>基本ステータスの値に戻す</button></div></div>
     <div class="stpres"><div><div class="muted">ASPD（装備・支援の補正込み）</div>${O.aspd ? stpAspdText(e, TG) : `<b>${simcNum(e.aspd, 1)}</b>`}${dl(e.aspd, e0.aspd, 1)}</div>
       <div><div class="muted">詠唱の値（DEX×2+INT。補正込み）</div><b class="${e.castP >= 530 ? "good" : ""}" style="font-size:18px">${simcNum(e.castP)}</b> <span class="muted">／ 530 で変動詠唱なし</span>${dl(e.castP, e0.castP)}
         <div class="muted" style="font-size:12px">= DEX ${d.dex}+${e.bonus.dex}（補正）= ${d.dex + e.bonus.dex} の2倍 ＋ INT ${d.int}+${e.bonus.int} = ${d.int + e.bonus.int}</div></div>
       ${stpDmgBlock(m, d)}
+      ${stpAilBlock(e, e0)}
       <div><div class="muted">最大HP ／ 所持限界量 ／ 状態異常のステ耐性の合計</div>${simcNum(e.hp)}${dl(e.hp, e0.hp)} ／ ${ex.weight === null ? "-" : simcNum(ex.weight)}${ex.weight !== null && ex0.weight !== null ? dl(ex.weight, ex0.weight) : ""} ／ ${simcNum(ex.ail)}%${dl(ex.ail, ex0.ail)}</div>${stpSurplus(d, e, O)}</div></div>`;
 }
 function stpDmgBlock(m, d) {                     // ダメージ(サンドバックマン): 試算のステータスと、基本ステータス欄の値(いま)の比べ
@@ -3871,12 +3899,12 @@ function renderSimChara() {
       V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog2(O.mainSel, el.dataset.optm, false));
       V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog2(O.shSel, el.dataset.opts, true));
       const S = stpState(), me = () => { stpRefreshMain(m); stpKick(m); };
-      const setV = (k, v) => { S.d[k] = Math.max(1, Math.min(SIMC_STMAX, Math.round(+v || 1))); S.touched = true; me(); };
+      const setV = (k, v) => { const tr = STP_TRAIT.includes(k); S.d[k] = tr ? Math.max(0, Math.min(STP_TMAX, Math.round(+v || 0))) : Math.max(1, Math.min(SIMC_STMAX, Math.round(+v || 1))); S.touched = true; me(); };
       g("stp").onclick = (e) => {
         const b = e.target.closest("[data-stpd]"); if (b) { const [k, dv] = b.dataset.stpd.split(":"); setV(k, S.d[k] + (+dv)); return; }
         const po = e.target.closest("[data-stpot]"); if (po) { m.status.speedPot = +po.dataset.stpot; changed(); return; }
         const a = e.target.closest("[data-stpapply]"); if (a) { const key = a.dataset.stpapply, c = key[0] === "b" ? (S.sug && S.sug.best || [])[+key.slice(1)] : (S.sug && S.sug.list || [])[+key]; if (c) { S.d.agi = c.agi; S.d.dex = c.dex; S.d.int = c.int; S.touched = true; render(); } return; }
-        if (e.target.closest("#stpreflect")) { Object.assign(m.status, S.d); S.touched = false; SIMC.msg = "試算のステータスを、基本ステータスに入れました。"; changed(); return; }
+        if (e.target.closest("#stpreflect")) { STP_KEYS.forEach((k) => { m.status[k] = S.d[k]; }); m.pureStatus = m.pureStatus || []; STP_TRAIT.forEach((k, i) => { while (m.pureStatus.length < 12) m.pureStatus.push(0); m.pureStatus[6 + i] = S.d[k]; }); S.touched = false; SIMC.msg = "試算のステータスを、基本ステータスに入れました。"; changed(); return; }
         if (e.target.closest("#stprecalc")) {      // 計算結果を全部捨てて、いまの設定で計算し直す
           Object.keys(ENG.cache).filter((k) => /^(sbd:|stpk:|atkk:)/.test(k)).forEach((k) => delete ENG.cache[k]); if (ENG.calcCache && ENG.calcCache.clear) ENG.calcCache.clear();
           S.rowSig = ""; S.sugSig = ""; S.effSig = ""; S.swSig = ""; S.rows = null; S.sug = null; S.eff = null; S.swR = null; render(); return;
@@ -5193,14 +5221,17 @@ function monpGuideHtml(g) {
   const D = g.damage || {}, T = D.total || 0;
   const pct = (v) => (T ? Math.round(100 * v / T) : 0);
   const bars = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).filter(([, v]) => pct(v) > 0).map(([k, v]) => `<span class="tag" title="${esc(k)} ${fmtN(v)}">${esc(k)} ${pct(v)}%</span>`).join(" ");
-  const got = (g.got || []).map((a) => `<tr><td class="l"><b>${esc(a.name)}</b></td><td>${fmtN(a.n)}</td><td class="l muted">${a.src.map(([w, s, c]) => w ? `${esc(w)}（${esc(s)}）×${c}` : `原因不明 ×${c}`).join("、")}</td></tr>`).join("");
+  const stat = (a) => a.label && STP_AILSTAT[a.label] ? `${esc(STP_AILSTAT[a.label])}${a.est ? ` <span title="ゲームの表示名と違うため、推定の対応です（ラトリオでは「${esc(a.label)}」）">※</span>` : ""}` : "";
+  const got = (g.got || []).map((a) => `<tr><td class="l"><b>${esc(a.name)}</b></td><td>${fmtN(a.n)}</td><td class="l">${stat(a)}</td><td class="l muted">${a.src.map(([w, s, c]) => w ? `${esc(w)}（${esc(s)}）×${c}` : `原因不明 ×${c}`).join("、")}</td></tr>`).join("");
   const warn = (g.warn || []).filter((a) => !a.got).map((a) => `<tr><td class="l"><b>${esc(a.name)}</b></td><td class="l muted">${a.mobs.map(([m, s]) => `${esc(m)}（${esc(s.join("・"))}）`).join("、")}</td></tr>`).join("");
+  const cnt = Object.entries(g.counter || {}).filter(([, v]) => v.length).map(([k, v]) => `<div style="margin:6px 0 2px"><b>${esc(k)}</b> <span class="muted">${esc(STP_AILSTAT[k] || "")}</span></div><div>${v.map(([kind, n, val, cond]) => `<span class="tag" title="${esc(kind)}${cond ? "・" + esc(cond) : ""}">${esc(n)} ${val >= 100 ? "無効" : val + "%"}${cond ? "*" : ""}</span>`).join(" ")}</div>`).join("");
   const top = (g.top || []).map(([n, c, mx, k, e]) => `<tr><td class="l"><button class="ghost mskill" data-msk="${esc(n)}">${esc(n)}</button></td><td class="l">${esc(k)}・${esc(e)}</td><td>${fmtN(c)}</td><td class="dm-max">${fmtN(mx)}</td></tr>`).join("");
   if (!got && !warn && !T) return `<div class="panel" style="padding:10px;margin-top:8px"><b>この場所の対策</b> <span class="muted">まだ記録がありません</span></div>`;
   return `<div class="panel" style="padding:10px;margin-top:8px"><b style="font-size:15px">この場所の対策</b> <span class="muted">（実測の被ダメ・状態異常と、公式サイトの敵のスキルから）</span>
     ${T ? `<div style="margin:8px 0 2px"><b>受けたダメージの内訳</b>（合計 ${fmtN(T)}）</div><div>種類: ${bars(D.kind)}</div><div style="margin-top:3px">属性: ${bars(D.ele)}</div>${D.near + D.far ? `<div class="muted" style="margin-top:3px">物理: 近接 ${Math.round(100 * D.near / (D.near + D.far))}% ／ 遠距離 ${Math.round(100 * D.far / (D.near + D.far))}%</div>` : ""}` : ""}
-    ${got ? `<div style="margin:10px 0 2px"><b>受けた状態異常</b>（実測）</div><div class="panel tablewrap"><table><thead><tr><th class="l">状態異常</th><th>回数</th><th class="l">原因（相手の技）</th></tr></thead><tbody>${got}</tbody></table></div>` : ""}
+    ${got ? `<div style="margin:10px 0 2px"><b>受けた状態異常</b>（実測）</div><div class="panel tablewrap"><table><thead><tr><th class="l">状態異常</th><th>回数</th><th class="l" title="この状態異常に効くステータス（ラトリオの式。※は名前が違うため推定の対応）">効くステータス</th><th class="l">原因（相手の技）</th></tr></thead><tbody>${got}</tbody></table></div>` : ""}
     ${warn ? `<div style="margin:10px 0 2px"><b>警戒する状態異常</b>（まだ受けていないが、この場所の敵が使う技から）</div><div class="panel tablewrap"><table><thead><tr><th class="l">状態異常</th><th class="l">使う敵（技）</th></tr></thead><tbody>${warn}</tbody></table></div>` : ""}
+    ${cnt ? `<details style="margin-top:8px"><summary>この場所の状態異常に効く装備・カード（${Object.keys(g.counter).filter((k) => g.counter[k].length).length}種類。ラトリオのデータから）</summary>${cnt}</details>` : ""}
     ${top ? `<details style="margin-top:8px"><summary>よく受けた・強い技（${g.top.length}）</summary><div class="tablewrap"><table><thead><tr><th class="l">技</th><th class="l">種類・属性</th><th>回数</th><th>最大</th></tr></thead><tbody>${top}</tbody></table></div></details>` : ""}
     <p class="hint" style="margin:8px 0 0">いまのキャラの状態異常の耐性は、「計算機」の「耐性」の枠（状態異常）で確認できます。</p></div>`;
 }

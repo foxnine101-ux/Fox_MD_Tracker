@@ -193,6 +193,19 @@ SKILL_AILMENT = {
 }
 
 
+# 記録の状態異常の名前(通信のアイコンから付けた名前)→ ラトリオの名前。ゲームの表示名と違うものは、意味が近い推定の対応(est)
+AIL_LABEL = {"暗闇": ("暗黒", False), "深い暗闇": ("漆黒", True), "深い沈黙": ("静寂", True), "倦怠": ("無気力", True), "致死毒": ("強毒", True), "不運": ("不幸", True)}
+RAT_AIL = {"毒", "スタン", "凍結", "呪い", "暗黒", "睡眠", "沈黙", "混乱", "出血", "石化", "冷凍", "氷結", "発火", "恐怖", "深い眠り", "魅了", "狂乱", "無気力", "漆黒",
+           "強毒", "激流", "憂鬱", "静寂", "火災", "急冷", "結晶化", "不幸"}
+
+
+def ail_label(name):
+    """状態異常の名前 → (ラトリオの名前, 推定の対応か)。ラトリオに無ければ ("", False)。"""
+    if name in RAT_AIL:
+        return name, False
+    return AIL_LABEL.get(name, ("", False))
+
+
 def load_json(path, conv=None):
     """skill_hits.json・skill_counter.json など、無ければ空の辞書。"""
     try:
@@ -241,6 +254,7 @@ class DmgCore(object):
         self.official = None                # ro_official.Official(公式サイトから集めた、この PC だけのデータ)。あれば mob_info より優先
         self._bc = {}                       # 借りた定義の覚え(borrow)
         self.hits_info = {}                 # 番号 -> 1回で当たるヒット数(skill_hits.json。ラトリオの定義で数が決まっているものだけ)
+        self.ail_counter = {}               # ラトリオの名前の状態異常 -> 耐性が付く装備・カード(ail_counter.json)
         self.counter = {}                   # 技の名前 -> 軽減する装備・カード(skill_counter.json。ラトリオの説明文から)
         self.mob_ids = {}                   # ゲームのモンスター番号(クラス) -> ID名(同梱の mob_ids.json。公式ツールの ID と同じ)
         self.cls_name = {}                  # ゲームのモンスター番号 -> 通信で見えた名前(出現パケットから覚える。この対応が「結びつけ」)
@@ -586,9 +600,10 @@ class DmgCore(object):
                 t[1] = max(t[1], v[2])
         topl = sorted(([n] + t for n, t in top.items()), key=lambda x: -x[2])[:8]
         return {"where": where, "official": off is not None,
-                "got": sorted(({"name": a, "n": g["n"], "src": sorted(([w, s2, c] for (w, s2), c in g["src"].items()), key=lambda x: -x[2])[:6]} for a, g in got.items()), key=lambda x: -x["n"]),
-                "warn": sorted(({"name": a, "got": a in got, "mobs": [[m, sorted(set(s2))] for m, s2 in sorted(d.items())]} for a, d in warn.items()), key=lambda x: (x["got"], x["name"])),
-                "damage": {"total": total, "kind": by_kind, "ele": by_ele, "near": near, "far": far}, "top": topl}
+                "got": sorted(({"name": a, "label": ail_label(a)[0], "est": ail_label(a)[1], "n": g["n"], "src": sorted(([w, s2, c] for (w, s2), c in g["src"].items()), key=lambda x: -x[2])[:6]} for a, g in got.items()), key=lambda x: -x["n"]),
+                "warn": sorted(({"name": a, "label": ail_label(a)[0], "est": ail_label(a)[1], "got": a in got, "mobs": [[m, sorted(set(s2))] for m, s2 in sorted(d.items())]} for a, d in warn.items()), key=lambda x: (x["got"], x["name"])),
+                "damage": {"total": total, "kind": by_kind, "ele": by_ele, "near": near, "far": far}, "top": topl,
+                "counter": {lb: self.ail_counter.get(lb, [])[:14] for lb in sorted({ail_label(a)[0] for a in list(got) + list(warn)} - {""})}}
 
     def _mob_stats(self, who):
         """相手の Lv・ATK・MATK・DEF・MDEF・属性・種族・サイズ(公式サイトの情報。強さ違いは 185/250 のように / でつなぐ)。"""

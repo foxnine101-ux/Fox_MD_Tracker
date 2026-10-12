@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.7"
+VERSION = "2.58.8"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1478,6 +1478,7 @@ def main():
             DMG.mob_ids = dmg_core.load_mob_ids(resource("mob_ids.json") or "")
             DMG.hits_info = dmg_core.load_json(resource("skill_hits.json") or "", lambda d: {int(k): v for k, v in d.items()})
             DMG.counter = dmg_core.load_json(resource("skill_counter.json") or "")
+            DMG.ail_counter = dmg_core.load_json(resource("ail_counter.json") or "")
             print("公式モンスター情報(この PC に集めたもの): {}件".format(len(OFFICIAL.mobs)))
         except Exception as e:
             print("公式モンスター情報が使えません:", e)
