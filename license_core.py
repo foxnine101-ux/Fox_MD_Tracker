@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.request
 
-LICENSE_URL = ""            # 例: "https://fox-md-license.<アカウント>.workers.dev"(サーバーを作ったらここに入れる)
+LICENSE_URL = "https://fox-md-license.foxnine101.workers.dev"            # 例: "https://fox-md-license.<アカウント>.workers.dev"(サーバーを作ったらここに入れる)
 ENFORCE = False             # True にすると、キーが無効・未入力のとき画面をふさぐ(画面側の判断。ここでは state を返すだけ)
 GRACE_DAYS = 14
 CHECK_EVERY = 24 * 3600
