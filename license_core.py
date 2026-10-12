@@ -8,7 +8,6 @@
 import hashlib
 import json
 import os
-import socket
 import threading
 import time
 import unicodedata
@@ -23,7 +22,7 @@ FILE = "利用キー.json"
 
 
 def pcid():
-    """この PC の識別子(マシンGUID のハッシュ。ユーザー名は送らない。管理者が見分けられるよう PC の名前(ホスト名)は別に送る)"""
+    """この PC の識別子(マシンGUID のハッシュ。PC の名前・ユーザー名は送らない)"""
     raw = ""
     try:
         import winreg
@@ -75,7 +74,7 @@ class License:
         return out
 
     def _body(self):
-        return {"key": self.d.get("key", ""), "pcid": pcid(), "pcname": socket.gethostname()[:40]}
+        return {"key": self.d.get("key", ""), "pcid": pcid()}
 
     def activate(self, key):
         """キーを入れて登録する。返り値は status()"""
@@ -87,7 +86,7 @@ class License:
             return self.status()
         with self.lock:
             try:
-                r = self._post("/activate", {"key": key, "pcid": pcid(), "pcname": socket.gethostname()[:40]})
+                r = self._post("/activate", {"key": key, "pcid": pcid()})
             except Exception as e:
                 self.msg = "サーバーにつながりませんでした。ネットを確認してもう一度試してください。"
                 self.log("[利用キー] 登録できません:", e)
