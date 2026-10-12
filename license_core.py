@@ -11,6 +11,8 @@ import os
 import socket
 import threading
 import time
+import unicodedata
+import urllib.error
 import urllib.request
 
 LICENSE_URL = "https://fox-md-license.foxnine101.workers.dev"            # 例: "https://fox-md-license.<アカウント>.workers.dev"(サーバーを作ったらここに入れる)
@@ -21,7 +23,7 @@ FILE = "利用キー.json"
 
 
 def pcid():
-    """この PC の識別子(マシンGUID のハッシュ。名前やユーザー名は送らない)"""
+    """この PC の識別子(マシンGUID のハッシュ。ユーザー名は送らない。管理者が見分けられるよう PC の名前(ホスト名)は別に送る)"""
     raw = ""
     try:
         import winreg
@@ -43,6 +45,8 @@ class License:
         try:
             with open(self.path, encoding="utf-8") as f:
                 self.d = json.load(f)
+            if not isinstance(self.d, dict):
+                self.d = {}
         except Exception:
             self.d = {}
 
@@ -58,15 +62,27 @@ class License:
     def _post(self, path, body):
         req = urllib.request.Request(self.url + path, json.dumps(body).encode("utf-8"),
                                      {"Content-Type": "application/json", "User-Agent": "Fox_MD_Tracker"})
-        with urllib.request.urlopen(req, timeout=15) as r:
-            return json.loads(r.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                out = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:           # 400 など。中身(reason)があれば読む(ネットの不通とは区別する)
+            try:
+                out = json.loads(e.read().decode("utf-8"))
+            except Exception:
+                raise e
+        if not isinstance(out, dict):
+            raise ValueError("サーバーの返事の形が違います")
+        return out
 
     def _body(self):
         return {"key": self.d.get("key", ""), "pcid": pcid(), "pcname": socket.gethostname()[:40]}
 
     def activate(self, key):
         """キーを入れて登録する。返り値は status()"""
-        key = str(key or "").strip().upper()
+        key = unicodedata.normalize("NFKC", str(key or "")).strip().upper().replace(" ", "")      # 全角・空白をそろえる
+        if not key:
+            self.msg = "キーを入力してください。"
+            return self.status()
         if not self.url:
             return self.status()
         with self.lock:
@@ -83,6 +99,7 @@ class License:
                 self.log("[利用キー] 登録しました:", r.get("name", ""))
             else:
                 self.msg = {"unknown": "このキーは見つかりません。入力を確認してください。",
+                            "bad request": "このキーは見つかりません。入力を確認してください。",
                             "revoked": "このキーは停止されています。",
                             "limit": "このキーで登録できる台数({}台)に達しています。使わない PC で「この PC をはずす」を押してください。".format(r.get("limit")),
                             }.get(r.get("reason"), "登録できませんでした。")
@@ -98,8 +115,11 @@ class License:
             except Exception as e:
                 self.log("[利用キー] 確認できません(猶予の間は使えます):", e)
                 return self.status()
+            if r.get("reason") == "bad request":
+                return self.status()
             if r.get("ok"):
                 self.d.update({"last_ok": int(time.time()), "bad": "", "name": r.get("name", self.d.get("name", ""))})
+                self.msg = ""
             else:
                 self.d["bad"] = r.get("reason") or "bad"
                 self.log("[利用キー] 無効になっています:", self.d["bad"])
@@ -112,8 +132,10 @@ class License:
             if self.url and self.d.get("key"):
                 try:
                     self._post("/release", self._body())
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.msg = "サーバーにつながらないため、はずせませんでした(サーバー側に登録が残ります)。ネットを確認してもう一度試してください。"
+                    self.log("[利用キー] はずせません:", e)
+                    return self.status()
             self.d = {}
             self.msg = ""
             try:
@@ -146,7 +168,10 @@ class License:
             if stop.wait(20):
                 return
             while True:
-                self.check()
+                try:
+                    self.check()
+                except Exception as e:
+                    self.log("[利用キー] 確認で例外:", e)
                 if stop.wait(CHECK_EVERY):
                     return
         threading.Thread(target=run, daemon=True).start()

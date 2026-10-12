@@ -34,4 +34,5 @@ def main(a):
         print(__doc__)
 
 
-main(sys.argv[1:])
+if __name__ == "__main__":
+    main(sys.argv[1:])

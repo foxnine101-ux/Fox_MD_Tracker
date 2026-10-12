@@ -5398,7 +5398,7 @@ function showLicKey() {
   const d = document.createElement("div"); d.className = "licdlg lickey";
   const has = LICST.state !== "none";
   d.innerHTML = `<div class="licbox" style="max-width:460px"><div class="infoh"><b>利用キー</b>${hard ? "" : '<a class="infox" title="閉じる">×</a>'}</div>
-    <div style="padding:10px 14px"><p>${esc(LIC_TEXT[LICST.state] || "")}${LICST.name ? `<br>登録名: ${esc(LICST.name)}(…${esc(LICST.key_tail || "")})` : ""}${LICST.state === "grace" || LICST.state === "ok" ? `<br>猶予: あと${LICST.days_left ?? "-"}日` : ""}</p>
+    <div style="padding:10px 14px"><p>${esc(LIC_TEXT[LICST.state] || "")}${LICST.name ? `<br>登録名: ${esc(LICST.name)}(…${esc(LICST.key_tail || "")})` : ""}${LICST.state === "grace" ? `<br>猶予: あと${LICST.days_left ?? "-"}日` : ""}</p>
     ${LICST.msg ? `<p style="color:#c0392b">${esc(LICST.msg)}</p>` : ""}
     ${has && LICST.state !== "revoked" ? "" : `<input id="lickin" placeholder="FOX-XXXX-XXXX-XXXX-XXXX" style="width:100%;box-sizing:border-box" autocomplete="off"><p><button id="licok">登録する</button></p>`}
     ${has ? `<p><button id="licchk">今すぐ確認</button> <button id="licrel">この PC をはずす</button></p><p class="muted" style="font-size:12px">別の PC で使うときは、使わない PC で「この PC をはずす」を押します。</p>` : ""}</div></div>`;
