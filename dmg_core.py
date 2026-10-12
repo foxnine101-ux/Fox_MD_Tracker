@@ -899,6 +899,7 @@ class DmgCore(object):
                 out.update(k.split("|")[0] for k in d)
         for d in self.mob_seen.values():
             out.update(d)
+        out.update(r.get("name") for r in self.links if r.get("name"))      # 「次からも自動」の決まりの名前
         return out
 
     def _act_ok(self, who, known):
@@ -1026,6 +1027,8 @@ class DmgCore(object):
             if not (who.startswith("ID") and who[2:].isdigit()):
                 continue
             self._rename_who(who, name)
+            if name not in self.monnames and len(self.monnames) < PLAYERS_MAX:
+                self.monnames.add(name)                  # 手で(または公式の一覧から)モンスターの名前だと決めたもの → ダメージの無い技の相手として残す
             aid = int(who[2:])
             self.names[aid] = name
             self.id_used.discard(aid)
