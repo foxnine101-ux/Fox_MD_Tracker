@@ -5391,24 +5391,39 @@ async function licLoad(show) {
 async function licPost(b) {
   try { LICST = await (await fetch("/api/license", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })).json(); } catch (e) { LICST = { ...LICST, msg: "つながりませんでした" }; }
 }
+let LICMSG = "";      // 押したあとの結果(ダイアログを作り直しても残す)
 function showLicKey() {
   document.querySelector(".licdlg.lickey")?.remove();
   if (LICST.state === "off") return;
-  const hard = LICST.enforce && ["none", "revoked", "expired"].includes(LICST.state);      // 止める設定のときは閉じられない
+  const st = LICST.state, bad = ["none", "revoked", "expired"].includes(st);
+  const hard = LICST.enforce && bad;      // 止める設定のときは閉じられない
+  const has = st !== "none";
+  const badge = { none: ["未登録", "#c77d0a"], ok: ["登録済み・確認できています", "#1f9d55"], grace: ["登録済み(サーバーに確認できていません)", "#c77d0a"], expired: ["確認が必要です", "#d64545"], revoked: ["使えなくなっています", "#d64545"] }[st] || ["", "#888"];
+  const t = LICST.last_ok ? new Date(LICST.last_ok * 1000).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
   const d = document.createElement("div"); d.className = "licdlg lickey";
-  const has = LICST.state !== "none";
-  d.innerHTML = `<div class="licbox" style="max-width:460px"><div class="infoh"><b>利用キー</b>${hard ? "" : '<a class="infox" title="閉じる">×</a>'}</div>
-    <div style="padding:10px 14px"><p>${esc(LIC_TEXT[LICST.state] || "")}${LICST.name ? `<br>登録名: ${esc(LICST.name)}(…${esc(LICST.key_tail || "")})` : ""}${LICST.state === "grace" ? `<br>猶予: あと${LICST.days_left ?? "-"}日` : ""}</p>
-    ${LICST.msg ? `<p style="color:#c0392b">${esc(LICST.msg)}</p>` : ""}
-    ${has && LICST.state !== "revoked" ? "" : `<input id="lickin" placeholder="FOX-XXXX-XXXX-XXXX-XXXX" style="width:100%;box-sizing:border-box" autocomplete="off"><p><button id="licok">登録する</button></p>`}
-    ${has ? `<p><button id="licchk">今すぐ確認</button> <button id="licrel">この PC をはずす</button></p><p class="muted" style="font-size:12px">別の PC で使うときは、使わない PC で「この PC をはずす」を押します。</p>` : ""}</div></div>`;
+  d.innerHTML = `<div class="licbox" style="max-width:480px"><div class="infoh"><b>利用キー</b>${hard ? "" : '<a class="infox" title="閉じる">×</a>'}</div>
+    <div style="padding:12px 16px;line-height:1.7">
+    <div style="font-size:15px;font-weight:600;color:${badge[1]}">● ${esc(badge[0])}</div>
+    ${has ? `<div class="muted" style="margin:4px 0 10px">登録名: ${esc(LICST.name || "-")}${LICST.key_tail ? `　キー: …${esc(LICST.key_tail)}` : ""}${t ? `<br>最後に確認できた時刻: ${esc(t)}` : ""}${st === "grace" ? `<br>ネットにつながらなくても、あと${LICST.days_left ?? "-"}日は使えます。` : ""}</div>` : `<div class="muted" style="margin:4px 0 10px">配られた利用キーを入れてください(初回だけです)。いまは入れなくても今までどおり使えます。</div>`}
+    ${LICST.msg ? `<div style="color:#d64545;margin-bottom:8px">${esc(LICST.msg)}</div>` : ""}
+    ${LICMSG ? `<div style="margin-bottom:8px;color:#1f9d55" id="licres">${esc(LICMSG)}</div>` : ""}
+    ${has && st !== "revoked" ? "" : `<input id="lickin" placeholder="FOX-XXXX-XXXX-XXXX-XXXX" style="width:100%;box-sizing:border-box;margin-bottom:8px" autocomplete="off"><div style="margin-bottom:10px"><button id="licok" class="pri">登録する</button></div>`}
+    ${has ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px"><button id="licchk">サーバーに確認する</button>${hard ? "" : '<button id="licclose">閉じる</button>'}</div>
+      <details style="margin-top:8px"><summary class="muted" style="cursor:pointer">別の PC に移したいとき</summary><div class="muted" style="margin:6px 0">この PC の登録を解除します。そのあと別の PC でキーを入れ直してください(1つのキーで使える台数は決まっています)。<br><button id="licrel" style="margin-top:6px">この PC の登録を解除する</button></div></details>` : (hard ? "" : '<button id="licclose">あとで入れる</button>')}
+    </div></div>`;
   d.onclick = (e) => { if (e.target === d && !hard || e.target.closest(".infox")) d.remove(); };
   document.body.appendChild(d);
-  const redo = async (b) => { await licPost(b); showLicKey(); };
-  d.querySelector("#licok")?.addEventListener("click", () => redo({ key: d.querySelector("#lickin").value }));
+  const redo = async (b, ok) => {
+    const btn = d.querySelector("#licok,#licchk"); d.querySelectorAll("button").forEach((x) => (x.disabled = true));
+    if (btn) btn.textContent = "確認中…";
+    LICMSG = ""; await licPost(b);
+    LICMSG = ok(LICST); showLicKey();
+  };
+  d.querySelector("#licok")?.addEventListener("click", () => redo({ key: d.querySelector("#lickin").value }, (r) => (r.state === "ok" ? "登録しました。" : "")));
   d.querySelector("#lickin")?.addEventListener("keydown", (e) => { if (e.key === "Enter") d.querySelector("#licok").click(); });
-  d.querySelector("#licchk")?.addEventListener("click", () => redo({ check: 1 }));
-  d.querySelector("#licrel")?.addEventListener("click", () => { if (confirm("この PC のキーをはずします。よろしいですか?")) redo({ release: 1 }); });
+  d.querySelector("#licchk")?.addEventListener("click", () => redo({ check: 1 }, (r) => (r.state === "ok" ? "✓ 確認できました(" + new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }) + ")" : r.state === "revoked" ? "" : "サーバーにつながりませんでした。あとでもう一度試してください。")));
+  d.querySelector("#licrel")?.addEventListener("click", () => { if (confirm("この PC の登録を解除します。よろしいですか?")) redo({ release: 1 }, (r) => (r.state === "none" ? "解除しました。" : "")); });
+  d.querySelector("#licclose")?.addEventListener("click", () => d.remove());
 }
 licLoad(true);
 $("#gear").onclick = (e) => {      // 歯車: イベント・入場履歴・設定のメニュー

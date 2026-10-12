@@ -148,7 +148,7 @@ class License:
         if not self.url:
             return {"state": "off", "enforce": False}
         k = self.d.get("key")
-        out = {"enforce": ENFORCE, "msg": self.msg, "name": self.d.get("name", ""), "pc": pcid()[:6]}
+        out = {"enforce": ENFORCE, "msg": self.msg, "last_ok": self.d.get("last_ok", 0), "name": self.d.get("name", ""), "pc": pcid()[:6]}
         if not k:
             out["state"] = "none"
         elif self.d.get("bad"):
