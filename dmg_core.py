@@ -173,6 +173,11 @@ def load_skill_info(path):
         return {}
 
 
+# 資料で確かめた「M〇〇」(モンスター専用)の定義。コロコロラグナロク「MOB専用スキルについて」(https://www.kopeya.jp/korokororo/category42/)と、実測(736)
+VERIFIED = {736: "念属性固定の地面設置範囲魔法(通常スキルのサイキックウェーブとは別物)", 173: "消費したHPと同量の火属性ダメージ・魔法扱い(属性耐性・種族耐性・DEFを貫通)",
+            737: "非設置の聖属性範囲魔法"}
+
+
 def load_json(path, conv=None):
     """skill_hits.json・skill_counter.json など、無ければ空の辞書。"""
     try:
@@ -485,7 +490,9 @@ class DmgCore(object):
         exp = self.hits_info.get(base)
         hit_ok = exp is not None and per is not None and uses >= 3 and abs(per - exp) < 0.05
         out.update(base=base, hits_exp=exp, hits_meas=per, uses=uses)
-        if skid not in self.info:
+        if skid in VERIFIED:
+            out["state"], out["note"] = "確認ずみ", VERIFIED[skid]
+        elif skid not in self.info:
             out["state"] = "確定" if hit_ok else "借り"
         else:
             out["state"] = "一致" if self._classify(skid) == self._classify(base) else "食い違い"
@@ -521,7 +528,7 @@ class DmgCore(object):
                          "hits": round(a[3] / a[0], 1) if a[0] else 0, "mob": self._mob_stats(who)})
         rows.sort(key=lambda r: -r["max"])
         return {"name": name, "id": skid, "kind": kind, "ele": ele, "state": st["state"], "base": self.skill_name(st["base"]) if st["base"] else "",
-                "base_kind": list(self._classify(st["base"])) if st["base"] else [], "hits_exp": st["hits_exp"], "hits_meas": st["hits_meas"], "uses": st["uses"], "near": near, "far": far, "counter": self.counter.get(name) or [],
+                "base_kind": list(self._classify(st["base"])) if st["base"] else [], "hits_exp": st["hits_exp"], "hits_meas": st["hits_meas"], "uses": st["uses"], "note": st.get("note", ""), "near": near, "far": far, "counter": self.counter.get(name) or [],
                 "rows": rows[:300], "official": off is not None}
 
     def _mob_stats(self, who):

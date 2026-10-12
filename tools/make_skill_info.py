@@ -32,7 +32,10 @@ ALWAYS_LONG = {"KN_BRANDISHSPEAR", "SR_RAMPAGEBLASTER", "BO_ACIDIFIED_ZONE_WATER
 
 # jRO で rAthena と違っていたもの(実際に受けて確かめたもの)。番号 -> {"e": 属性, "t": 種類}
 JRO_FIX = {
-    736: {"e": "念"},      # Mサイキックウェーブ: rAthena は火だが jRO では念
+    736: {"e": "念"},      # Mサイキックウェーブ: rAthena は火だが jRO では念(実測 + コロコロラグナロク「MOB専用スキルについて」にも「念属性固定」)
+    # コロコロラグナロク「MOB専用スキルについて」(https://www.kopeya.jp/korokororo/category42/)で、無属性の物理・遠距離と書かれているもの
+    674: {"t": "W", "e": "無", "r": 7, "m": "L"},     # イクスパルシオン(射程7・ATK依存の無属性物理)
+    679: {"m": "L"},                                  # ヴァンパイアギフト(無属性遠距離物理)
 }
 
 
@@ -64,6 +67,8 @@ def main(path):
         if fx:
             out[str(s["Id"])][0] = fx.get("t", out[str(s["Id"])][0])
             out[str(s["Id"])][1] = fx.get("e", out[str(s["Id"])][1])
+            out[str(s["Id"])][2] = fx.get("r", out[str(s["Id"])][2])
+            out[str(s["Id"])][3] = "".join(c for c in out[str(s["Id"])][3] if c not in "SL") + fx["m"] if "m" in fx else out[str(s["Id"])][3]
     json.dump(out, sys.stdout, ensure_ascii=False, separators=(",", ":"))
 
 

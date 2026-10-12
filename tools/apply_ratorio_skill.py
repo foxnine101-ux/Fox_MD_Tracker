@@ -27,7 +27,7 @@ import sys
 
 ELE = {"FORCE_VANITY": "無", "FORCE_WATER": "水", "FORCE_EARTH": "地", "FORCE_FIRE": "火", "FORCE_WIND": "風",
        "FORCE_POISON": "毒", "FORCE_HOLY": "聖", "FORCE_DARK": "闇", "FORCE_PSYCO": "念", "FORCE_UNDEAD": "不死"}
-KEEP = {"736"}          # make_skill_info.py の JRO_FIX(実際に受けて確かめたもの)
+KEEP = {"736", "674", "679"}          # make_skill_info.py の JRO_FIX(実際に受けて確かめたもの)
 
 
 def read_ratorio(folder):
