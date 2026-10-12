@@ -477,7 +477,7 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
 const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["mapview", "マップ読み込み"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
@@ -531,6 +531,7 @@ function renderNow() {
   if (TAB === "event") return renderEvents(chars, now);
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);
+  if (TAB === "mons") return renderMons();
   if (TAB === "chars" || TAB === "equip") return renderChars(chars);
   if (TAB === "gsets") return renderGSets(chars);
   if (TAB === "sim") return renderSim(chars);
@@ -5116,6 +5117,51 @@ function renderHistory() {
   let h = `<div class="panel tablewrap"><table class="hist"><thead><tr><th class="char">キャラ</th><th>日時</th><th>MD（内部名）</th><th>マップ</th></tr></thead><tbody>`;
   for (const x of hs) h += `<tr><td class="char">${esc(cn(x.char))}</td><td>${when(x.t)}</td><td>${esc(x.md || "")}</td><td class="muted">${esc(x.map)}</td></tr>`;
   $("#view").innerHTML = h + `</tbody></table></div>`;
+}
+
+// ---------------- モンスター情報: 被ダメを受けた場所・見かけた場所ごとの、出てくるモンスター ----------------
+// 出どころ: 被ダメ(実際に攻撃を受けた)/ 見かけた(通信で見えた)/ 公式(公式サイトのマップの出現一覧)。Lv・属性などは公式サイト(この PC に集めたもの)→ ラトリオの順。
+const MONP = { d: null, place: store.get("md_monplace") || "", busy: false, q: "" };
+function renderMons() {
+  if ($("#monp")) { monpFill(); return; }
+  $("#view").innerHTML = `<div id="monp"><div class="panel" style="padding:10px"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+    <label>場所 <select id="monsel" style="max-width:360px"></select></label>
+    <input id="monq" type="search" placeholder="モンスター名で絞る" style="width:200px">
+    <button class="ghost" id="monrun" title="公式サイトから、足りないモンスター・マップの情報を（時間をあけて）集めます">足りない情報を公式サイトから集める</button>
+    <span id="monst" class="muted"></span></div>
+    <p class="hint" style="margin:6px 0 0">被ダメを受けた場所・通信で見かけた場所ごとに、出てくるモンスターを表示します。出どころの「被ダメ」は実際に攻撃を受けた相手、「見かけた」は通信で見えた相手、「公式」は公式サイトのマップの出現一覧です。公式サイトの情報はこの PC の中にだけ集めます。</p></div>
+    <div id="monbody"></div></div>`;
+  $("#monsel").onchange = (e) => { MONP.place = e.target.value; store.set("md_monplace", MONP.place); monpFill(); };
+  $("#monq").oninput = (e) => { MONP.q = e.target.value; monpBody(); };
+  $("#monrun").onclick = async () => {
+    $("#monrun").disabled = true;
+    await mapvJson("/api/official", { run: 1 }).catch(() => {});
+    $("#monst").textContent = "裏で集めています。しばらくしてから「更新」を押してください。";
+    setTimeout(() => { const b = $("#monrun"); if (b) b.disabled = false; }, 4000);
+  };
+  monpFill();
+}
+async function monpFill() {
+  if (MONP.busy) return; MONP.busy = true;
+  try { MONP.d = await mapvJson("/api/mobplaces"); } catch (e) { MONP.busy = false; return; }
+  MONP.busy = false;
+  const sel = $("#monsel"); if (!sel) return;
+  const places = Object.keys((MONP.d || {}).places || {}).sort((a, b) => (a.startsWith("フィールド") - b.startsWith("フィールド")) || a.localeCompare(b, "ja"));
+  if (!places.includes(MONP.place)) MONP.place = places[0] || "";
+  sel.innerHTML = places.map((w) => `<option value="${esc(w)}" ${w === MONP.place ? "selected" : ""}>${esc(w)}（${MONP.d.places[w].length}）</option>`).join("");
+  const o = (MONP.d || {}).official;
+  $("#monst").textContent = o ? `公式サイトから集めた情報: モンスター ${o.mobs} 体（詳細 ${o.details}）${o.state === "working" ? " ・取得中…" : ""}` : "";
+  monpBody();
+}
+function monpBody() {
+  const el = $("#monbody"); if (!el) return;
+  const rows = (((MONP.d || {}).places || {})[MONP.place] || []).filter((r) => !MONP.q || r.name.includes(MONP.q));
+  if (!MONP.place) { el.innerHTML = `<div class="panel empty">まだ記録がありません。ROで戦うと、受けた場所ごとにここに出ます。</div>`; return; }
+  const tag = (s) => `<span class="tag" style="${s === "被ダメ" ? "background:#c0392b;color:#fff" : s === "公式" ? "background:#2a6fb0;color:#fff" : ""}">${esc(s)}</span>`;
+  const noOff = rows.filter((r) => !r.official).length;
+  el.innerHTML = `<div class="panel tablewrap" style="margin-top:8px"><table><thead><tr><th class="l">モンスター</th><th>Lv</th><th>HP</th><th>属性</th><th>種族</th><th>サイズ</th><th>種類</th><th class="l">使うスキル</th><th class="l">出どころ</th></tr></thead><tbody>${
+    rows.map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.lv ? esc(r.lv) : "-"}</td><td>${r.hp ? esc(typeof r.hp === "number" ? fmtN(r.hp) : r.hp) : "-"}</td><td>${esc(r.ele || "-")}</td><td>${esc(r.race || "-")}</td><td>${esc(r.size || "-")}</td><td>${r.boss ? "ボス" : r.lv ? "一般" : "-"}</td><td class="l muted" style="max-width:380px">${r.skills.length ? esc(r.skills.join("、")) : r.official ? "-" : `<span title="公式サイトから集めると出ます">未取得</span>`}</td><td class="l">${r.src.map(tag).join(" ")}</td></tr>`).join("")}</tbody></table></div>
+    ${noOff ? `<p class="hint">公式サイトの情報が未取得のモンスターが ${noOff} 体います。「足りない情報を公式サイトから集める」で、時間をあけて少しずつ集めます。</p>` : ""}`;
 }
 
 // ---------------- マップ読み込み(歯車): 公式サイト(RO公式ツール)のマップ情報を、この PC に取り込んで見る ----------------

@@ -493,6 +493,10 @@ def start_live_server(core, lock, cfg):
                     return self._send(404, "not found", "text/plain")
                 with open(full, "rb") as f:
                     return self._send(200, f.read(), "image/png" if full.endswith(".png") else "image/jpeg", "public, max-age=86400")
+            if path == "/api/mobplaces":          # 「モンスター情報」タブ: 場所ごとのモンスター
+                with lock:
+                    out = {"places": DMG.place_view() if DMG is not None else {}, "official": OFFICIAL.status() if OFFICIAL is not None else None}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path in ("/api/map", "/api/maps", "/api/mapcur"):
                 if OFFICIAL is None:
                     return self._send(200, json.dumps({"off": True}), "application/json")

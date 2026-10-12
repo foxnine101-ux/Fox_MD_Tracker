@@ -934,12 +934,21 @@ class DmgCore(object):
                     by[md].append(suf)
         for md, sufs in by.items():
             maps.append([md, sufs])
+        fields = {}                                      # @ の無いマップ(bl_ice など)。被ダメを受けた場所「フィールド ○○」の、○○が公式のマップのファイル名
+        for per_char in self.stats.values():
+            for where, rows in per_char.items():
+                if where.startswith("フィールド ") and rows:
+                    fields[where] = fields.get(where, 0) + sum(v[0] for v in rows.values())
+        for where in sorted(fields, key=lambda w: -fields[w]):
+            maps.append([where, [where[len("フィールド "):]]])
         return {"names": names, "maps": maps}
 
     def _suffixes(self, where):
         """その場所(MD の名前)で入ったマップの後ろの部分。「MD ct2」のような名前なら ct2 そのもの。"""
         if where.startswith("MD "):
             return [where[3:]]
+        if where.startswith("フィールド "):
+            return [where[len("フィールド "):]]
         out = []
         for h in getattr(self.md, "history", []) or []:
             if (h.get("md") or "") == where and "@" in (h.get("map") or ""):
@@ -1043,6 +1052,44 @@ class DmgCore(object):
                 done += self.link_ids(g["where"], g["ids"], name)
                 self.log("[被ダメ] 名前の分からない相手 {} 体を「{}」にしました({})".format(len(g["ids"]), name, g["where"]))
         return done
+
+    def place_view(self):
+        """「モンスター情報」タブ用: 被ダメを受けた場所・見かけた場所ごとの、出てくるモンスター。
+        {場所: [{name, lv, hp, ele, race, size, boss, skills, src: ["被ダメ"/"見かけた"/"公式"], official: 公式の情報があるか}]}"""
+        places = {}
+
+        def add(where, name, src):
+            if not name or name.startswith("#") or (name.startswith("ID") and name[2:].isdigit()):
+                return
+            places.setdefault(where, {}).setdefault(name, set()).add(src)
+        for per_char in self.stats.values():
+            for where, rows in per_char.items():
+                for k in rows:
+                    add(where, shown_name(k.split("|")[0]), "被ダメ")
+        for where, d in self.mob_seen.items():
+            for n in d:
+                add(where, shown_name(n), "見かけた")
+        off = self.official
+        if off is not None:
+            for where in list(places):
+                sufs = self._suffixes(where)
+                if not sufs:
+                    continue
+                mo = off.monsters_on(where, sufs)
+                if 0 < len(mo) <= getattr(off, "SMALL_MAP", 80):      # 大きな一覧(全部入りのマップ)は、場所のモンスターとして出さない
+                    for n in mo:
+                        add(where, n, "公式")
+        out = {}
+        for where, names in places.items():
+            rows = []
+            for n, src in names.items():
+                info = (off.info(n) if off is not None else None) or self.mobs.get(n) or {}
+                rows.append({"name": n, "lv": info.get("lv"), "hp": info.get("hp"), "ele": info.get("ele"), "race": info.get("race"),
+                             "size": info.get("size"), "boss": info.get("boss"), "skills": (off.skills_of(n) if off is not None else []),
+                             "src": sorted(src, key=["被ダメ", "見かけた", "公式"].index), "official": bool(off is not None and off.has(n))})
+            rows.sort(key=lambda r: (0 if "被ダメ" in r["src"] else 1, r["name"]))
+            out[where] = rows
+        return out
 
     def mob_view(self):
         """記録にある相手のうち、モンスターのデータがあるものだけ {名前: {lv, hp, race, size, ele, boss}}。"""

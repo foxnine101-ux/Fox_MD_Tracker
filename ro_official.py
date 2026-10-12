@@ -431,7 +431,12 @@ class Official(object):
         if m is None:
             files = []
             tried = []
-            for q in (md_name, re.sub(r"[（(][^（）()]*[）)]\s*$", "", md_name).strip()):     # 名前のとおり → 後ろの（ノーマル）などをはずして
+            field = md_name.startswith("フィールド ")
+            if field:          # @ の無いマップ(bl_ice など): 通信のマップ名がそのまま公式のファイル名。公式の一覧(1回)から探す
+                if not self.maplist:
+                    self.fetch_maplist()
+                files = [[f, n] for f, n in self.maplist if f == md_name[len("フィールド "):]]
+            for q in (() if field else (md_name, re.sub(r"[（(][^（）()]*[）)]\s*$", "", md_name).strip())):     # 名前のとおり → 後ろの（ノーマル）などをはずして
                 if not q or q in tried:
                     continue
                 tried.append(q)
