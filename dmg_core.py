@@ -178,6 +178,21 @@ VERIFIED = {736: "念属性固定の地面設置範囲魔法(通常スキルの�
             737: "非設置の聖属性範囲魔法"}
 
 
+# モンスターが使う技(公式サイトの「使うスキル」の名前)→ 受ける状態異常(画面の状態異常の名前)。名前から読み取れるものと、
+# コロコロラグナロク「MOB専用スキルについて」(https://www.kopeya.jp/korokororo/category42/)に書かれているものだけ。「警戒」(まだ受けていないが、この場所の敵が使う)に使う。
+SKILL_AILMENT = {
+    "ポイズンアタック": ["毒"], "ポイズンブロー": ["毒"], "スタンアタック": ["スタン"], "ワイドスタン": ["スタン"], "カースアタック": ["呪い"], "ワイドカース": ["呪い"],
+    "ワイドストーン": ["石化"], "ストーンカース": ["石化"], "ペトリファイアタック": ["石化"], "サイレンスアタック": ["沈黙"], "ワイドサイレンス": ["沈黙"],
+    "ブラインドアタック": ["暗闇"], "砂まき": ["暗闇"], "スリープアタック": ["睡眠"], "ワイドスリープ": ["睡眠"], "サンドマン": ["睡眠"],
+    "ワイドコンフューズ": ["混乱"], "ワイドフリーズ": ["凍結"], "ブリーディングアタック": ["出血"], "ワイドブリーディング": ["出血"], "ハルシネーション": ["幻覚"],
+    "Mハウリングオブマンドラゴラ": ["ハウリング(マンドラゴラ)"], "ドラゴンフィアー": ["スタン", "混乱", "沈黙", "出血"], "スローキャスト": ["スローキャスト"],
+    "ワイドクリティカルウーンズ": ["致命傷"], "致命的な傷": ["致命傷"], "ストリップヘルム": ["兜脱衣"], "ストリップウェポン": ["武器脱衣"],
+    "ストリップシールド": ["盾脱衣"], "フルストリップ": ["武器脱衣", "盾脱衣", "鎧脱衣", "兜脱衣"], "ホールドウェブ": ["スパイダーウェブ"], "アンクルスネア": ["アンクルスネア"],
+    "レックスエーテルナ": ["レックスエーテルナ"], "ブレイクアーマー": ["装備破壊"], "ブレイクヘルム": ["装備破壊"], "ブレイクシールド": ["装備破壊"], "ウェポンブレイカー": ["装備破壊"],
+    "ダークブレッシング": ["HPを1に(コーマ)"], "メンタルブレイカー": ["SP減少"], "オールステータスダウン": ["ステータスダウン"],
+}
+
+
 def load_json(path, conv=None):
     """skill_hits.json・skill_counter.json など、無ければ空の辞書。"""
     try:
@@ -530,6 +545,50 @@ class DmgCore(object):
         return {"name": name, "id": skid, "kind": kind, "ele": ele, "state": st["state"], "base": self.skill_name(st["base"]) if st["base"] else "",
                 "base_kind": list(self._classify(st["base"])) if st["base"] else [], "hits_exp": st["hits_exp"], "hits_meas": st["hits_meas"], "uses": st["uses"], "note": st.get("note", ""), "near": near, "far": far, "counter": self.counter.get(name) or [],
                 "rows": rows[:300], "official": off is not None}
+
+    def place_guide(self, where):
+        """「この場所の対策」: 受けた状態異常(実測)・警戒する状態異常(この場所の敵が使う技から)・ダメージの種類と属性の内訳(実測)。"""
+        got = {}                                           # 状態異常 -> {"n": 回数, "src": {(相手, 技): 回数}}
+        known = self._known_mobs()
+        for per_char in self.ails.values():
+            for k, v in (per_char.get(where) or {}).items():
+                a, who, sk = (k.split("|") + ["", ""])[:3]
+                if who and (who == "ID0" or not self._act_ok(who, known)):      # 仲間のプレイヤーの支援などを、原因にしない(前の記録にあるもの)
+                    who = sk = ""
+                g = got.setdefault(a, {"n": 0, "src": {}})
+                g["n"] += v[0]
+                g["src"][(who, sk)] = g["src"].get((who, sk), 0) + v[0]
+        warn = {}                                          # 状態異常 -> {"mobs": {敵: [技]}}
+        off = self.official
+        for r in self.place_view().get(where, []):
+            for sk in r["skills"]:
+                for a in SKILL_AILMENT.get(sk, []):
+                    warn.setdefault(a, {}).setdefault(r["name"], []).append(sk)
+        ids = {}
+        for k, n in self.skills.items():
+            ids.setdefault(self.skill_name(k), k)
+        by_kind, by_ele, near, far, total = {}, {}, 0, 0, 0
+        top = {}
+        for per_char in self.stats.values():
+            for k, v in (per_char.get(where) or {}).items():
+                who, sk = k.split("|", 1)
+                kind, ele = self.classify(0) if sk == "通常攻撃" else self.classify(ids[sk]) if sk in ids else ("", "")      # 名前から番号が分からない技は「不明」
+                if isinstance(ele, list):
+                    ele = "/".join(dict.fromkeys(ele))
+                by_kind[kind or "不明"] = by_kind.get(kind or "不明", 0) + v[1]
+                by_ele[ele or "不明"] = by_ele.get(ele or "不明", 0) + v[1]
+                total += v[1]
+                if len(v) >= 7:
+                    near += v[5]
+                    far += v[6]
+                t = top.setdefault(sk, [0, 0, kind or "不明", ele or "不明"])
+                t[0] += v[0]
+                t[1] = max(t[1], v[2])
+        topl = sorted(([n] + t for n, t in top.items()), key=lambda x: -x[2])[:8]
+        return {"where": where, "official": off is not None,
+                "got": sorted(({"name": a, "n": g["n"], "src": sorted(([w, s2, c] for (w, s2), c in g["src"].items()), key=lambda x: -x[2])[:6]} for a, g in got.items()), key=lambda x: -x["n"]),
+                "warn": sorted(({"name": a, "got": a in got, "mobs": [[m, sorted(set(s2))] for m, s2 in sorted(d.items())]} for a, d in warn.items()), key=lambda x: (x["got"], x["name"])),
+                "damage": {"total": total, "kind": by_kind, "ele": by_ele, "near": near, "far": far}, "top": topl}
 
     def _mob_stats(self, who):
         """相手の Lv・ATK・MATK・DEF・MDEF・属性・種族・サイズ(公式サイトの情報。強さ違いは 185/250 のように / でつなぐ)。"""

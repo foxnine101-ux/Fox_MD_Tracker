@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.6"
+VERSION = "2.58.7"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -493,6 +493,11 @@ def start_live_server(core, lock, cfg):
                     return self._send(404, "not found", "text/plain")
                 with open(full, "rb") as f:
                     return self._send(200, f.read(), "image/png" if full.endswith(".png") else "image/jpeg", "public, max-age=86400")
+            if path == "/api/placeguide":          # 「この場所の対策」
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                with lock:
+                    out = DMG.place_guide((q.get("where") or [""])[0]) if DMG is not None else {}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/skillview":          # 「技から見る」: 技の定義・軽減する装備・敵ごとのダメージ
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 with lock:

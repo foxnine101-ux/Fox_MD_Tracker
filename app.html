@@ -5131,7 +5131,7 @@ function renderMons() {
     <button class="ghost" id="monrun" title="公式サイトから、足りないモンスター・マップの情報を（時間をあけて）集めます">足りない情報を公式サイトから集める</button>
     <span id="monst" class="muted"></span></div>
     <p class="hint" style="margin:6px 0 0">被ダメを受けた場所・通信で見かけた場所ごとに、出てくるモンスターを表示します。出どころの「被ダメ」は実際に攻撃を受けた相手、「見かけた」は通信で見えた相手、「公式」は公式サイトのマップの出現一覧です。公式サイトの情報はこの PC の中にだけ集めます。</p></div>
-    <div id="monbody"></div><div id="monskill"></div></div>`;
+    <div id="monguide"></div><div id="monbody"></div><div id="monskill"></div></div>`;
   $("#monsel").onchange = (e) => { MONP.place = e.target.value; store.set("md_monplace", MONP.place); monpFill(); };
   $("#monq").oninput = (e) => { MONP.q = e.target.value; monpBody(); };
   $("#monrun").onclick = async () => {
@@ -5180,6 +5180,29 @@ async function monpFill() {
   const o = (MONP.d || {}).official;
   $("#monst").textContent = o ? `公式サイトから集めた情報: モンスター ${o.mobs} 体（詳細 ${o.details}）${o.state === "working" ? " ・取得中…" : ""}` : "";
   monpBody();
+  monpGuide();
+}
+async function monpGuide() {
+  const el = $("#monguide"); if (!el || !MONP.place) { if (el) el.innerHTML = ""; return; }
+  const w = MONP.place;
+  let g; try { g = await mapvJson("/api/placeguide?where=" + encodeURIComponent(w)); } catch (e) { return; }
+  if (w !== MONP.place || !$("#monguide")) return;
+  el.innerHTML = monpGuideHtml(g);
+}
+function monpGuideHtml(g) {
+  const D = g.damage || {}, T = D.total || 0;
+  const pct = (v) => (T ? Math.round(100 * v / T) : 0);
+  const bars = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).filter(([, v]) => pct(v) > 0).map(([k, v]) => `<span class="tag" title="${esc(k)} ${fmtN(v)}">${esc(k)} ${pct(v)}%</span>`).join(" ");
+  const got = (g.got || []).map((a) => `<tr><td class="l"><b>${esc(a.name)}</b></td><td>${fmtN(a.n)}</td><td class="l muted">${a.src.map(([w, s, c]) => w ? `${esc(w)}（${esc(s)}）×${c}` : `原因不明 ×${c}`).join("、")}</td></tr>`).join("");
+  const warn = (g.warn || []).filter((a) => !a.got).map((a) => `<tr><td class="l"><b>${esc(a.name)}</b></td><td class="l muted">${a.mobs.map(([m, s]) => `${esc(m)}（${esc(s.join("・"))}）`).join("、")}</td></tr>`).join("");
+  const top = (g.top || []).map(([n, c, mx, k, e]) => `<tr><td class="l"><button class="ghost mskill" data-msk="${esc(n)}">${esc(n)}</button></td><td class="l">${esc(k)}・${esc(e)}</td><td>${fmtN(c)}</td><td class="dm-max">${fmtN(mx)}</td></tr>`).join("");
+  if (!got && !warn && !T) return `<div class="panel" style="padding:10px;margin-top:8px"><b>この場所の対策</b> <span class="muted">まだ記録がありません</span></div>`;
+  return `<div class="panel" style="padding:10px;margin-top:8px"><b style="font-size:15px">この場所の対策</b> <span class="muted">（実測の被ダメ・状態異常と、公式サイトの敵のスキルから）</span>
+    ${T ? `<div style="margin:8px 0 2px"><b>受けたダメージの内訳</b>（合計 ${fmtN(T)}）</div><div>種類: ${bars(D.kind)}</div><div style="margin-top:3px">属性: ${bars(D.ele)}</div>${D.near + D.far ? `<div class="muted" style="margin-top:3px">物理: 近接 ${Math.round(100 * D.near / (D.near + D.far))}% ／ 遠距離 ${Math.round(100 * D.far / (D.near + D.far))}%</div>` : ""}` : ""}
+    ${got ? `<div style="margin:10px 0 2px"><b>受けた状態異常</b>（実測）</div><div class="panel tablewrap"><table><thead><tr><th class="l">状態異常</th><th>回数</th><th class="l">原因（相手の技）</th></tr></thead><tbody>${got}</tbody></table></div>` : ""}
+    ${warn ? `<div style="margin:10px 0 2px"><b>警戒する状態異常</b>（まだ受けていないが、この場所の敵が使う技から）</div><div class="panel tablewrap"><table><thead><tr><th class="l">状態異常</th><th class="l">使う敵（技）</th></tr></thead><tbody>${warn}</tbody></table></div>` : ""}
+    ${top ? `<details style="margin-top:8px"><summary>よく受けた・強い技（${g.top.length}）</summary><div class="tablewrap"><table><thead><tr><th class="l">技</th><th class="l">種類・属性</th><th>回数</th><th>最大</th></tr></thead><tbody>${top}</tbody></table></div></details>` : ""}
+    <p class="hint" style="margin:8px 0 0">いまのキャラの状態異常の耐性は、「計算機」の「耐性」の枠（状態異常）で確認できます。</p></div>`;
 }
 function monpBody() {
   const el = $("#monbody"); if (!el) return;
