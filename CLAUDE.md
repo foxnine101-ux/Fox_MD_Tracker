@@ -343,3 +343,4 @@
    - ~~「ID○○」(名前がわからない相手)~~ → v2.13.1 で解決(技の設置物 09CA の置いた人)。`raw.id_src` は残してある
 3. Atk/Matk/Hit/Flee が装備タブで「-」のままなら 00BD の読み方を確かめる
 - **利用キー(サーバー稼働中: https://fox-md-license.foxnine101.workers.dev ・Cloudflare アカウント Foxnine・Worker `fox-md-license`・KV `fox-md-licenses`。管理トークンは 管理トークン.txt(git 外)。アプリの版はまだ上げていない)**: `server/worker.js`(Cloudflare Worker + KV。/activate /check /release と管理 /admin/*)、`license_core.py`(アプリ側。`LICENSE_URL` が空のあいだは機能オフ・`ENFORCE=False` のあいだは警告のみ・オフライン猶予14日・PC識別子=マシンGUIDのハッシュ)、`tools/license_admin.py`(発行・停止)。画面は歯車の「利用キー」(`showLicKey`)。保存は `利用キー.json`(.gitignore)。ローカルで node+偽KV と組み合わせて、登録・台数超過・停止・猶予・猶予切れを確認ずみ。**次**: Cloudflare にデプロイ → `LICENSE_URL` を入れる → 身内に配る → `ENFORCE` を検討。2台同期(設定系から)は未着手
+- サーバー側のコードは `F:\Claude\Fox_license`(別フォルダ・別 git)に移した。管理画面 https://fox-md-license.foxnine101.workers.dev/admin

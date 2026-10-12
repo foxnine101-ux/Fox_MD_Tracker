@@ -5382,7 +5382,11 @@ let LICST = { state: "off" };
 const LIC_TEXT = { none: "利用キーを入力してください(初回だけです)。", ok: "確認できています。", grace: "サーバーに確認できていません(オフラインでも猶予の間は使えます)。", expired: "長い間サーバーに確認できていません。ネットにつないで「今すぐ確認」を押してください。", revoked: "このキーは使えなくなっています。配布した人に聞いてください。" };
 async function licLoad(show) {
   try { LICST = await (await fetch("/api/license")).json(); } catch (e) { return; }
-  if (show && ["none", "revoked", "expired"].includes(LICST.state)) showLicKey();
+  if (show && ["none", "revoked", "expired"].includes(LICST.state)) {
+    let ok = true;                       // 止めない設定のときは、押し付けない(1日1回だけ出す)
+    if (!LICST.enforce) { try { const d = new Date().toDateString(); ok = localStorage.getItem("md_lic_ask") !== d; localStorage.setItem("md_lic_ask", d); } catch (e) {} }
+    if (ok) showLicKey();
+  }
 }
 async function licPost(b) {
   try { LICST = await (await fetch("/api/license", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) })).json(); } catch (e) { LICST = { ...LICST, msg: "つながりませんでした" }; }
