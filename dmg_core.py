@@ -214,7 +214,7 @@ class DmgCore(object):
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
         self.names = {}                     # 相手のID -> 名前
-        self.kinds = {}                     # (接続, ID) -> 出現の種類(5 = モンスター。0 = プレイヤー など)
+        self.spawn_kinds = {}                     # (接続, ID) -> 出現の種類(5 = モンスター。0 = プレイヤー など)
         self.monnames = set()               # モンスター(種類5)として見かけた名前(ダメージの無い技の相手を残すかの判断用)
         self.units = {}                     # 技の設置物のID -> 置いた人のID
         self.ring = {}                      # 接続 -> 最近の通信 [(op, 先頭)](名前がわからない相手を調べる用)
@@ -598,7 +598,7 @@ class DmgCore(object):
             skid, lv, tgt, src, res = struct.unpack_from(OP_USE[op], pkt, 2)
             if not self._mine(key, tgt) or src == tgt or self._mine(key, src):
                 return
-            kind = self.kinds.get((key, src), 5)
+            kind = self.spawn_kinds.get((key, src), 5)
             self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res, "kind": kind}, keep=True)      # 落とすものも確認用データには残す
             if kind != 5 or src == 0:                    # モンスターではない(仲間の支援・NPC など)・ID 0 は、ダメージの無い技に記録しない
                 return
@@ -783,9 +783,9 @@ class DmgCore(object):
         aid = struct.unpack_from("<I", pkt, 5)[0]
         self._spawn_pos(op, pkt, aid)
         self._name(aid, pkt[at:at + 24], op, pkt)
-        if len(self.kinds) > MOBS_MAX:
-            self.kinds.clear()
-        self.kinds[(key, aid)] = pkt[4]                  # 接続ごとに覚える(別の接続の同じ番号と混ざらないように)
+        if len(self.spawn_kinds) > MOBS_MAX:
+            self.spawn_kinds.clear()
+        self.spawn_kinds[(key, aid)] = pkt[4]                  # 接続ごとに覚える(別の接続の同じ番号と混ざらないように)
         if pkt[4] == 5:
             nm = self.names.get(aid)
             if nm and nm not in self.monnames and len(self.monnames) < PLAYERS_MAX:
