@@ -1,0 +1,10 @@
+name = "fox-md-license"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+# 先に `wrangler kv namespace create LICENSES` を実行し、出てきた id をここに書く
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "ここにKVのIDを書く"
+
+# 管理用の秘密は `wrangler secret put ADMIN_TOKEN`(このファイルには書かない)

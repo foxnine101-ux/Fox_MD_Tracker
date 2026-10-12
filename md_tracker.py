@@ -64,6 +64,7 @@ UPD = None         # updater.Updater(アップデート)
 CALC_DATA = {}     # calc_data.json(属性の相性表など。ラトリオのデータから tools/make_calc_data.py で作る)
 RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
+LIC = None        # license_core.License(利用キー)
 QUIT_ALL = None    # 画面の「アプリを終了」から呼ぶ(トレイの「終了」と同じ)
 
 
@@ -410,6 +411,8 @@ def start_live_server(core, lock, cfg):
                 return self._file("app.html", "text/html; charset=utf-8")
             if DEV and path in ("/live", "/live.html"):   # 耐性リアルタイムは開発版だけ
                 return self._file("live.html", "text/html; charset=utf-8")
+            if path == "/api/license" and self._local_only():
+                return self._send(200, json.dumps(LIC.status() if LIC else {"state": "off"}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/data":
                 with lock:
                     data = build_payload(core, history=300)
@@ -577,6 +580,17 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/license" and self._local_only():
+                # 利用キー: {key} で登録 / {release: 1} でこの PC をはずす / {check: 1} で今すぐ確認
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 2000)).decode("utf-8"))
+                    if LIC is None:
+                        raise ValueError
+                    st = LIC.release() if b.get("release") else LIC.check() if b.get("check") else LIC.activate(b.get("key"))
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/quit" and self._local_only():
                 # 画面の「アプリを終了」(トレイの「終了」と同じ)
                 def _bye():
@@ -1273,6 +1287,13 @@ def main():
         fail("scapy(通信を読む部品)が使えません。")
         return
 
+    global LIC
+    try:
+        import license_core
+        LIC = license_core.License(HERE, cfg.get("利用キー確認先") or None, log=print)
+    except Exception as e:
+        print("[利用キー] 使えません:", e)
+        LIC = None
     lock = threading.Lock()
     start_live_server(core, lock, cfg)   # 画面は先に出す(Npcapが無くても見られるように)
     if OFFICIAL is not None and DMG is not None:
@@ -1302,6 +1323,8 @@ def main():
         print("※ ウェブには送りません(この PC だけで記録・表示します)")
 
     stop = threading.Event()
+    if LIC is not None:
+        LIC.start_background(stop)
     if GUI:
         global TRAY
         import tray
