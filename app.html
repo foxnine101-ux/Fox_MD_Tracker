@@ -5127,10 +5127,11 @@ function renderMons() {
   $("#view").innerHTML = `<div id="monp"><div class="panel" style="padding:10px"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
     <label>場所 <select id="monsel" style="max-width:360px"></select></label>
     <input id="monq" type="search" placeholder="モンスター名で絞る" style="width:200px">
+    <label>技から見る <select id="monsk" style="max-width:260px"></select></label>
     <button class="ghost" id="monrun" title="公式サイトから、足りないモンスター・マップの情報を（時間をあけて）集めます">足りない情報を公式サイトから集める</button>
     <span id="monst" class="muted"></span></div>
     <p class="hint" style="margin:6px 0 0">被ダメを受けた場所・通信で見かけた場所ごとに、出てくるモンスターを表示します。出どころの「被ダメ」は実際に攻撃を受けた相手、「見かけた」は通信で見えた相手、「公式」は公式サイトのマップの出現一覧です。公式サイトの情報はこの PC の中にだけ集めます。</p></div>
-    <div id="monbody"></div></div>`;
+    <div id="monbody"></div><div id="monskill"></div></div>`;
   $("#monsel").onchange = (e) => { MONP.place = e.target.value; store.set("md_monplace", MONP.place); monpFill(); };
   $("#monq").oninput = (e) => { MONP.q = e.target.value; monpBody(); };
   $("#monrun").onclick = async () => {
@@ -5139,7 +5140,34 @@ function renderMons() {
     $("#monst").textContent = "裏で集めています。しばらくしてから「更新」を押してください。";
     setTimeout(() => { const b = $("#monrun"); if (b) b.disabled = false; }, 4000);
   };
+  { const sk = ((DATA || {}).dmg_skills || []).filter((x) => x.n).sort((a, b) => b.n - a.n); $("#monsk").innerHTML = `<option value="">（受けた技を選ぶ）</option>` + sk.map((x) => `<option value="${esc(x.name)}">${esc(x.name)}（${fmtN(x.n)}回）${x.borrow ? " ・" + esc(x.borrow) : ""}</option>`).join(""); $("#monsk").onchange = (e) => { if (e.target.value) monpSkill(e.target.value); }; }
+  $("#monp").onclick = (e) => { const b = e.target.closest("[data-msk]"); if (b) monpSkill(b.dataset.msk); };
   monpFill();
+}
+const MON_ST = { "確定": ["#2e7d32", "通常スキルと種類・属性が同じで、ヒット数も実測と合いました"], "借り": ["#b7791f", "定義が無いので、「M」を外した通常スキルから種類・属性を借りています（ヒット数で確かめられていません）"],
+  "一致": ["#2a6fb0", "もともとの定義が、通常スキルの種類・属性と同じです"], "食い違い": ["#c0392b", "もともとの定義が、通常スキルの種類・属性と違います（どちらかが誤りの可能性）"] };
+async function monpSkill(name) {
+  const el = $("#monskill"); if (!el) return;
+  el.innerHTML = `<div class="panel" style="padding:10px;margin-top:8px"><div class="busybar">${esc(name)} を調べています</div></div>`;
+  let v; try { v = await mapvJson("/api/skillview?name=" + encodeURIComponent(name)); } catch (e) { el.innerHTML = ""; return; }
+  const G = gearSets();
+  const st = v.state ? `<span class="tag" style="background:${MON_ST[v.state][0]};color:#fff" title="${esc(MON_ST[v.state][1])}">${esc(v.state)}</span>` : "";
+  const norm = (m) => (v.kind === "魔法" ? m.matk : /物理/.test(v.kind) ? m.atk : null);
+  const num = (x) => (typeof x === "number" ? x : null);
+  const tot = v.near + v.far;
+  const head = `<b style="font-size:15px">${esc(v.name)}</b> ${v.kind || v.ele ? `<span class="tag">${esc(v.kind || "種類不明")}・${esc(v.ele || "属性不明")}</span>` : `<span class="muted">種類・属性はまだ分かりません</span>`} ${st}`;
+  const info = [];
+  if (v.base) info.push(`通常スキル「${esc(v.base)}」${v.base_kind && v.base_kind.length ? `（${esc(v.base_kind.join("・"))}）` : ""}と比較`);
+  if (v.hits_exp != null) info.push(`ヒット数: 通常 ${v.hits_exp} ／ 実測 ${v.hits_meas == null ? "-" : v.hits_meas}（${fmtN(v.uses)}回）`);
+  else if (v.hits_meas != null) info.push(`実測ヒット数: 1回 ${v.hits_meas}`);
+  if (tot && /物理/.test(v.kind)) info.push(`近接 ${Math.round(100 * v.near / tot)}% ／ 遠距離 ${Math.round(100 * v.far / tot)}%（ダメージの合計で）`);
+  const cnt = v.counter.length ? `<details style="margin-top:8px" open><summary>この技のダメージを減らす装備・カード（${v.counter.length}件。ラトリオの説明文から）</summary><div class="tablewrap"><table><tbody>${v.counter.map(([k, n, t]) => `<tr><td class="l"><span class="tag">${esc(k)}</span> ${esc(n)}</td><td class="l muted">${esc(t)}</td></tr>`).join("")}</tbody></table></div></details>` : "";
+  const rows = v.rows.map((r) => {
+    const m = r.mob || {}, nv = norm(m);
+    return `<tr><td class="l">${esc(r.who)}</td><td class="l muted">${esc(r.where)}</td><td class="l">${gearTag(G, r.set)}</td><td>${esc(m.lv ?? "-")}</td><td>${esc(m.atk != null ? (num(m.atk) ? fmtN(m.atk) : m.atk) : "-")}</td><td>${esc(m.matk != null ? (num(m.matk) ? fmtN(m.matk) : m.matk) : "-")}</td><td>${esc(m.def ?? "-")}/${esc(m.mdef ?? "-")}</td><td>${esc(m.ele || "-")}</td><td>${fmtN(r.n)}</td><td class="dm-max">${fmtN(r.max)}</td><td>${fmtN(r.avg)}</td><td>${num(nv) ? (r.max / nv).toFixed(2) : "-"}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<div class="panel" style="padding:10px;margin-top:8px">${head}<div class="muted" style="margin:4px 0">${info.join(" ・ ")}</div>${cnt}
+    ${v.rows.length ? `<h3 style="margin:12px 2px 4px">敵・装備ごとのダメージ</h3><p class="hint" style="margin:0 0 4px">同じ技でも敵によってダメージが変わります。右端は「最大ダメージ ÷ 敵の${v.kind === "魔法" ? "MATK" : /物理/.test(v.kind) ? "ATK" : "ATK/MATK（技の種類が不明で出せません）"}」で、敵の強さの違いを除いて比べるための目安です。同じ装備(記号)どうしで見ると、装備の違いも除けます。</p><div class="panel tablewrap"><table><thead><tr><th class="l">敵</th><th class="l">場所</th><th class="l">装備</th><th>敵Lv</th><th>ATK</th><th>MATK</th><th>DEF/MDEF</th><th>敵の属性</th><th>回数</th><th>最大</th><th>平均</th><th>最大÷${v.kind === "魔法" ? "MATK" : "ATK"}</th></tr></thead><tbody>${rows}</tbody></table></div>` : `<p class="hint">この技は、まだ受けた記録がありません。</p>`}</div>`;
 }
 async function monpFill() {
   if (MONP.busy) return; MONP.busy = true;
@@ -5160,7 +5188,7 @@ function monpBody() {
   const tag = (s) => `<span class="tag" style="${s === "被ダメ" ? "background:#c0392b;color:#fff" : s === "公式" ? "background:#2a6fb0;color:#fff" : ""}">${esc(s)}</span>`;
   const noOff = rows.filter((r) => !r.official).length;
   el.innerHTML = `<div class="panel tablewrap" style="margin-top:8px"><table><thead><tr><th class="l">モンスター</th><th>Lv</th><th>HP</th><th>属性</th><th>種族</th><th>サイズ</th><th>種類</th><th class="l">使うスキル</th><th class="l">出どころ</th></tr></thead><tbody>${
-    rows.map((r) => `<tr><td class="l"${r.aegis ? ` title="公式のID名: ${esc(r.aegis)}"` : ""}>${esc(r.name)}</td><td>${r.lv ? esc(r.lv) : "-"}</td><td>${r.hp ? esc(typeof r.hp === "number" ? fmtN(r.hp) : r.hp) : "-"}</td><td>${esc(r.ele || "-")}</td><td>${esc(r.race || "-")}</td><td>${esc(r.size || "-")}</td><td>${r.boss ? "ボス" : r.lv ? "一般" : "-"}</td><td class="l muted" style="max-width:380px">${r.skills.length ? esc(r.skills.join("、")) : r.official ? "-" : `<span title="公式サイトから集めると出ます">未取得</span>`}</td><td class="l">${r.src.map(tag).join(" ")}</td></tr>`).join("")}</tbody></table></div>
+    rows.map((r) => `<tr><td class="l"${r.aegis ? ` title="公式のID名: ${esc(r.aegis)}"` : ""}>${esc(r.name)}</td><td>${r.lv ? esc(r.lv) : "-"}</td><td>${r.hp ? esc(typeof r.hp === "number" ? fmtN(r.hp) : r.hp) : "-"}</td><td>${esc(r.ele || "-")}</td><td>${esc(r.race || "-")}</td><td>${esc(r.size || "-")}</td><td>${r.boss ? "ボス" : r.lv ? "一般" : "-"}</td><td class="l muted" style="max-width:380px">${r.skills.length ? r.skills.map((x) => `<button class="ghost mskill" data-msk="${esc(x)}" title="この技の種類・属性・軽減する装備・敵ごとのダメージを見る">${esc(x)}</button>`).join(" ") : r.official ? "-" : `<span title="公式サイトから集めると出ます">未取得</span>`}</td><td class="l">${r.src.map(tag).join(" ")}</td></tr>`).join("")}</tbody></table></div>
     ${noOff ? `<p class="hint">公式サイトの情報が未取得のモンスターが ${noOff} 体います。「足りない情報を公式サイトから集める」で、時間をあけて少しずつ集めます。</p>` : ""}`;
 }
 

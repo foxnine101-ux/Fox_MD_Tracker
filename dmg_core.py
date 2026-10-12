@@ -173,6 +173,16 @@ def load_skill_info(path):
         return {}
 
 
+def load_json(path, conv=None):
+    """skill_hits.json・skill_counter.json など、無ければ空の辞書。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return conv(d) if conv else d
+    except (OSError, ValueError):
+        return {}
+
+
 def load_mob_ids(path):
     """mob_ids.json(ゲームのモンスター番号 → ID名。tools/make_mob_ids.py)。無ければ空。"""
     try:
@@ -209,6 +219,9 @@ class DmgCore(object):
         self.efix = dict(efix or {})        # 手で直した種類・属性(番号 -> {"ele":, "kind":})。こっちが優先
         self.mobs = mobs or {}              # モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json)
         self.official = None                # ro_official.Official(公式サイトから集めた、この PC だけのデータ)。あれば mob_info より優先
+        self._bc = {}                       # 借りた定義の覚え(borrow)
+        self.hits_info = {}                 # 番号 -> 1回で当たるヒット数(skill_hits.json。ラトリオの定義で数が決まっているものだけ)
+        self.counter = {}                   # 技の名前 -> 軽減する装備・カード(skill_counter.json。ラトリオの説明文から)
         self.mob_ids = {}                   # ゲームのモンスター番号(クラス) -> ID名(同梱の mob_ids.json。公式ツールの ID と同じ)
         self.cls_name = {}                  # ゲームのモンスター番号 -> 通信で見えた名前(出現パケットから覚える。この対応が「結びつけ」)
         self.mob_seen = {}                  # 場所(MD) -> {見かけたモンスターの名前: 最後に見た時刻}(公式の情報を集める名簿)
@@ -401,6 +414,8 @@ class DmgCore(object):
             return "物理", "無"                  # モンスターの通常攻撃
         inf = self.info.get(skid)
         if not inf:
+            inf = self.borrow(skid)[0]               # モンスター専用の「M〇〇」は、同じ名前の通常スキルから借りる
+        if not inf:
             return "", ""
         t, ele, rng, mark = inf
         if isinstance(ele, list):
@@ -424,9 +439,111 @@ class DmgCore(object):
             return "物理・近接", ele
         return "物理", ele
 
+    def borrow(self, skid):
+        """定義の無い「M〇〇」(モンスター専用)の技の定義を、「M」を外した同じ名前の通常スキルから借りる。
+        種類・属性は同じことが多い(威力・範囲・詠唱は違うので、借りない)。(定義, 借りた元の番号) / (None, 0)"""
+        nm = self.skill_name(skid)
+        if not nm.startswith("M") or len(nm) < 2:
+            return None, 0
+        ck = (skid, nm)
+        r = self._bc.get(ck)
+        if r is None:
+            r = (None, 0)
+            for k, n in self.skills.items():
+                if n == nm[1:] and k in self.info and self.info[k][0] in ("M", "W"):
+                    r = (self.info[k], k)
+                    break
+            self._bc[ck] = r
+        return r
+
+    def borrow_state(self, skid):
+        """「M〇〇」(モンスター専用)の定義を、「M」を外した同じ名前の通常スキルと比べる。
+        {"state": 借り/確定/一致/食い違い/"" , "base": 元の番号, "hits_exp": 通常スキルのヒット数, "hits_meas": 通信で実測した 1回あたりのヒット数, "uses": 回数}
+          借り   … 定義が無いので、通常スキルの種類・属性を借りている
+          確定   … 借りていて、ヒット数(通常スキルで数が決まっているもの)が実測と合った(3回以上)
+          一致   … 自分の定義がもともとあって、通常スキルの種類・属性と同じ
+          食い違い … 自分の定義と通常スキルの種類・属性が違う(rAthena 由来の定義が jRO と違う可能性)"""
+        out = {"state": "", "base": 0, "hits_exp": None, "hits_meas": None, "uses": 0}
+        nm = self.skill_name(skid)
+        if not skid or not nm.startswith("M") or len(nm) < 2:
+            return out
+        base = 0
+        for k, n in self.skills.items():
+            if n == nm[1:] and k in self.info and self.info[k][0] in ("M", "W"):
+                base = k
+                break
+        if not base:
+            return out
+        uses = hits = 0
+        for per_char in self.stats.values():
+            for rows in per_char.values():
+                for k, v in rows.items():
+                    if k.endswith("|" + nm) and len(v) >= 5:
+                        uses += v[0]
+                        hits += v[4]
+        per = round(hits / uses, 2) if uses else None
+        exp = self.hits_info.get(base)
+        hit_ok = exp is not None and per is not None and uses >= 3 and abs(per - exp) < 0.05
+        out.update(base=base, hits_exp=exp, hits_meas=per, uses=uses)
+        if skid not in self.info:
+            out["state"] = "確定" if hit_ok else "借り"
+        else:
+            out["state"] = "一致" if self._classify(skid) == self._classify(base) else "食い違い"
+        return out
+
+    def skill_view(self, name):
+        """「技から見る」: 技の定義(確定・借り)・軽減する装備・敵ごと×装備ごとのダメージ(敵の ATK/MATK などと並べて、敵によるダメージの違いを見る)。"""
+        ids = [int(k) for k in self.seen if self.skill_name(int(k)) == name] or ([0] if name == "通常攻撃" else [])
+        skid = ids[0] if ids else 0
+        kind, ele = self.classify(skid, (self.seen.get(str(skid)) or {}).get("lv") or 0) if ids else ("", "")
+        st = self.borrow_state(skid) if skid else {"state": "", "base": 0, "hits_exp": None, "hits_meas": None, "uses": 0}
+        agg = {}                                   # (相手, 場所, 装備) -> [回数, 合計, 最大, ヒット, 近接, 遠距離]
+        near = far = 0
+        for per_char in self.gstats.values():
+            for where, sets in per_char.items():
+                for sid, rows in sets.items():
+                    for k, v in rows.items():
+                        who, sk = k.split("|", 1)
+                        if sk != name or len(v) < 5:
+                            continue
+                        a = agg.setdefault((who, where, sid), [0, 0, 0, 0])
+                        a[0] += v[0]
+                        a[1] += v[1]
+                        a[2] = max(a[2], v[2])
+                        a[3] += v[4]
+                        if len(v) >= 7:
+                            near += v[5]
+                            far += v[6]
+        off = self.official
+        rows = []
+        for (who, where, sid), a in agg.items():
+            rows.append({"who": who, "where": where, "set": sid, "n": a[0], "max": a[2], "avg": round(a[1] / a[0]) if a[0] else 0,
+                         "hits": round(a[3] / a[0], 1) if a[0] else 0, "mob": self._mob_stats(who)})
+        rows.sort(key=lambda r: -r["max"])
+        return {"name": name, "id": skid, "kind": kind, "ele": ele, "state": st["state"], "base": self.skill_name(st["base"]) if st["base"] else "",
+                "base_kind": list(self._classify(st["base"])) if st["base"] else [], "hits_exp": st["hits_exp"], "hits_meas": st["hits_meas"], "uses": st["uses"], "near": near, "far": far, "counter": self.counter.get(name) or [],
+                "rows": rows[:300], "official": off is not None}
+
+    def _mob_stats(self, who):
+        """相手の Lv・ATK・MATK・DEF・MDEF・属性・種族・サイズ(公式サイトの情報。強さ違いは 185/250 のように / でつなぐ)。"""
+        recs = self.official.recs(who) if self.official is not None else []
+        out = {}
+        for k in ("lv", "atk", "matk", "def", "mdef", "ele", "race", "size", "cls"):
+            vals = []
+            for r in recs:
+                v = r.get(k)
+                if v not in (None, "", 0) and v not in vals:
+                    vals.append(v)
+            if vals:
+                out[k] = vals[0] if len(vals) == 1 else "/".join(str(x) for x in vals)
+        if not out:
+            m = self.mobs.get(who) or {}
+            out = {k: m[k] for k in ("lv", "ele", "race", "size") if k in m}
+        return out
+
     def kinds(self):
         """画面用: 技の名前 -> [種類, 属性](記録の表は名前でまとめているので)。"""
-        out = {"通常攻撃": list(self.classify(0))}
+        out = {"通常攻撃": list(self.classify(0))}   # (借りた定義も classify を通るので、Mダイヤモンドダストなども種類・属性が出る)
         for k, v in self.seen.items():
             sk = int(k)
             out[self.skill_name(sk)] = list(self.classify(sk, v.get("lv") or 0))
@@ -444,7 +561,7 @@ class DmgCore(object):
             akind, aele = self._classify(sk, v.get("lv") or 0)
             out.append(dict(v, id=sk, name=self.skill_name(sk), base=self.skills.get(sk, ""),
                             fixed=sk in self.fix, known=self.known(sk), kind=kind, ele=ele,
-                            akind=akind, aele=aele, efix=self.efix.get(sk) or {}))
+                            akind=akind, aele=aele, efix=self.efix.get(sk) or {}, borrow=self.borrow_state(sk)["state"]))
         out.sort(key=lambda r: (r["known"], -r.get("last", 0)))
         return out
 

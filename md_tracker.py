@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.4"
+VERSION = "2.58.5"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -493,6 +493,11 @@ def start_live_server(core, lock, cfg):
                     return self._send(404, "not found", "text/plain")
                 with open(full, "rb") as f:
                     return self._send(200, f.read(), "image/png" if full.endswith(".png") else "image/jpeg", "public, max-age=86400")
+            if path == "/api/skillview":          # 「技から見る」: 技の定義・軽減する装備・敵ごとのダメージ
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                with lock:
+                    out = DMG.skill_view((q.get("name") or [""])[0]) if DMG is not None else {}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/mobplaces":          # 「モンスター情報」タブ: 場所ごとのモンスター
                 with lock:
                     out = {"places": DMG.place_view() if DMG is not None else {}, "official": OFFICIAL.status() if OFFICIAL is not None else None}
@@ -1466,6 +1471,8 @@ def main():
             OFFICIAL = ro_official.Official(OFFICIAL_FILE, log=print)
             DMG.official = OFFICIAL
             DMG.mob_ids = dmg_core.load_mob_ids(resource("mob_ids.json") or "")
+            DMG.hits_info = dmg_core.load_json(resource("skill_hits.json") or "", lambda d: {int(k): v for k, v in d.items()})
+            DMG.counter = dmg_core.load_json(resource("skill_counter.json") or "")
             print("公式モンスター情報(この PC に集めたもの): {}件".format(len(OFFICIAL.mobs)))
         except Exception as e:
             print("公式モンスター情報が使えません:", e)

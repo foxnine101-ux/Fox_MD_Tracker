@@ -52,7 +52,11 @@ mt.resource = lambda n: os.path.join(T, "app.html") if n == "app.html" else _ori
 mt.CHARS = char_core.CharCore(md=core, log=print)
 if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))
-mt.DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(mt.resource("skill_names.json")), mobs=dmg_core.load_mob_info(mt.resource("mob_info.json")))
+mt.DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(mt.resource("skill_names.json")), info=dmg_core.load_skill_info(mt.resource("skill_info.json")),
+                          mobs=dmg_core.load_mob_info(mt.resource("mob_info.json")))
+mt.DMG.hits_info = dmg_core.load_json(mt.resource("skill_hits.json") or "", lambda d: {int(k): v for k, v in d.items()})
+mt.DMG.counter = dmg_core.load_json(mt.resource("skill_counter.json") or "")
+mt.DMG.mob_ids = dmg_core.load_mob_ids(mt.resource("mob_ids.json") or "")
 if rd("被ダメ記録.json"):
     mt.DMG.restore(rd("被ダメ記録.json"))
     mt.DMG.remap_sets(mt.CHARS.set_map)
