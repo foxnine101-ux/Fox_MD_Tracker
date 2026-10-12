@@ -590,6 +590,21 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/records" and self._local_only():
+                # 2台の同期の記録の窓口: {op: "export"} / {op: "merge", remote: {md, cs}} → {records, changed}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 6000000)).decode("utf-8"))
+                    with lock:
+                        if b.get("op") == "merge":
+                            if not isinstance(b.get("remote"), dict):
+                                raise ValueError("remote")
+                            rec, changed = records_merge(core, b["remote"])
+                        else:
+                            rec, changed = records_export(core), False
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
+                return self._send(200, json.dumps({"ok": True, "records": rec, "changed": changed}, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/sync" and self._local_only():
                 # 2台の同期の窓口(暗号化は画面側): {op: "get", since} / {op: "put", base, data}
                 try:
@@ -951,6 +966,48 @@ def save_dmg():
             _write_json(DMG_RAW_FILE, DMG.raw_snapshot(), indent=1)
     except Exception as e:
         print("[被ダメ] 保存に失敗:", e)
+
+
+def records_export(core):
+    """同期に出す記録(MD の記録・キャラ・装備)。lock の中で呼ぶ。キーを並べた形にそろえる(比べやすいように)"""
+    import records_sync
+    cs = CHARS.snapshot() if CHARS is not None else {}
+    cs.pop("updated", None)            # 保存のたびに変わる時刻は、中身ではないので外す
+    return records_sync.norm({"md": core.snapshot(), "cs": cs})
+
+
+def records_backup():
+    """同期で記録を書きかえる前に、いまのファイルを「同期前のバックアップ」に写す(新しい5つだけ残す)"""
+    try:
+        import shutil
+        root = os.path.join(HERE, "同期前のバックアップ")
+        dst = os.path.join(root, time.strftime("%Y%m%d_%H%M%S"))
+        os.makedirs(dst, exist_ok=True)
+        for f in (STATE_FILE, CHAR_STATE_FILE):
+            if os.path.exists(f):
+                shutil.copy2(f, dst)
+        for old in sorted(os.listdir(root))[:-5]:
+            shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+    except Exception as e:
+        print("[同期] バックアップを作れませんでした:", e)
+
+
+def records_merge(core, remote):
+    """ほかの PC の記録を、いまの記録に混ぜて書く。返り値 = (混ぜた結果, 変わったか)。lock の中で呼ぶ"""
+    import records_sync
+    local = records_export(core)
+    merged = records_sync.merge_records(local, remote)
+    if merged == local:
+        return local, False
+    records_backup()
+    core.restore(merged["md"])
+    if CHARS is not None:
+        CHARS.restore(merged["cs"])
+        CHARS.changed = True
+    save_state(core)
+    save_chars()
+    print("[同期] ほかの PC の記録を取り込みました: MD {}人・キャラ {}人・装備セット {}個".format(len(merged["md"]["chars"]), len(merged["cs"]["chars"]), len(merged["cs"]["sets"])))
+    return records_export(core), True
 
 
 def save_chars():

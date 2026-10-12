@@ -5467,7 +5467,8 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && DA
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
 if (LOCAL) { sharedLoad().then(() => { if (DATA && TAB === "settings") render(); }); setInterval(sharedLoad, 3600000); }      // 共有の結びつけ(配布元が承認した表)
 // ---------------- 2台の同期(同じ利用キーの PC どうし。中身は暗号化して預ける。合言葉を足すと、サーバーの管理者にも読めなくなる) ----------------
-// 同期するもの: 表示の設定(並び順・非表示・色・結びつけ など)・計算機のスロット・(選べば)枠の開け閉めなどの画面の記憶
+// 同期するもの: 表示の設定(並び順・非表示・色・結びつけ など)・計算機のスロット・(選べば)枠の開け閉めなどの画面の記憶・
+//   通信から集めた記録(キャラ・装備・装備セット・MD の記録。混ぜ方は records_sync.py。足すだけ・新しいほうを採るだけで、消さない。被ダメは対象外)
 // 混ぜ方: 前に同期したときの内容(md_syncbase = 前回預けた内容)との3者比べ。変えたほうを採用し、両方が変えた所はこの PC を優先(スロットは新しいほう)
 // 安全装置: 画面を読み込む前・設定やスロットが空(読み込みの失敗かも)・大量に消える ときは、勝手に同期せず止める(「それでも同期する」で進める)
 const SYNC_UI_KEYS = ["md_simfold", "md_simx", "md_evopen", "md_onlyok", "md_simv", "md_atk"];
@@ -5508,6 +5509,14 @@ async function syncApi(body) {
   if (j.ok !== true && j.reason !== "conflict") throw new Error(j.error || (j.reason ? "同期できません(" + j.reason + ")" : "サーバーの返事が正しくありません"));
   return j;
 }
+async function syncRecordsApi(body) {      // 記録の書き出し・混ぜ込み(混ぜるのは Python 側。いまの記録に直接書く)
+  const r = await fetch("/api/records", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || "記録を読めませんでした");
+  return j;
+}
+const syncHash = (s) => { let h1 = 0xdeadbeef, h2 = 0x41c6ce57; for (let i = 0; i < s.length; i++) { const c = s.charCodeAt(i); h1 = Math.imul(h1 ^ c, 2654435761); h2 = Math.imul(h2 ^ c, 1597334677); } h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909); h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909); return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36); };
+const syncNoRec = (p) => { const { records, ...rest } = p || {}; return rest; };      // 記録は大きいので、「前回の内容」には入れない(印だけ覚える)
 async function syncRawSlots() {          // 読めなかったときは例外(空と区別する)
   const r = await fetch("/api/simchars");
   if (!r.ok) throw new Error("計算機のスロットを読めませんでした");
@@ -5524,7 +5533,7 @@ async function syncCollect() {           // いまのこの PC の同期する�
   if (!DATA) throw new Error("画面の読み込みが終わっていません");
   const chars = await syncRawSlots();
   const slots = {}; Object.entries(chars).forEach(([id, c]) => { slots[id] = syncStripSlot(c); });
-  const out = { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots };
+  const out = { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots, records: await syncRecordsApi({ op: "export" }).then((j) => j.records) };
   if (syncUiOn()) { out.ui = {}; SYNC_UI_KEYS.forEach((k) => { const v = store.get(k); if (v != null) out.ui[k] = v; }); }      // 画面の記憶を揃えない PC は ui を持たない(相手の ui を消さない)
   return out;
 }
@@ -5613,13 +5622,21 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
       const why = !(opt && (opt.force || opt.take)) ? syncGuard(base, loc, merged, rem) : null;      // 「ほかの PC に合わせる」は本人が確認ずみ
       if (why) { SYNC.hold = why; SYNC.msg = "安全のため、同期を止めました。" + why; break; }
       if (!syncPayloadEq(merged, loc)) { await syncApply(merged, loc); changed = true; }
+      // 記録(キャラ・装備・MD): ほかの PC のものがあれば、Python がいまの記録に混ぜて書く(足すだけ・新しいほうを採るだけ)
+      if (rem && rem.records) { const mr = await syncRecordsApi({ op: "merge", remote: rem.records }); merged.records = mr.records; if (mr.changed) changed = true; }
+      else merged.records = loc.records;
+      const recStr = JSON.stringify(merged.records), recHash = syncHash(recStr);
+      const recDiff = rem && rem.records ? recStr !== JSON.stringify(rem.records) : recHash !== store.get("md_syncrechash");
+      const restDiff = !rem || !syncPayloadEq(merged, rem, true);
       let newVer = r.v;
-      if (!rem || !syncPayloadEq(merged, rem, true)) {
+      if (restDiff || recDiff) {
+        // 記録だけが違うときは、書き込みの回数を減らすため、自動では10分に1回まで(「今すぐ同期」はすぐ)
+        if (!restDiff && !(opt && (opt.manual || opt.force || opt.take)) && Date.now() - (+store.get("md_syncpusht") || 0) < 600000) { SYNC.t = Date.now(); SYNC.msg = changed ? "ほかの PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false; done = true; break; }
         const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(merged) });
         if (p.ok === false) continue;           // 先に別の PC が書いた → もう一度(取り込んで混ぜ直す)
-        newVer = p.v;
+        newVer = p.v; store.set("md_syncpusht", String(Date.now()));
       }
-      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(merged));      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
+      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(syncNoRec(merged))); store.set("md_syncrechash", recHash);      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
       SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); SYNC.msg = changed ? "ほかの PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false; done = true;
     }
     if (!done && !SYNC.hold) SYNC.msg = "混み合っていて同期できませんでした。もう一度試してください。";
@@ -5631,7 +5648,7 @@ async function syncReset() {           // 合言葉を忘れたとき: この PC
   if (!confirm("預けてある同期データを、この PC の内容で作り直します(合言葉・利用キーが合わず読めなくなったときに使います)。\n\nこの PC に無いスロット・設定は、同期している ほかの PC からも消える場合があります(消える前に確認が出ます)。よろしいですか?")) return;
   if (!DATA) return;
   SYNC.busy = true; syncPaint();
-  try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(loc)); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
+  try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(syncNoRec(loc))); store.set("md_syncrechash", syncHash(JSON.stringify(loc.records))); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
   catch (e) { SYNC.msg = "できませんでした: " + e.message; }
   SYNC.busy = false; syncPaint();
 }
@@ -5649,7 +5666,7 @@ function syncStatusHtml() {
 function syncSettingsHtml() {
   const on = syncOn(), ui = syncUiOn();
   return `<h2>2台の同期</h2><div class="panel list">
-    <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロットを揃えます。<span class="muted">（中身は暗号化して預けます。利用キーを持つ PC だけが読めます。通信の記録（被ダメなど）は対象外です。計算機のスロットに着せた装備セットの記号は、PC ごとのものを使います）</span></span></div>
+    <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロット・キャラ／装備／MD の記録を揃えます。<span class="muted">（中身は暗号化して預けます。利用キーを持つ PC だけが読めます。被ダメの記録は対象外です。記録は「足すだけ・新しいほうを採るだけ」で、消えることはありません（取り込む前に、同期前のバックアップが作られます）。計算機のスロットに着せた装備セットの記号は、PC ごとのものを使います）</span></span></div>
     <div class="row"><label class="nm"><input type="checkbox" id="synccb" ${on ? "checked" : ""}> 同期する</label></div>
     <div class="row"><span class="nm">合言葉（任意）<span class="muted">（入れると、サーバーの管理者にも読めなくなります。使うなら2台とも同じものを入れます。8文字以上・長めの文章がおすすめ。空のままでも同期できます）</span></span><input class="lbl" type="password" id="syncpw" autocomplete="off" value="${esc(store.get("md_syncpw") || "")}" style="min-width:200px"></div>
     <div class="row"><label class="nm"><input type="checkbox" id="syncuicb" ${ui ? "checked" : ""}> 枠の開け閉めなど画面の記憶も揃える</label></div>
@@ -5680,9 +5697,9 @@ function syncBind() {
         if (!store.get("md_syncbase")) take = confirm("ほかの PC が預けたデータがあります。\n\nこの PC の設定を、そのデータに合わせますか?\n\n［OK］ほかの PC に合わせる（この PC の設定は置きかわります）\n［キャンセル］この PC の設定と混ぜる");
       }
     } catch (e) { cb.checked = false; SYNC.msg = "始められませんでした: " + e.message; SYNC.badPw = !!e.badPw; render(); return; }
-    store.set("md_sync", "1"); syncNow({ take });
+    store.set("md_sync", "1"); syncNow({ take, manual: true });
   };
-  $("#syncnow").onclick = () => syncNow();
+  $("#syncnow").onclick = () => syncNow({ manual: true });
 }
 if (LOCAL) {
   setTimeout(() => { if (syncOn()) syncNow(); }, 25000);
