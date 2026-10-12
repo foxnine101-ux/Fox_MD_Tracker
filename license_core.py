@@ -105,13 +105,18 @@ class License:
             return self.status()
 
     # ---- 共有の結びつけ(ゲームのアイテム番号 → ラトリオの名前。承認式) ----
+    def _need(self):
+        if not self.url or not self.d.get("key"):
+            raise RuntimeError("利用キーが登録されていません")
+        if self.d.get("bad"):
+            raise RuntimeError("この利用キーは使えなくなっています")
+
     def _usable(self):
         return bool(self.url and self.d.get("key") and not self.d.get("bad"))
 
     def links_get(self, since):
         """承認ずみの表を取る。変わっていなければ None。返り値 {v, links}。使えないときは例外"""
-        if not self._usable():
-            raise RuntimeError("利用キーが登録されていません")
+        self._need()
         b = self._body()
         b["since"] = since
         r = self._post("/links/get", b)
@@ -119,19 +124,24 @@ class License:
             raise RuntimeError("確認できません: " + str(r.get("reason")))
         if r.get("same"):
             return None
-        return {"v": r.get("v", 0), "links": r.get("links") or {}}
+        links = r.get("links")
+        if not isinstance(links, dict):
+            raise RuntimeError("サーバーの返事の形が違います")
+        return {"v": r.get("v", 0), "links": {str(k): v for k, v in links.items() if str(k).isdigit() and isinstance(v, str)}}
 
     def links_propose(self, links):
         """自分の結びつけ {番号: 名前} を提案する。返り値 = 新しく足された件数"""
-        if not self._usable():
-            raise RuntimeError("利用キーが登録されていません")
+        self._need()
         clean = {str(k): str(v)[:80] for k, v in (links or {}).items() if str(k).isdigit() and v}
-        b = self._body()
-        b["links"] = dict(list(clean.items())[:300])
-        r = self._post("/links/propose", b)
-        if not r.get("ok"):
-            raise RuntimeError("提案できません: " + str(r.get("reason")))
-        return int(r.get("added") or 0)
+        items, added = list(clean.items()), 0
+        for i in range(0, len(items), 300):           # 300件ずつに分けて送る
+            b = self._body()
+            b["links"] = dict(items[i:i + 300])
+            r = self._post("/links/propose", b)
+            if not r.get("ok"):
+                raise RuntimeError("提案できません: " + {"full": "提案の受付がいっぱいです(配布元に連絡してください)", "limit": "提案が多すぎます(承認されるまでお待ちください)"}.get(r.get("reason"), str(r.get("reason"))))
+            added += int(r.get("added") or 0)
+        return added
 
     def check(self):
         """サーバーに確認する(起動時・1日1回)。つながらないときは猶予のまま"""

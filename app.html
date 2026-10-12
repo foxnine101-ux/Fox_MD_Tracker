@@ -3523,7 +3523,7 @@ function simcWearSet(sid, shadow) {       // sid = 装備セット(登録・履�
 }
 async function simcRegister(shadow, take) {     // いまの計算機の装備を装備セットに登録する(take = 上書きする相手の ID)
   const ch = simcCur(); if (!ch) return;
-  const links = {}; Object.entries({ ...(SHARED.links || {}), ...(SETTINGS.ratLinks || {}) }).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm) links[String(nm).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "")] = +id; });
+  const links = {}; Object.entries(SETTINGS.ratLinks || {}).forEach(([id, nm]) => { if (/^\d+$/.test(id) && nm) links[String(nm).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "")] = +id; });
   const m = ch.model; SIMC.busy = "装備スロットに登録しています…"; render();
   const r = await postSet({ sim: { shadow, items: simcFragItems(m, shadow), data: simcGearFrag(m, shadow) }, take: take || "", links });
   SIMC.busy = "";

@@ -214,6 +214,7 @@ class CharCore(object):
         self.sets = {}         # 装備セット(メイン10か所): ID -> {items, name, tag, first, last, worn, chars: {キャラ: {last, status}}}
         self.shadows = {}      # シャドウセット(6か所): 同じ形(タグは S1, S2…)
         self.set_map = {}      # 前の版の「キャラ:中身」の装備セットID -> 新しいID(被ダメの記録の付けかえ用)
+        self.shared_names = {}   # 共有の結びつけ(配布元が承認した 番号 → ラトリオの名前)を裏返した {正規化した名前: 番号}。参照するだけで保存しない
         self.sim_links = {}    # 計算機(ラトリオ)の名前 -> ゲームのアイテム番号。手で結びつけたもの(0 = わざと結びつけない)
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
@@ -651,7 +652,19 @@ class CharCore(object):
         hit = idx.get(k) or idx.get(re.sub(r"^\[[^\]]*\]", "", k)) or idx.get("[シャドウ]" + k)   # ゲーム側だけ頭に [シャドウ] が付く名前がある
         if hit is None and card:
             hit = idx.get(k + "カード")
+        if hit is None:
+            hit = self.shared_names.get(k)         # 共有の結びつけ(自分の結びつけ・名前の表で見つからないときだけ)
         return hit
+
+    def set_shared_links(self, links):
+        """共有の結びつけ {番号: 名前} を、名前 → 番号 に裏返して覚える(同じ名前に複数の番号があるときは小さい番号)。変わったら装備セットを引き直す"""
+        rev = {}
+        for iid, nm in sorted((links or {}).items(), key=lambda kv: int(kv[0]) if str(kv[0]).isdigit() else 1 << 60):
+            if str(iid).isdigit() and isinstance(nm, str) and nm:
+                rev.setdefault(self._norm_name(re.sub(r"\s*[(（]\+\d+以上[)）]\s*$", "", nm)), int(iid))
+        if rev != self.shared_names:
+            self.shared_names = rev
+            self.resolve_sim_all()
 
     def _resolve_sim(self, s):
         n = 0

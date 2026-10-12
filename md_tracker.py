@@ -590,6 +590,8 @@ def start_live_server(core, lock, cfg):
                     n = int(self.headers.get("Content-Length") or 0)
                     b = json.loads(self.rfile.read(min(n, 200000)).decode("utf-8"))
                     out = {"ok": True}
+                    if LIC is None:
+                        raise RuntimeError("利用キーの機能が使えません")
                     if isinstance(b.get("propose"), dict):
                         out["added"] = LIC.links_propose(b["propose"])
                     if b.get("refresh"):
@@ -989,6 +991,9 @@ def load_sandbag():
         return []
 
 
+_SHARED_LOCK = threading.Lock()
+
+
 def load_shared_links():
     """共有の結びつけ.json → {v, links, t}"""
     try:
@@ -1005,19 +1010,30 @@ def refresh_shared_links(force=False):
     """配布元から承認ずみの表を取る(1日1回。変わっていなければ何もしない)。返り値 = 状態の文"""
     if LIC is None:
         return "利用キーの機能が使えません"
-    d = load_shared_links()
-    if not force and time.time() - d.get("t", 0) < 20 * 3600:
-        return "最近確認ずみです"
+    with _SHARED_LOCK:                                  # 裏の更新と「今すぐ更新」が重ならないように
+        d = load_shared_links()
+        if not force and time.time() - d.get("t", 0) < 20 * 3600:
+            return "最近確認ずみです"
+        try:
+            r = LIC.links_get(d.get("v", -1))
+        except Exception as e:
+            return str(e)
+        d["t"] = int(time.time())
+        if r is not None:
+            d["v"], d["links"] = r["v"], r["links"]
+            print("[共有の結びつけ] 更新しました: {}件(版 {})".format(len(d["links"]), d["v"]))
+        _write_json(SHARED_LINKS_FILE, d)
+        apply_shared_links(d)
+        return "更新しました" if r is not None else "変わりありません"
+
+
+def apply_shared_links(d=None):
+    """共有の表を、装備の名前の引き当て(char_core)に渡す(参照するだけ。保存はしない)"""
     try:
-        r = LIC.links_get(d.get("v", -1))
+        if CHARS is not None:
+            CHARS.set_shared_links((d or load_shared_links()).get("links") or {})
     except Exception as e:
-        return str(e)
-    d["t"] = int(time.time())
-    if r is not None:
-        d["v"], d["links"] = r["v"], r["links"]
-        print("[共有の結びつけ] 更新しました: {}件(版 {})".format(len(d["links"]), d["v"]))
-    _write_json(SHARED_LINKS_FILE, d)
-    return "更新しました" if r is not None else "変わりありません"
+        print("[共有の結びつけ] 反映できませんでした:", e)
 
 
 def load_sim_chars():
@@ -1376,6 +1392,7 @@ def main():
     if LIC is not None:
         LIC.start_background(stop)
 
+        apply_shared_links()        # 前に取ってあった表を、まず反映
         def _links_loop():
             if stop.wait(60):
                 return
