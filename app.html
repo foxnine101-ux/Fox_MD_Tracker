@@ -5160,7 +5160,7 @@ function monpBody() {
   const tag = (s) => `<span class="tag" style="${s === "被ダメ" ? "background:#c0392b;color:#fff" : s === "公式" ? "background:#2a6fb0;color:#fff" : ""}">${esc(s)}</span>`;
   const noOff = rows.filter((r) => !r.official).length;
   el.innerHTML = `<div class="panel tablewrap" style="margin-top:8px"><table><thead><tr><th class="l">モンスター</th><th>Lv</th><th>HP</th><th>属性</th><th>種族</th><th>サイズ</th><th>種類</th><th class="l">使うスキル</th><th class="l">出どころ</th></tr></thead><tbody>${
-    rows.map((r) => `<tr><td class="l">${esc(r.name)}</td><td>${r.lv ? esc(r.lv) : "-"}</td><td>${r.hp ? esc(typeof r.hp === "number" ? fmtN(r.hp) : r.hp) : "-"}</td><td>${esc(r.ele || "-")}</td><td>${esc(r.race || "-")}</td><td>${esc(r.size || "-")}</td><td>${r.boss ? "ボス" : r.lv ? "一般" : "-"}</td><td class="l muted" style="max-width:380px">${r.skills.length ? esc(r.skills.join("、")) : r.official ? "-" : `<span title="公式サイトから集めると出ます">未取得</span>`}</td><td class="l">${r.src.map(tag).join(" ")}</td></tr>`).join("")}</tbody></table></div>
+    rows.map((r) => `<tr><td class="l"${r.aegis ? ` title="公式のID名: ${esc(r.aegis)}"` : ""}>${esc(r.name)}</td><td>${r.lv ? esc(r.lv) : "-"}</td><td>${r.hp ? esc(typeof r.hp === "number" ? fmtN(r.hp) : r.hp) : "-"}</td><td>${esc(r.ele || "-")}</td><td>${esc(r.race || "-")}</td><td>${esc(r.size || "-")}</td><td>${r.boss ? "ボス" : r.lv ? "一般" : "-"}</td><td class="l muted" style="max-width:380px">${r.skills.length ? esc(r.skills.join("、")) : r.official ? "-" : `<span title="公式サイトから集めると出ます">未取得</span>`}</td><td class="l">${r.src.map(tag).join(" ")}</td></tr>`).join("")}</tbody></table></div>
     ${noOff ? `<p class="hint">公式サイトの情報が未取得のモンスターが ${noOff} 体います。「足りない情報を公式サイトから集める」で、時間をあけて少しずつ集めます。</p>` : ""}`;
 }
 

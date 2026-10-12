@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.3"
+VERSION = "2.58.4"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1465,6 +1465,7 @@ def main():
             global OFFICIAL
             OFFICIAL = ro_official.Official(OFFICIAL_FILE, log=print)
             DMG.official = OFFICIAL
+            DMG.mob_ids = dmg_core.load_mob_ids(resource("mob_ids.json") or "")
             print("公式モンスター情報(この PC に集めたもの): {}件".format(len(OFFICIAL.mobs)))
         except Exception as e:
             print("公式モンスター情報が使えません:", e)

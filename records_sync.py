@@ -115,7 +115,7 @@ def replace_with(local, remote):
 
 # ---- 被ダメの記録(dmg): 標準では引っ越しに含めない。含めるときだけ ----
 DMG_PER_CHAR = ("stats", "gstats", "ails", "acts")       # キャラ → 中身
-DMG_PER_KEY = ("seen", "sets", "mob_seen")                # キー → 中身(この PC に無いキーだけ足す)
+DMG_PER_KEY = ("seen", "sets", "mob_seen", "cls_name")                # キー → 中身(この PC に無いキーだけ足す)
 
 
 def dmg_counts(dmg):

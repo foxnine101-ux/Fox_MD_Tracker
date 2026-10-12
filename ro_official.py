@@ -466,6 +466,9 @@ class Official(object):
         """これから取りにいく名前の数(目安)。"""
         n = 0
         with self.lock:
+            for ae, _ in wanted.get("aegis") or []:
+                if (self.mobs.get(ae) or {}).get("d") is None:
+                    n += 1
             for name in wanted.get("names") or []:
                 have = self._index().get(norm(name))
                 if have:
@@ -488,6 +491,9 @@ class Official(object):
         self.budget = RUN_MAX
         self.last_error = ""
         try:
+            for ae, nm in wanted.get("aegis") or []:        # ゲームの番号から分かった ID名は、名前で探さずに直接取る(1件で済む・同じ名前の別物と混ざらない)
+                if (self.mobs.get(ae) or {}).get("d") is None:
+                    self.fetch_detail(ae, {"jname": nm})
             for name in wanted.get("names") or []:
                 self.ensure_name(name)
             for md, sufs in wanted.get("maps") or []:

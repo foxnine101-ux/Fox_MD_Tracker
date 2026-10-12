@@ -83,6 +83,7 @@ RING_MAX = 400          # 名前がわからない相手を調べる用に、接
 
 RECENT_MAX = 300
 MOBS_MAX = 20000
+CLS_MAX = 8000          # ゲームのモンスター番号と名前の対応を覚える数の上限
 PLAYERS_MAX = 5000       # モンスターとして見かけた名前を覚える数の上限
 SAMPLE_MAX = 8          # 確かめ用に動作ログへ出す数(通信の種類ごと)
 RAW_MAX = 150           # 確認用データに残す数(通信の種類ごと・新しいものを残す)
@@ -172,6 +173,16 @@ def load_skill_info(path):
         return {}
 
 
+def load_mob_ids(path):
+    """mob_ids.json(ゲームのモンスター番号 → ID名。tools/make_mob_ids.py)。無ければ空。"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return {int(k): v for k, v in d.items()}
+    except (OSError, ValueError):
+        return {}
+
+
 def load_mob_info(path):
     """モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json = ラトリオのデータから)。"""
     try:
@@ -198,6 +209,8 @@ class DmgCore(object):
         self.efix = dict(efix or {})        # 手で直した種類・属性(番号 -> {"ele":, "kind":})。こっちが優先
         self.mobs = mobs or {}              # モンスターの名前 -> {lv, hp, race, size, ele, boss}(mob_info.json)
         self.official = None                # ro_official.Official(公式サイトから集めた、この PC だけのデータ)。あれば mob_info より優先
+        self.mob_ids = {}                   # ゲームのモンスター番号(クラス) -> ID名(同梱の mob_ids.json。公式ツールの ID と同じ)
+        self.cls_name = {}                  # ゲームのモンスター番号 -> 通信で見えた名前(出現パケットから覚える。この対応が「結びつけ」)
         self.mob_seen = {}                  # 場所(MD) -> {見かけたモンスターの名前: 最後に見た時刻}(公式の情報を集める名簿)
         self.links = []                     # 手で結びつけた「ID○○ → 名前」を、次からも自動にする決まり [{where, skills, name}]
         self.id_used = set()                # 名前がわからず「ID○○」で記録した相手(あとで名前がわかったら付けかえる)
@@ -227,7 +240,7 @@ class DmgCore(object):
     def snapshot(self):
         return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen,
                 "sets": self.sets, "gstats": self.gstats, "ails": self.ails, "acts": self.acts,
-                "mob_seen": self.mob_seen, "links": self.links, "monnames": sorted(self.monnames)[-PLAYERS_MAX:]}
+                "mob_seen": self.mob_seen, "links": self.links, "cls_name": self.cls_name, "monnames": sorted(self.monnames)[-PLAYERS_MAX:]}
 
     def restore(self, d):
         if d:
@@ -241,6 +254,7 @@ class DmgCore(object):
             self.mob_seen = d.get("mob_seen") or {}
             self.links = d.get("links") or []
             self.monnames = set(d.get("monnames") or [])
+            self.cls_name = {int(k): v for k, v in (d.get("cls_name") or {}).items()}
             # 「ID○○」のままの相手は、名前がわかったら付けかえられるように覚えておく
             for per_char in self.stats.values():
                 for dd in per_char.values():
@@ -788,6 +802,11 @@ class DmgCore(object):
         self.spawn_kinds[(key, aid)] = pkt[4]                  # 接続ごとに覚える(別の接続の同じ番号と混ざらないように)
         if pkt[4] == 5:
             nm = self.names.get(aid)
+            if nm and len(pkt) >= 25 and len(self.cls_name) < CLS_MAX:
+                cls, sn = struct.unpack_from("<H", pkt, 23)[0], shown_name(nm)
+                if sn and not sn.startswith("#") and self.cls_name.get(cls) != sn and (cls not in self.cls_name or cls in self.mob_ids):
+                    self.cls_name[cls] = sn                      # 番号 → 名前(同じ番号で名前が変わるのは、強さ違いなどの別名。同梱の表にある番号は最新で上書き)
+                    self.changed = True
             if nm and nm not in self.monnames and len(self.monnames) < PLAYERS_MAX:
                 self.monnames.add(nm)
                 self.changed = True
@@ -942,7 +961,7 @@ class DmgCore(object):
                     fields[where] = fields.get(where, 0) + sum(v[0] for v in rows.values())
         for where in sorted(fields, key=lambda w: -fields[w]):
             maps.append([where, [where[len("フィールド "):]]])
-        return {"names": names, "maps": maps}
+        return {"names": names, "maps": maps, "aegis": self.aegis_wanted()}
 
     def _suffixes(self, where):
         """その場所(MD の名前)で入ったマップの後ろの部分。「MD ct2」のような名前なら ct2 そのもの。"""
@@ -1056,6 +1075,23 @@ class DmgCore(object):
                 self.log("[被ダメ] 名前の分からない相手 {} 体を「{}」にしました({})".format(len(g["ids"]), name, g["where"]))
         return done
 
+    def aegis_of(self, name):
+        """通信で見えた名前 → 公式ツールの ID名(出現パケットの番号 → 同梱の表)。分からなければ ""。"""
+        for cls, nm in self.cls_name.items():
+            if nm == name and cls in self.mob_ids:
+                return self.mob_ids[cls]
+        return ""
+
+    def aegis_wanted(self):
+        """公式サイトから ID で直接取るもの [[ID名, 名前], …](被ダメの相手・見かけた順は気にせず、全部)。名前で探すより確実で、1件で済む。"""
+        out, seen = [], set()
+        for cls, nm in self.cls_name.items():
+            ae = self.mob_ids.get(cls)
+            if ae and ae not in seen:
+                seen.add(ae)
+                out.append([ae, nm])
+        return out
+
     def place_view(self):
         """「モンスター情報」タブ用: 被ダメを受けた場所・見かけた場所ごとの、出てくるモンスター。
         {場所: [{name, lv, hp, ele, race, size, boss, skills, src: ["被ダメ"/"見かけた"/"公式"], official: 公式の情報があるか}]}"""
@@ -1089,7 +1125,7 @@ class DmgCore(object):
                 info = (off.info(n) if off is not None else None) or self.mobs.get(n) or {}
                 rows.append({"name": n, "lv": info.get("lv"), "hp": info.get("hp"), "ele": info.get("ele"), "race": info.get("race"),
                              "size": info.get("size"), "boss": info.get("boss"), "skills": (off.skills_of(n) if off is not None else []),
-                             "src": sorted(src, key=["被ダメ", "見かけた", "公式"].index), "official": bool(off is not None and off.has(n))})
+                             "src": sorted(src, key=["被ダメ", "見かけた", "公式"].index), "official": bool(off is not None and off.has(n)), "aegis": self.aegis_of(n)})
             rows.sort(key=lambda r: (0 if "被ダメ" in r["src"] else 1, r["name"]))
             out[where] = rows
         return out
