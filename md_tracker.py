@@ -18,6 +18,8 @@ import time
 import urllib.parse
 import urllib.request
 
+import netutil
+
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 sys.path.insert(0, HERE)
 
@@ -361,7 +363,7 @@ def _sheet_csv(url):
     if c["body"] is not None and c["url"] == url and time.time() - c["t"] < 60:
         return c["body"]
     req = urllib.request.Request(url, headers={"User-Agent": "Fox_MD_Tracker"})
-    with urllib.request.urlopen(req, timeout=10) as r:
+    with urllib.request.urlopen(req, timeout=10, context=netutil.CTX) as r:
         body = r.read()
     if b"<html" in body[:500].lower():
         raise ValueError("シートが公開されていません")
@@ -879,7 +881,7 @@ def upload(cfg, payload):
     req = urllib.request.Request(url + "/api/upload", data=body, method="POST",
                                  headers={"Content-Type": "application/json", "x-upload-token": key})
     try:
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=20, context=netutil.CTX) as r:
             return r.status == 200
     except Exception as e:
         print("[ウェブ] 送信に失敗:", e)

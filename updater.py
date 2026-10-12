@@ -19,6 +19,8 @@ import threading
 import time
 import urllib.request
 
+import netutil
+
 DEFAULT_REPO = "foxnine101-ux/Fox_MD_Tracker"
 ASSET_NAME = "Fox_MD_Tracker.exe"
 ASSET_OLD = "MDTracker.exe"   # 改名前の名前(古い版のリリース用)
@@ -105,7 +107,7 @@ class Updater(object):
             req = urllib.request.Request("https://api.github.com/repos/{}/releases/latest".format(self.repo),
                                          headers={"User-Agent": "Fox_MD_Tracker/" + self.version,
                                                   "Accept": "application/vnd.github+json"})
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with urllib.request.urlopen(req, timeout=15, context=netutil.CTX) as r:
                 rel = json.loads(r.read().decode("utf-8"))
             ver = rel.get("tag_name") or rel.get("name") or ""
             assets = rel.get("assets", [])
@@ -161,7 +163,7 @@ class Updater(object):
         new = os.path.join(self.folder, "Fox_MD_Tracker.new.exe")
         try:
             req = urllib.request.Request(self.latest["url"], headers={"User-Agent": "Fox_MD_Tracker/" + self.version})
-            with urllib.request.urlopen(req, timeout=60) as r, open(new, "wb") as f:
+            with urllib.request.urlopen(req, timeout=60, context=netutil.CTX) as r, open(new, "wb") as f:
                 total = int(r.headers.get("Content-Length") or self.latest.get("size") or 0)
                 got = 0
                 while True:

@@ -40,7 +40,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pyinstaller scapy pystray pillow pywebview
+          python -m pip install pyinstaller scapy pystray pillow pywebview certifi
 
       - name: 公開版の exe を作る
         if: steps.v.outputs.skip == 'false'
@@ -53,7 +53,7 @@ jobs:
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "item_names_fix.json;." --add-data "calc_data.json;." --add-data "option_names.json;." `
             --hidden-import edition `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
-            --collect-all webview --hidden-import clr md_tracker.py
+            --collect-all webview --collect-data certifi --hidden-import certifi --hidden-import netutil --hidden-import clr md_tracker.py
           New-Item -ItemType Directory -Force pkg\Fox_MD_Tracker | Out-Null
           Copy-Item dist\Fox_MD_Tracker.exe pkg\Fox_MD_Tracker\
           Copy-Item はじめに_配布版.txt pkg\Fox_MD_Tracker\はじめに.txt
@@ -71,7 +71,7 @@ jobs:
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "item_names_fix.json;." --add-data "calc_data.json;." --add-data "option_names.json;." `
             --hidden-import edition `
             --hidden-import scapy.all --collect-submodules scapy --hidden-import pystray._win32 `
-            --collect-all webview --hidden-import clr md_tracker.py
+            --collect-all webview --collect-data certifi --hidden-import certifi --hidden-import netutil --hidden-import clr md_tracker.py
 
       - name: 開発版を Artifacts に置く
         uses: actions/upload-artifact@v4

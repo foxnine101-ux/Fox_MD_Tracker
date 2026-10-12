@@ -954,8 +954,9 @@ def npcap_available():
 def npcap_download_url():
     import re
     import urllib.request
+    import netutil
     try:
-        with urllib.request.urlopen(NPCAP_PAGE, timeout=20) as r:
+        with urllib.request.urlopen(NPCAP_PAGE, timeout=20, context=netutil.CTX) as r:
             html = r.read().decode("utf-8", "replace")
         m = re.findall(r"dist/npcap-(\d+(?:\.\d+)+)\.exe", html)
         if m:
@@ -973,7 +974,10 @@ def install_npcap():
     url = npcap_download_url()
     dst = os.path.join(tempfile.gettempdir(), os.path.basename(url))
     print("Npcap をダウンロードしています:", url)
-    urllib.request.urlretrieve(url, dst)
+    import netutil
+    import shutil
+    with urllib.request.urlopen(url, timeout=120, context=netutil.CTX) as r, open(dst, "wb") as f:
+        shutil.copyfileobj(r, f)
     print("インストーラーを開きます。画面の案内どおり「I Agree」→「Install」で進めてください。")
     print("(「Administrators only」のチェックは入れないでね)")
     if os.name == "nt":

@@ -21,6 +21,8 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+
+import netutil
 from concurrent.futures import ThreadPoolExecutor
 
 REPO = "foxnine101-ux/ratorio"
@@ -85,7 +87,7 @@ class Ratorio(object):
 
     # ---------- 取り込み ----------
     def _get(self, url, timeout=30):
-        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout) as r:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout, context=netutil.CTX) as r:
             return r.read()
 
     def check(self):

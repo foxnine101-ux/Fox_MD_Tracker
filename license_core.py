@@ -15,6 +15,8 @@ import unicodedata
 import urllib.error
 import urllib.request
 
+import netutil
+
 LICENSE_URL = "https://fox-md-license.foxnine101.workers.dev"            # 例: "https://fox-md-license.<アカウント>.workers.dev"(サーバーを作ったらここに入れる)
 ENFORCE = False             # True にすると、キーが無効・未入力のとき画面をふさぐ(画面側の判断。ここでは state を返すだけ)
 GRACE_DAYS = 14
@@ -63,7 +65,7 @@ class License:
         req = urllib.request.Request(self.url + path, json.dumps(body).encode("utf-8"),
                                      {"Content-Type": "application/json", "User-Agent": "Fox_MD_Tracker"})
         try:
-            with urllib.request.urlopen(req, timeout=15) as r:
+            with urllib.request.urlopen(req, timeout=15, context=netutil.CTX) as r:
                 out = json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as e:           # 400 など。中身(reason)があれば読む(ネットの不通とは区別する)
             try:

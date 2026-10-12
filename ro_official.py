@@ -22,6 +22,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+import netutil
+
 BASE = "https://rotool.gungho.jp"
 UA = "Fox_MD_Tracker (personal local cache; 1 request / 3+ sec; no redistribution)"
 MIN_GAP = 3.0          # 秒。これに 0〜1 秒のゆらぎを足す
@@ -314,7 +316,7 @@ class Official(object):
     # ---------- 取りにいく(ゆっくり) ----------
     def _http_get(self, url):
         req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "ja", "Accept": "text/html,application/json"})
-        opener = urllib.request.build_opener()      # クッキーを扱う部品を入れない = 送らない
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=netutil.CTX))      # クッキーを扱う部品を入れない = 送らない
         with opener.open(req, timeout=TIMEOUT) as r:
             return r.read()
 
