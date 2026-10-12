@@ -5466,7 +5466,7 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && DA
 // この PC のツール(Fox_MD_Tracker)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
 if (LOCAL) { sharedLoad().then(() => { if (DATA && TAB === "settings") render(); }); setInterval(sharedLoad, 3600000); }      // 共有の結びつけ(配布元が承認した表)
-// ---------------- 2台の同期(同じ利用キーの PC どうし。中身は合言葉で暗号化して預ける = サーバーには読めない) ----------------
+// ---------------- 2台の同期(同じ利用キーの PC どうし。中身は暗号化して預ける。合言葉を足すと、サーバーの管理者にも読めなくなる) ----------------
 // 同期するもの: 表示の設定(並び順・非表示・色・結びつけ など)・計算機のスロット・(選べば)枠の開け閉めなどの画面の記憶
 // 混ぜ方: 前に同期したときの内容(md_syncbase = 前回預けた内容)との3者比べ。変えたほうを採用し、両方が変えた所はこの PC を優先(スロットは新しいほう)
 // 安全装置: 画面を読み込む前・設定やスロットが空(読み込みの失敗かも)・大量に消える ときは、勝手に同期せず止める(「それでも同期する」で進める)
@@ -5481,9 +5481,9 @@ const syncN = (o) => Object.keys(o || {}).length;
 function syncB64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); }
 const syncUnB64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
 async function syncCryptoKey() {
-  const pw = store.get("md_syncpw") || "", salt = (LICST && LICST.salt) || "";
-  if (pw.length < 8) throw new Error("合言葉が未設定です(8文字以上)");
-  if (!salt) throw new Error("利用キーを確認できません");
+  const extra = store.get("md_syncpw") || "", secret = (LICST && LICST.sync_secret) || "", salt = (LICST && LICST.salt) || "";
+  if (!secret || !salt) throw new Error("利用キーを確認できません");
+  const pw = secret + "|" + extra;          // 利用キーから作った秘密 + (入れていれば)合言葉。合言葉なしでも、キーを知らない人には読めない
   if (SYNC.key && SYNC.keyPw === pw && SYNC.keySalt === salt) return SYNC.key;
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
   SYNC.key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode("fox-md-sync-v2|" + salt), iterations: 300000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
@@ -5500,7 +5500,7 @@ async function syncDec(text) {
   const [a, b] = text.split(".");
   const key = await syncCryptoKey();
   try { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: syncUnB64(a) }, key, syncUnB64(b)))); }
-  catch (e) { const er = new Error("合言葉が違うか、データが壊れています"); er.badPw = true; throw er; }
+  catch (e) { const er = new Error("復号できません。2台の合言葉の有無・内容が合っているか、同じ利用キーか確認してください"); er.badPw = true; throw er; }
 }
 async function syncApi(body) {
   const r = await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -5628,7 +5628,7 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
   if (changed) { try { if (typeof simcLoad === "function") await simcLoad(); await load(); render(); } catch (e) {} }
 }
 async function syncReset() {           // 合言葉を忘れたとき: この PC の内容で、預けてあるデータを作り直す
-  if (!confirm("預けてある同期データを、この PC の内容で作り直します。\n\nこの PC に無いスロット・設定は、同期している ほかの PC からも消える場合があります(消える前に確認が出ます)。よろしいですか?")) return;
+  if (!confirm("預けてある同期データを、この PC の内容で作り直します(合言葉・利用キーが合わず読めなくなったときに使います)。\n\nこの PC に無いスロット・設定は、同期している ほかの PC からも消える場合があります(消える前に確認が出ます)。よろしいですか?")) return;
   if (!DATA) return;
   SYNC.busy = true; syncPaint();
   try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(loc)); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
@@ -5649,9 +5649,9 @@ function syncStatusHtml() {
 function syncSettingsHtml() {
   const on = syncOn(), ui = syncUiOn();
   return `<h2>2台の同期</h2><div class="panel list">
-    <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロットを揃えます。<span class="muted">（中身は合言葉で暗号化して預けるので、サーバーには読めません。通信の記録（被ダメなど）は対象外です。計算機のスロットに着せた装備セットの記号は、PC ごとのものを使います）</span></span></div>
+    <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロットを揃えます。<span class="muted">（中身は暗号化して預けます。利用キーを持つ PC だけが読めます。通信の記録（被ダメなど）は対象外です。計算機のスロットに着せた装備セットの記号は、PC ごとのものを使います）</span></span></div>
     <div class="row"><label class="nm"><input type="checkbox" id="synccb" ${on ? "checked" : ""}> 同期する</label></div>
-    <div class="row"><span class="nm">合言葉（2台とも同じものを入れます。8文字以上。短い言葉だと破られやすいので、長めの文章がおすすめです）</span><input class="lbl" type="password" id="syncpw" autocomplete="off" value="${esc(store.get("md_syncpw") || "")}" style="min-width:200px"></div>
+    <div class="row"><span class="nm">合言葉（任意）<span class="muted">（入れると、サーバーの管理者にも読めなくなります。使うなら2台とも同じものを入れます。8文字以上・長めの文章がおすすめ。空のままでも同期できます）</span></span><input class="lbl" type="password" id="syncpw" autocomplete="off" value="${esc(store.get("md_syncpw") || "")}" style="min-width:200px"></div>
     <div class="row"><label class="nm"><input type="checkbox" id="syncuicb" ${ui ? "checked" : ""}> 枠の開け閉めなど画面の記憶も揃える</label></div>
     <div class="row"><span class="nm" id="syncmsg">${syncStatusHtml()}</span><button class="ghost" id="syncnow" ${on ? "" : "disabled"}>今すぐ同期</button></div></div>`;
 }
@@ -5661,7 +5661,7 @@ function syncBind() {
   syncBindStatus();
   $("#syncpw").onchange = (e) => {
     const v = e.target.value, old = store.get("md_syncpw") || "";
-    if (v.length < 8) { alert("合言葉は8文字以上にしてください。"); e.target.value = old; return; }
+    if (v && v.length < 8) { alert("合言葉は8文字以上にしてください(使わないときは空にします)。"); e.target.value = old; return; }
     if (v === old) return;
     store.set("md_syncpw", v); SYNC.key = null;
     if (syncOn()) { store.set("md_sync", "0"); store.del("md_syncbase"); store.del("md_syncver"); SYNC.msg = "合言葉を変えたので、同期を止めました。もう一度「同期する」にしてください(ほかの PC のデータと合うか確認します)。"; render(); }
@@ -5669,7 +5669,7 @@ function syncBind() {
   $("#syncuicb").onchange = (e) => { store.set("md_syncui", e.target.checked ? "1" : "0"); };
   cb.onchange = async () => {
     if (!cb.checked) { store.set("md_sync", "0"); SYNC.msg = "同期を止めました。"; render(); return; }
-    const pw = $("#syncpw").value; if (pw.length < 8) { cb.checked = false; alert("合言葉は8文字以上にしてください。"); return; }
+    const pw = $("#syncpw").value; if (pw && pw.length < 8) { cb.checked = false; alert("合言葉は8文字以上にしてください(使わないときは空にします)。"); return; }
     store.set("md_syncpw", pw); SYNC.key = null;
     let take = false;
     try {

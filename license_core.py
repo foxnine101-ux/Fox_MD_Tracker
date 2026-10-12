@@ -6,6 +6,7 @@
 - ENFORCE が False のあいだは「警告を出すだけ」で止めない(配り始めの段階)
 """
 import hashlib
+import hmac
 import json
 import os
 import threading
@@ -206,7 +207,7 @@ class License:
         if not self.url:
             return {"state": "off", "enforce": False}
         k = self.d.get("key")
-        out = {"enforce": ENFORCE, "msg": self.msg, "last_ok": self.d.get("last_ok", 0), "name": self.d.get("name", ""), "pc": pcid()[:6], "salt": hashlib.sha256(("fox-md-salt|" + self.d.get("key", "")).encode("utf-8")).hexdigest()[:24] if self.d.get("key") else ""}
+        out = {"enforce": ENFORCE, "msg": self.msg, "last_ok": self.d.get("last_ok", 0), "name": self.d.get("name", ""), "pc": pcid()[:6], "sync_secret": hmac.new((self.d.get("key") or "").encode("utf-8"), b"fox-md-sync-secret-v1", hashlib.sha256).hexdigest() if self.d.get("key") else "", "salt": hashlib.sha256(("fox-md-salt|" + self.d.get("key", "")).encode("utf-8")).hexdigest()[:24] if self.d.get("key") else ""}
         if not k:
             out["state"] = "none"
         elif self.d.get("bad"):
