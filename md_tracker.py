@@ -31,7 +31,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.53.2"
+VERSION = "2.53.3"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -64,18 +64,44 @@ UPD = None         # updater.Updater(アップデート)
 CALC_DATA = {}     # calc_data.json(属性の相性表など。ラトリオのデータから tools/make_calc_data.py で作る)
 RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
+QUIT_ALL = None    # 画面の「アプリを終了」から呼ぶ(トレイの「終了」と同じ)
 
 
 LOG_MAX = 5 * 1024 * 1024      # 動作ログがこの大きさを超えたら「動作ログ.1.txt」に回して新しく始める(古いものは1つだけ残す = 最大でも約10MB。1日で約1MB)
 _log_n = 0
 
 
+LOG_KEEP = False           # True のとき(自分用のトグル): 回したログを捨てずに 動作ログ保存/ に日付つきで取っておく
+LOG_KEEP_DIR = os.path.join(HERE, "動作ログ保存")
+
+
 def _log_rotate():
     try:
         if os.path.getsize(LOG_FILE) > LOG_MAX:
-            os.replace(LOG_FILE, os.path.splitext(LOG_FILE)[0] + ".1.txt")
+            if LOG_KEEP:
+                os.makedirs(LOG_KEEP_DIR, exist_ok=True)
+                os.replace(LOG_FILE, os.path.join(LOG_KEEP_DIR, "動作ログ_" + time.strftime("%Y%m%d_%H%M%S") + ".txt"))
+            else:
+                os.replace(LOG_FILE, os.path.splitext(LOG_FILE)[0] + ".1.txt")
     except OSError:
         pass
+
+
+def set_log_keep(on):
+    """動作ログの長期保存の入り切り(設定.json の「動作ログを長期保存」も書きかえる。送信キーなど、ほかの項目はそのまま)。"""
+    global LOG_KEEP
+    LOG_KEEP = bool(on)
+    try:
+        d = {}
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, "r", encoding="utf-8-sig") as f:
+                d = json.load(f)
+        d["動作ログを長期保存"] = LOG_KEEP
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("[設定] 動作ログの長期保存の設定を書けませんでした:", e)
+    print("[設定] 動作ログの長期保存: {}".format("オン(動作ログ保存フォルダに取っておく)" if LOG_KEEP else "オフ"))
 
 
 def print(*a, **k):  # noqa: A001  画面とファイルの両方に出す
@@ -100,6 +126,7 @@ DEFAULT_CONFIG = {
     "アップデートを確認": True,
     "耐性シートURL": "",
     "ネットワーク名": "",
+    "動作ログを長期保存": False,      # 自分用。True にすると、動作ログを捨てずに「動作ログ保存」フォルダへ日付つきで取っておく(配布版は False)
 }
 RO_DIRS = [r"C:\Gravity\Ragnarok", r"C:\Program Files (x86)\Gravity\Ragnarok",
            r"C:\Program Files\Gravity\Ragnarok", r"D:\Gravity\Ragnarok"]
@@ -550,6 +577,16 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/quit" and self._local_only():
+                # 画面の「アプリを終了」(トレイの「終了」と同じ)
+                def _bye():
+                    time.sleep(0.4)
+                    try:
+                        (QUIT_ALL or (lambda: os._exit(0)))()
+                    except Exception:
+                        os._exit(0)
+                threading.Thread(target=_bye, daemon=True).start()
+                return self._send(200, json.dumps({"ok": True}), "application/json")
             if self.path.split("?")[0] == "/api/map" and self._local_only():
                 # 公式サイトからマップを1つ読み込む: {file: "1@23inf"}。裏で動かす(進み具合は GET /api/map?file=…)
                 try:
@@ -869,6 +906,24 @@ def save_chars():
         print("[キャラ] 保存に失敗:", e)
 
 
+def prune_equip_history():
+    """装備セットの履歴の自動片づけ(起動時と1日おき)。被ダメの記録・計算機のスロットが使っているものは残す。"""
+    if CHARS is None or DMG is None:                     # 被ダメの記録が読めていないときは、参照が分からないので片づけない
+        return
+    try:
+        if os.path.exists(SIM_CHARS_FILE):
+            with open(SIM_CHARS_FILE, "r", encoding="utf-8") as f:     # あるのに読めないときは例外 → 片づけない
+                sim = json.load(f)
+        else:
+            sim = {}
+        blob = json.dumps(DMG.snapshot(), ensure_ascii=False) + json.dumps(sim, ensure_ascii=False)
+        blob += json.dumps(load_sandbag(), ensure_ascii=False)
+        if CHARS.prune_sets(blob):
+            save_chars()
+    except Exception as e:
+        print("[キャラ] 履歴の片づけに失敗:", e)
+
+
 def load_skill_fix():
     """スキル名の手直し.json → (名前, 種類・属性)。中身は {"番号": "名前"} か {"番号": {"name", "ele", "kind"}}"""
     names, attrs = {}, {}
@@ -1099,6 +1154,8 @@ def main():
     args = ap.parse_args()
     print("Fox_MD_Tracker v{} ({})".format(VERSION, EDITION))
     cfg = load_config()
+    global LOG_KEEP
+    LOG_KEEP = bool(cfg.get("動作ログを長期保存", False))
     ro = find_ro_dir(cfg)
     names = {}
     if ro:
@@ -1271,6 +1328,8 @@ def main():
                 stop.set()
                 if app is not None:
                     app.quit()
+            global QUIT_ALL
+            QUIT_ALL = lambda: (quit_all(), TRAY.icon.stop() if TRAY and TRAY.icon else None)
 
             global UPD, QUIT_HOOK
             try:
@@ -1318,7 +1377,8 @@ def main():
             TRAY = tray.Tray(resource("tray.png") or resource("icon.ico"), local_url(), (local_url() + "live") if DEV else "",
                              ((cfg.get("ウェブのURL") or "").strip() if web_on(cfg) else ""), LOG_FILE, HERE,
                              on_quit=quit_all, status=status, open_main=(app.show if app else None),
-                             update=(upd_text, upd_act))
+                             update=(upd_text, upd_act),
+                             extras=[("動作ログを長期保存(自分用)", lambda: set_log_keep(not LOG_KEEP), lambda: LOG_KEEP)])
             th = threading.Thread(target=run_loop, args=(core, lock, cfg, stop), daemon=True)
             th.start()
             if app is not None:
@@ -1396,7 +1456,12 @@ def run_loop(core, lock, cfg, stop):
     last_stat = time.time()
     last_dmg_save = 0
     last_link = 0
+    last_prune = time.time() - 86400 + 180      # 起動の3分後に1回、そのあとは1日おき(起動の途中・複数起動のときに書かないように)
     while not stop.wait(1):
+        if time.time() - last_prune > 86400:
+            last_prune = time.time()
+            with lock:
+                prune_equip_history()
         if DMG is not None and DMG.changed and time.time() - last_dmg_save > 30:
             with lock:
                 DMG.changed = False

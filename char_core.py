@@ -201,6 +201,8 @@ def load_id2name(folder=None):
     return out
 
 
+PRUNE_DAYS = 45       # この日数 着ていない・使われていない・記号なしの履歴は自動で片づける
+
 class CharCore(object):
     def __init__(self, md=None, id2name=None, log=None):
         self.md = md                      # md_core.MDCore (キャラ名を借りる)。無くても動く
@@ -709,6 +711,26 @@ class CharCore(object):
             else:
                 s.pop("color", None)
             self.changed = True
+
+    def prune_sets(self, in_use, now=None, days=PRUNE_DAYS):
+        """履歴の自動片づけ: 記号・名前・色が無く、「days」日以上着ていなくて、どこからも使われていない装備セット・シャドウセットを消す。
+        in_use = その ID を含む文字列(被ダメの記録・計算機のスロットなど、ほかが参照している中身)。計算機で作ったもの(mx…/sx…)といま着ているものは消さない。消した数を返す。"""
+        now = int(now or time.time())
+        cur = {ch.get(k) for ch in self.chars.values() for k in ("cur_set", "cur_shadow")}
+        n = 0
+        for table in (self.sets, self.shadows):
+            for sid in list(table):
+                s = table[sid]
+                if sid.startswith(("mx", "sx")) or sid in cur or s.get("tag") or s.get("name") or s.get("color"):
+                    continue
+                if now - max(s.get("last") or 0, s.get("first") or 0) < days * 86400 or sid in in_use:
+                    continue
+                del table[sid]
+                n += 1
+        if n:
+            self.changed = True
+            self.log("[キャラ] 使われていない古い装備の履歴を {} 件片づけました({}日以上着ていない・記号なし)".format(n, days))
+        return n
 
     def delete_set(self, name, sid):
         if self._table(sid).pop(sid, None) is not None:
