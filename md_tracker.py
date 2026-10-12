@@ -31,7 +31,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.53.0"
+VERSION = "2.53.1"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -66,9 +66,25 @@ RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
 
 
+LOG_MAX = 5 * 1024 * 1024      # 動作ログがこの大きさを超えたら「動作ログ.1.txt」に回して新しく始める(古いものは1つだけ残す = 最大でも約10MB。1日で約1MB)
+_log_n = 0
+
+
+def _log_rotate():
+    try:
+        if os.path.getsize(LOG_FILE) > LOG_MAX:
+            os.replace(LOG_FILE, os.path.splitext(LOG_FILE)[0] + ".1.txt")
+    except OSError:
+        pass
+
+
 def print(*a, **k):  # noqa: A001  画面とファイルの両方に出す
+    global _log_n
     if not GUI:
         _print(*a, **k)
+    _log_n += 1
+    if _log_n % 100 == 1:                  # 100回に1回だけ大きさを見る
+        _log_rotate()
     try:
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(time.strftime("%m/%d %H:%M:%S ") + " ".join(str(x) for x in a) + "\n")

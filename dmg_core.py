@@ -83,6 +83,7 @@ RING_MAX = 400          # 名前がわからない相手を調べる用に、接
 
 RECENT_MAX = 300
 MOBS_MAX = 20000
+PLAYERS_MAX = 5000       # モンスターとして見かけた名前を覚える数の上限
 SAMPLE_MAX = 8          # 確かめ用に動作ログへ出す数(通信の種類ごと)
 RAW_MAX = 150           # 確認用データに残す数(通信の種類ごと・新しいものを残す)
 RAW_UNKNOWN_MAX = 300   # 名前がわからない技の通信は別に多めに残す
@@ -213,6 +214,8 @@ class DmgCore(object):
         self.me = {}                        # 接続 -> 自分の [x0, y0, x1, y1, 開始時刻, 速さ]
         self.log = log or (lambda *a: None)
         self.names = {}                     # 相手のID -> 名前
+        self.kinds = {}                     # (接続, ID) -> 出現の種類(5 = モンスター。0 = プレイヤー など)
+        self.monnames = set()               # モンスター(種類5)として見かけた名前(ダメージの無い技の相手を残すかの判断用)
         self.units = {}                     # 技の設置物のID -> 置いた人のID
         self.ring = {}                      # 接続 -> 最近の通信 [(op, 先頭)](名前がわからない相手を調べる用)
         self.stats = {}                     # キャラ -> MD -> "相手|技" -> [回数, 合計, 最大, 最後, ヒット数合計]
@@ -224,7 +227,7 @@ class DmgCore(object):
     def snapshot(self):
         return {"stats": self.stats, "recent": self.recent[-RECENT_MAX:], "seen": self.seen,
                 "sets": self.sets, "gstats": self.gstats, "ails": self.ails, "acts": self.acts,
-                "mob_seen": self.mob_seen, "links": self.links}
+                "mob_seen": self.mob_seen, "links": self.links, "monnames": sorted(self.monnames)[-PLAYERS_MAX:]}
 
     def restore(self, d):
         if d:
@@ -237,6 +240,7 @@ class DmgCore(object):
             self.acts = d.get("acts") or {}
             self.mob_seen = d.get("mob_seen") or {}
             self.links = d.get("links") or []
+            self.monnames = set(d.get("monnames") or [])
             # 「ID○○」のままの相手は、名前がわかったら付けかえられるように覚えておく
             for per_char in self.stats.values():
                 for dd in per_char.values():
@@ -594,7 +598,10 @@ class DmgCore(object):
             skid, lv, tgt, src, res = struct.unpack_from(OP_USE[op], pkt, 2)
             if not self._mine(key, tgt) or src == tgt or self._mine(key, src):
                 return
-            self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res}, keep=True)
+            kind = self.kinds.get((key, src), 5)
+            self._raw_st(key, tag, pkt, {"skid": skid, "lv": lv, "src": src, "res": res, "kind": kind}, keep=True)      # 落とすものも確認用データには残す
+            if kind != 5 or src == 0:                    # モンスターではない(仲間の支援・NPC など)・ID 0 は、ダメージの無い技に記録しない
+                return
             skill = self.skill_name(skid)
             who = self.names.get(src)
             if not who:
@@ -776,8 +783,16 @@ class DmgCore(object):
         aid = struct.unpack_from("<I", pkt, 5)[0]
         self._spawn_pos(op, pkt, aid)
         self._name(aid, pkt[at:at + 24], op, pkt)
-        if key is not None and pkt[4] == 5:
-            self._seen_mob(key, aid)
+        if len(self.kinds) > MOBS_MAX:
+            self.kinds.clear()
+        self.kinds[(key, aid)] = pkt[4]                  # 接続ごとに覚える(別の接続の同じ番号と混ざらないように)
+        if pkt[4] == 5:
+            nm = self.names.get(aid)
+            if nm and nm not in self.monnames and len(self.monnames) < PLAYERS_MAX:
+                self.monnames.add(nm)
+                self.changed = True
+            if key is not None:
+                self._seen_mob(key, aid)
 
     def _gear_set(self, name, now):
         """いまの装備のまとめを、同じものは同じIDにして覚える。わからなければ ""。"""
@@ -868,7 +883,31 @@ class DmgCore(object):
 
     def for_char_status(self, name):
         """キャラの状態異常と、ダメージの無い技(MDごと)。"""
-        return self.ails.get(name) or {}, self.acts.get(name) or {}
+        acts = {}
+        known = self._known_mobs()
+        for where, rows in (self.acts.get(name) or {}).items():
+            keep = {k: v for k, v in rows.items() if self._act_ok(k.split("|")[0], known)}
+            if keep:
+                acts[where] = keep
+        return self.ails.get(name) or {}, acts
+
+    def _known_mobs(self):
+        """モンスターだと分かっている名前(ダメージを受けた相手・見かけたもの・データがあるもの)。"""
+        out = set()
+        for per_char in self.stats.values():
+            for d in per_char.values():
+                out.update(k.split("|")[0] for k in d)
+        for d in self.mob_seen.values():
+            out.update(d)
+        return out
+
+    def _act_ok(self, who, known):
+        """ダメージの無い技の相手として残すか: ID○○(まだ分からない)・モンスターと分かっている名前(被ダメの相手・見かけたもの・データがあるもの)は残す。どのモンスターとも分からない名前(プレイヤーなど)は外す。"""
+        if (who.startswith("ID") and who[2:].isdigit()) or who in known:
+            return True
+        if who in self.monnames or who in self.mobs or (self.official is not None and self.official.has(who)):
+            return True
+        return False
 
     # ---------------- 公式サイトの情報と、名前の分からない相手 ----------------
     def wanted(self):
