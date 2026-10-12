@@ -143,6 +143,25 @@ class License:
             added += int(r.get("added") or 0)
         return added
 
+    # ---- 2台の同期(中身は画面側で暗号化ずみ。ここは預けて受け取るだけ) ----
+    def sync_get(self, since):
+        self._need()
+        b = self._body()
+        b["since"] = since
+        r = self._post("/sync/get", b)
+        if not r.get("ok"):
+            raise RuntimeError("同期できません: " + str(r.get("reason")))
+        return r        # {v, empty} / {v, same} / {v, data}
+
+    def sync_put(self, base, data):
+        self._need()
+        b = self._body()
+        b["base"], b["data"] = base, data
+        r = self._post("/sync/put", b)
+        if not r.get("ok") and r.get("reason") != "conflict":
+            raise RuntimeError("同期できません: " + {"size": "データが大きすぎます"}.get(r.get("reason"), str(r.get("reason"))))
+        return r        # {ok, v} / {ok: False, reason: "conflict", v}
+
     def check(self):
         """サーバーに確認する(起動時・1日1回)。つながらないときは猶予のまま"""
         if not self.url or not self.d.get("key"):

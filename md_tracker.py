@@ -584,6 +584,17 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "n": k}), "application/json")
+            if self.path.split("?")[0] == "/api/sync" and self._local_only():
+                # 2台の同期の窓口(暗号化は画面側): {op: "get", since} / {op: "put", base, data}
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 4000000)).decode("utf-8"))
+                    if LIC is None:
+                        raise RuntimeError("利用キーの機能が使えません")
+                    out = LIC.sync_get(b.get("since")) if b.get("op") == "get" else LIC.sync_put(b.get("base"), str(b.get("data") or ""))
+                except Exception as e:
+                    return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/links" and self._local_only():
                 # 共有の結びつけ: {propose: {番号: 名前}} で提案 / {refresh: 1} で今すぐ取り直す
                 try:

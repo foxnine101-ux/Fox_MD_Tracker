@@ -5262,8 +5262,10 @@ function renderSettings(groups) {
       <div class="row"><span class="nm">自分で結びつけたもののうち、共有の表にまだ無いもの: <b>${mine}件</b> <span class="muted">（提案すると、配布元が確認してから全員に配られます。名前の組だけが送られます）</span></span>
       <button class="ghost" id="lnkprop" ${mine ? "" : "disabled"}>提案する</button></div><div class="muted" id="lnkmsg" style="padding:4px 8px"></div></div>`;
   }
+  if (LOCAL && LICST.state !== "off") h += syncSettingsHtml();
   h += `<div class="err" id="serr"></div>`;
   $("#view").innerHTML = h;
+  syncBind();
   if ($("#lnkref")) $("#lnkref").onclick = async () => { $("#lnkmsg").textContent = "更新中…"; try { const j = await (await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ refresh: 1 }) })).json(); await sharedLoad(); render(); const m = $("#lnkmsg"); if (m) m.textContent = j.ok ? (j.msg || "") : "できませんでした: " + (j.error || ""); } catch (e) { $("#lnkmsg").textContent = "つながりませんでした。"; } };
   if ($("#lnkprop")) $("#lnkprop").onclick = async () => { $("#lnkmsg").textContent = "送信中…"; try { const j = await (await fetch("/api/links", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ propose: myUnsharedLinks() }) })).json(); $("#lnkmsg").textContent = j.ok ? `提案しました(新しく ${j.added} 件)。承認されると全員に配られます。` : "できませんでした: " + (j.error || ""); } catch (e) { $("#lnkmsg").textContent = "つながりませんでした。"; } };
   if ($("#upchk")) $("#upchk").onclick = async () => { $("#upchk").textContent = "確認中…"; await checkUpdate(true); render(); };
@@ -5459,6 +5461,156 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden && DA
 // この PC のツール(Fox_MD_Tracker)が出しているページなら、合言葉なし・こまめに更新
 const LOCAL = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) && location.port === "8788";
 if (LOCAL) { sharedLoad().then(() => { if (DATA && TAB === "settings") render(); }); setInterval(sharedLoad, 3600000); }      // 共有の結びつけ(配布元が承認した表)
+// ---------------- 2台の同期(同じ利用キーの PC どうし。中身は合言葉で暗号化して預ける = サーバーには読めない) ----------------
+// 同期するもの: 表示の設定(並び順・非表示・色・結びつけ など)・計算機のスロット・(選べば)枠の開け閉めなどの画面の記憶
+// 混ぜ方: 前に同期したときの内容(md_syncbase)との3者比べ。変えたほうを採用し、両方が変えた所はこの PC を優先(スロットは新しいほう)
+const SYNC_UI_KEYS = ["md_simfold", "md_simx", "md_evopen", "md_onlyok", "md_simv", "md_atk"];
+const SYNC = { busy: false, msg: "", t: +store.get("md_synct") || 0, keyPw: "", key: null, badPw: false };
+const syncOn = () => store.get("md_sync") === "1";
+const syncJeq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const syncIsObj = (x) => x && typeof x === "object" && !Array.isArray(x);
+function syncB64(u8) { let s = ""; for (let i = 0; i < u8.length; i += 8192) s += String.fromCharCode.apply(null, u8.subarray(i, i + 8192)); return btoa(s); }
+const syncUnB64 = (t) => Uint8Array.from(atob(t), (c) => c.charCodeAt(0));
+async function syncCryptoKey() {
+  const pw = store.get("md_syncpw") || "";
+  if (!pw) throw new Error("合言葉が未設定です");
+  if (SYNC.key && SYNC.keyPw === pw) return SYNC.key;
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+  SYNC.key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: new TextEncoder().encode("fox-md-sync-v1"), iterations: 200000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  SYNC.keyPw = pw;
+  return SYNC.key;
+}
+async function syncEnc(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await syncCryptoKey(), new TextEncoder().encode(JSON.stringify(obj))));
+  return syncB64(iv) + "." + syncB64(ct);
+}
+async function syncDec(text) {
+  const [a, b] = String(text).split(".");
+  try { return JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: "AES-GCM", iv: syncUnB64(a) }, await syncCryptoKey(), syncUnB64(b)))); }
+  catch (e) { const er = new Error("合言葉が違うか、データが壊れています"); er.badPw = true; throw er; }
+}
+async function syncApi(body) {
+  const r = await fetch("/api/sync", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json();
+  if (j.ok !== true && j.reason !== "conflict") throw new Error(j.error || (j.reason ? "同期できません(" + j.reason + ")" : "サーバーの返事が正しくありません"));
+  return j;
+}
+async function syncCollect() {       // いまのこの PC の同期するものを集める
+  const chars = await fetch("/api/simchars").then((r) => r.json());
+  const ui = {};
+  if (store.get("md_syncui") === "1") SYNC_UI_KEYS.forEach((k) => { const v = store.get(k); if (v != null) ui[k] = v; });
+  const slots = {}; Object.entries(chars || {}).forEach(([id, c]) => { slots[id] = { name: c.name, model: c.model, saved: c.saved, updated: c.updated }; });
+  return { settings: JSON.parse(JSON.stringify(SETTINGS || {})), simchars: slots, ui };
+}
+function syncMerge3(base, loc, rem, depth, opt) {      // 変えたほうを採用(両方変えた所は loc)。オブジェクトは depth の深さまで項目ごとに混ぜる
+  const eq = depth === 0 && opt && opt.eq ? opt.eq : syncJeq;      // 項目そのもの(いちばん下)だけ、専用の比べ方を使う
+  if (eq(loc, rem)) return loc;
+  if (eq(base, loc)) return rem;
+  if (eq(base, rem)) return loc;
+  if (depth > 0 && syncIsObj(loc) && syncIsObj(rem)) {
+    const out = {}, b = syncIsObj(base) ? base : {};
+    for (const k of new Set([...Object.keys(loc), ...Object.keys(rem)])) { const v = syncMerge3(b[k], loc[k], rem[k], depth - 1, opt); if (v !== undefined) out[k] = v; }
+    return out;
+  }
+  if (opt && opt.pick && loc !== undefined && rem !== undefined) return opt.pick(loc, rem);
+  return loc;
+}
+const syncSlotEq = (a, b) => (a === undefined || b === undefined) ? a === b : syncJeq({ n: a.name, m: a.model, s: a.saved }, { n: b.name, m: b.model, s: b.saved });
+function syncMergePayload(base, loc, rem) {
+  const b = base || { settings: {}, simchars: {}, ui: {} };
+  return {
+    settings: syncMerge3(b.settings, loc.settings, rem.settings, 2),
+    simchars: syncMerge3(b.simchars, loc.simchars, rem.simchars, 1, { eq: syncSlotEq, pick: (l, r) => ((r.updated || 0) > (l.updated || 0) ? r : l) }),
+    ui: syncMerge3(b.ui, loc.ui || {}, rem.ui || {}, 1),
+  };
+}
+const syncPayloadEq = (a, b) => syncJeq(a.settings, b.settings) && syncJeq(a.ui || {}, b.ui || {}) && Object.keys({ ...a.simchars, ...b.simchars }).every((id) => syncSlotEq(a.simchars[id], b.simchars[id]));
+async function syncApply(m, loc) {       // 混ぜた結果を、この PC に書く
+  if (!syncJeq(m.settings, loc.settings)) { Object.keys(SETTINGS).forEach((k) => delete SETTINGS[k]); Object.assign(SETTINGS, m.settings); saveSettings(); }
+  for (const id of new Set([...Object.keys(m.simchars), ...Object.keys(loc.simchars)])) {
+    const a = m.simchars[id], o = loc.simchars[id];
+    if (syncSlotEq(a, o)) continue;
+    const body = a ? { id, name: a.name, model: a.model, saved: a.saved } : { id, delete: 1 };
+    await fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  }
+  if (store.get("md_syncui") === "1") {
+    Object.entries(m.ui || {}).forEach(([k, v]) => { if (SYNC_UI_KEYS.includes(k)) store.set(k, v); });
+    Object.keys(loc.ui || {}).forEach((k) => { if (!(k in (m.ui || {}))) store.del(k); });
+  }
+}
+async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC のデータに合わせる」
+  if (SYNC.busy || !LOCAL) return;
+  if (!LICST || LICST.state === "off") await licLoad(false);
+  if (!LICST || !["ok", "grace"].includes(LICST.state)) { SYNC.msg = "利用キーが登録されていないため、同期できません。"; return; }
+  SYNC.busy = true; SYNC.msg = "同期中…"; syncPaint();
+  let changed = false;
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const ver = +(store.get("md_syncver") || -1), baseStr = store.get("md_syncbase"), base = baseStr ? JSON.parse(baseStr) : null;
+      const r = await syncApi({ op: "get", since: ver });
+      let loc = await syncCollect(), rem, merged;
+      if (r.empty) { rem = null; merged = loc; }
+      else if (r.same) { rem = base; merged = loc; }
+      else {
+        rem = await syncDec(r.data);
+        merged = (!base && opt && opt.take) ? rem : syncMergePayload(base, loc, rem);
+      }
+      if (!syncPayloadEq(merged, loc)) { await syncApply(merged, loc); changed = true; }
+      let newVer = r.v;
+      if (!rem || !syncPayloadEq(merged, rem)) {
+        const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(merged) });
+        if (p.ok === false) continue;           // 先に別の PC が書いた → もう一度(取り込んで混ぜ直す)
+        newVer = p.v;
+      }
+      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(await syncCollect()));
+      SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); SYNC.msg = changed ? "他の PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false;
+      break;
+    }
+  } catch (e) { SYNC.msg = "同期できませんでした: " + e.message; SYNC.badPw = !!e.badPw; }
+  SYNC.busy = false; syncPaint();
+  if (changed) { try { if (typeof simcLoad === "function") await simcLoad(); await load(); render(); } catch (e) {} }
+}
+async function syncReset() {           // 合言葉を忘れたとき: この PC の内容で、預けてあるデータを作り直す
+  if (!confirm("預けてある同期データを、この PC の内容で作り直します(ほかの PC の分は、次の同期でこの PC に合わせられます)。よろしいですか?")) return;
+  SYNC.busy = true; syncPaint();
+  try { const r = await syncApi({ op: "get", since: -1 }); const loc = await syncCollect(); const p = await syncApi({ op: "put", base: r.empty ? 0 : r.v, data: await syncEnc(loc) }); if (p.ok === false) throw new Error("もう一度試してください"); store.set("md_syncver", String(p.v)); store.set("md_syncbase", JSON.stringify(loc)); SYNC.msg = "作り直しました。"; SYNC.badPw = false; SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); }
+  catch (e) { SYNC.msg = "できませんでした: " + e.message; }
+  SYNC.busy = false; syncPaint();
+}
+function syncPaint() { const el = document.querySelector("#syncmsg"); if (el) el.innerHTML = syncStatusHtml(); const b = document.querySelector("#syncnow"); if (b) b.disabled = SYNC.busy; }
+function syncStatusHtml() {
+  const when = SYNC.t ? new Date(SYNC.t).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "まだ";
+  return `${SYNC.busy ? '<span class="spin"></span> ' : ""}${esc(SYNC.msg || "")} <span class="muted">（最後に同期: ${esc(when)}）</span>${SYNC.badPw ? ' <button class="ghost" id="syncreset">同期データを作り直す</button>' : ""}`;
+}
+function syncSettingsHtml() {
+  const on = syncOn(), ui = store.get("md_syncui") === "1";
+  return `<h2>2台の同期</h2><div class="panel list">
+    <div class="row"><span class="nm">同じ利用キーの PC どうしで、設定・計算機のスロットを揃えます。<span class="muted">（中身は合言葉で暗号化して預けるので、サーバーには読めません。通信の記録（被ダメなど）は対象外です）</span></span></div>
+    <div class="row"><label class="nm"><input type="checkbox" id="synccb" ${on ? "checked" : ""}> 同期する</label></div>
+    <div class="row"><span class="nm">合言葉（2台とも同じものを入れます。6文字以上）</span><input class="lbl" type="password" id="syncpw" autocomplete="off" value="${esc(store.get("md_syncpw") || "")}" style="min-width:200px"></div>
+    <div class="row"><label class="nm"><input type="checkbox" id="syncuicb" ${ui ? "checked" : ""}> 枠の開け閉めなど画面の記憶も揃える</label></div>
+    <div class="row"><span class="nm" id="syncmsg">${syncStatusHtml()}</span><button class="ghost" id="syncnow" ${on ? "" : "disabled"}>今すぐ同期</button></div></div>`;
+}
+function syncBind() {
+  const cb = $("#synccb"); if (!cb) return;
+  $("#syncpw").onchange = (e) => { store.set("md_syncpw", e.target.value); SYNC.key = null; };
+  $("#syncuicb").onchange = (e) => { store.set("md_syncui", e.target.checked ? "1" : "0"); };
+  cb.onchange = async () => {
+    if (!cb.checked) { store.set("md_sync", "0"); SYNC.msg = "同期を止めました。"; render(); return; }
+    const pw = $("#syncpw").value; if (pw.length < 6) { cb.checked = false; alert("合言葉は6文字以上にしてください。"); return; }
+    store.set("md_syncpw", pw); SYNC.key = null;
+    let take = false;
+    try { const r = await syncApi({ op: "get", since: -1 }); if (!r.empty && !store.get("md_syncbase")) take = confirm("ほかの PC が預けたデータがあります。\n\nこの PC の設定を、そのデータに合わせますか?\n\n［OK］ほかの PC に合わせる（この PC の設定は置きかわります）\n［キャンセル］この PC の設定と混ぜる"); } catch (e) { cb.checked = false; SYNC.msg = "確認できませんでした: " + e.message; render(); return; }
+    store.set("md_sync", "1"); syncNow({ take });
+  };
+  $("#syncnow").onclick = () => syncNow();
+  const rs = $("#syncreset"); if (rs) rs.onclick = syncReset;
+}
+if (LOCAL) {
+  setTimeout(() => { if (syncOn()) syncNow(); }, 25000);
+  setInterval(() => { if (syncOn() && !document.hidden) syncNow(); }, 180000);
+}
 // ---------- アップデート(この PC のツールだけ) ----------
 let UPDATE = null;
 async function checkUpdate(force) {
