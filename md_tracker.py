@@ -634,7 +634,7 @@ def start_live_server(core, lock, cfg):
                     if isinstance(b.get("propose"), dict):
                         out["added"] = LIC.links_propose(b["propose"])
                     if b.get("refresh"):
-                        out["msg"] = refresh_shared_links(True)
+                        out["msg"] = refresh_shared_links(True, lock)
                 except Exception as e:
                     return self._send(200, json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False), "application/json; charset=utf-8")
                 d = load_shared_links()
@@ -741,6 +741,17 @@ def start_live_server(core, lock, cfg):
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
                     b = json.loads(self.rfile.read(min(n, 800000)).decode("utf-8"))
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                if b.get("quarantine"):          # 壊れたファイルを別名にして、作り直せるようにする(画面の「作り直す」ボタン)
+                    try:
+                        with lock:
+                            name = quarantine_sim_chars()
+                        print("[計算機] 壊れたスロットのファイルを別名にしました:", name)
+                        return self._send(200, json.dumps({"ok": True, "name": name}, ensure_ascii=False), "application/json; charset=utf-8")
+                    except OSError as e:
+                        return self._send(503, json.dumps({"error": str(e)}), "application/json; charset=utf-8")
+                try:
                     cid = str(b["id"])[:40]
                     with lock:
                         chars = load_sim_chars_strict()          # 読めないときは書かない(1スロットだけ書いて、ほかを消さないように)
@@ -754,7 +765,7 @@ def start_live_server(core, lock, cfg):
                                 chars[cid]["saved"] = b["saved"]
                         _write_json(SIM_CHARS_FILE, chars)
                 except (OSError, ValueError) as e:
-                    if isinstance(e, json.JSONDecodeError) or isinstance(e, OSError) or str(e).startswith("計算機"):
+                    if isinstance(e, (json.JSONDecodeError, OSError)) or str(e).startswith("計算機"):      # 読めない(ファイル側の問題)は 503・送られた中身の問題は 400
                         return self._send(503, json.dumps({"error": str(e)}), "application/json; charset=utf-8")
                     return self._send(400, "bad data", "text/plain")
                 except Exception:
@@ -1031,14 +1042,16 @@ def records_apply(core, remote, mode, dmg=False):
     # 変わらない項目と、遊んでいるキャラ・名前の分からない置き場は、持ち物の番号つきの元の記録をそのまま残す
     live = {n for n in core.currents.values() if n} | {records_sync.UNKNOWN}
     for n, e in list(merged["md"]["chars"].items()):
-        if n in core.chars and (n in live or e == local["md"]["chars"].get(n)):
+        if n in core.chars and e == local["md"]["chars"].get(n):
             merged["md"]["chars"][n] = copy.deepcopy(core.chars[n])
     for n, e in list(merged["cs"]["chars"].items()):
-        if CHARS is not None and n in CHARS.chars and (n in live or e == local["cs"]["chars"].get(n)):
+        if CHARS is not None and n in CHARS.chars and e == local["cs"]["chars"].get(n):
             merged["cs"]["chars"][n] = copy.deepcopy(CHARS.chars[n])
-    for sect, src in (("md", core.chars), ("cs", CHARS.chars if CHARS is not None else {})):
-        if records_sync.UNKNOWN in src:
-            merged[sect]["chars"][records_sync.UNKNOWN] = copy.deepcopy(src[records_sync.UNKNOWN])
+    for n in live:                    # 遊んでいるキャラと名前の分からない置き場は、預けてある記録に無くても、この PC の元の記録をそのまま残す
+        if n in core.chars:
+            merged["md"]["chars"][n] = copy.deepcopy(core.chars[n])
+        if CHARS is not None and n in CHARS.chars:
+            merged["cs"]["chars"][n] = copy.deepcopy(CHARS.chars[n])
     if records_sync.prepare(merged) == local:
         return {"changed": False}
     old_md, old_cs = copy.deepcopy(core.snapshot()), (copy.deepcopy(CHARS.snapshot()) if CHARS is not None else None)
@@ -1142,7 +1155,7 @@ def load_shared_links():
     return {"v": -1, "links": {}, "t": 0}
 
 
-def refresh_shared_links(force=False):
+def refresh_shared_links(force=False, lock=None):
     """配布元から承認ずみの表を取る(1日1回。変わっていなければ何もしない)。返り値 = 状態の文"""
     if LIC is None:
         return "利用キーの機能が使えません"
@@ -1159,7 +1172,11 @@ def refresh_shared_links(force=False):
             d["v"], d["links"] = r["v"], r["links"]
             print("[共有の結びつけ] 更新しました: {}件(版 {})".format(len(d["links"]), d["v"]))
         _write_json(SHARED_LINKS_FILE, d)
-        apply_shared_links(d)
+        if lock is not None:                       # 装備セットを書きかえるので、通信を読むスレッドと同時にならないよう、データの鍵を取る
+            with lock:
+                apply_shared_links(d)
+        else:
+            apply_shared_links(d)
         return "更新しました" if r is not None else "変わりありません"
 
 
@@ -1170,6 +1187,15 @@ def apply_shared_links(d=None):
             CHARS.set_shared_links((d or load_shared_links()).get("links") or {})
     except Exception as e:
         print("[共有の結びつけ] 反映できませんでした:", e)
+
+
+def quarantine_sim_chars():
+    """壊れて読めない 計算機のキャラ.json を、別名(壊れた_日時)に退避して、空から作り直せるようにする。退避したファイル名を返す"""
+    if not os.path.exists(SIM_CHARS_FILE):
+        return ""
+    dst = os.path.join(os.path.dirname(SIM_CHARS_FILE), "計算機のキャラ.壊れた_{}.json".format(time.strftime("%Y%m%d_%H%M%S")))
+    os.replace(SIM_CHARS_FILE, dst)
+    return os.path.basename(dst)
 
 
 def load_sim_chars_strict():
@@ -1539,13 +1565,14 @@ def main():
     if LIC is not None:
         LIC.start_background(stop)
 
-        apply_shared_links()        # 前に取ってあった表を、まず反映
+        with lock:
+            apply_shared_links()        # 前に取ってあった表を、まず反映
         def _links_loop():
             if stop.wait(60):
                 return
             while True:
                 try:
-                    refresh_shared_links()
+                    refresh_shared_links(lock=lock)
                 except Exception as e:
                     print("[共有の結びつけ] 取れませんでした:", e)
                 if stop.wait(6 * 3600):

@@ -663,8 +663,13 @@ class CharCore(object):
             if str(iid).isdigit() and isinstance(nm, str) and nm:
                 rev.setdefault(self._norm_name(re.sub(r"\s*[(（]\+\d+以上[)）]\s*$", "", nm)), int(iid))
         if rev != self.shared_names:
+            old = self.shared_names
             self.shared_names = rev
-            self.resolve_sim_all()
+            try:
+                self.resolve_sim_all()
+            except Exception:
+                self.shared_names = old          # 途中で失敗したら、次の更新でやり直せるように元に戻す
+                raise
 
     def _resolve_sim(self, s):
         n = 0

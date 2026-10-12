@@ -1551,8 +1551,15 @@ async function simcLoad() {
   SIMC.chars = await fetch("/api/simchars").then((r) => (r.ok ? r.json() : Promise.reject(new Error("read")))).then((j) => { SIMC.loadErr = ""; return j; }).catch(() => { SIMC.loadErr = SIMC.chars ? "" : "計算機のスロットを読めませんでした。"; return SIMC.chars || null; });      // 読めなかったとき、空の一覧に見せない(新しく作って、ほかを消さないように)
   if (SIMC.chars && !SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || "";
 }
-const simcLoadingHtml = () => SIMC.loadErr ? `<div class="panel empty">${esc(SIMC.loadErr)} <button class="ghost" id="simcretry">もう一度読み込む</button></div>` : `<div class="panel empty"><span class="spin">読み込み中…</span></div>`;
-function simcLoadingBind() { const b = $("#simcretry"); if (b) b.onclick = () => { SIMC.loadErr = ""; render(); }; }
+const simcLoadingHtml = () => SIMC.loadErr ? `<div class="panel empty">${esc(SIMC.loadErr)} <button class="ghost" id="simcretry">もう一度読み込む</button> <button class="ghost" id="simcfix" title="読めないファイルを、別の名前にして残し、空のスロットから作り直します">壊れたファイルを別名にして作り直す</button></div>` : `<div class="panel empty"><span class="spin">読み込み中…</span></div>`;
+function simcLoadingBind() {
+  const b = $("#simcretry"); if (b) b.onclick = () => { SIMC.loadErr = ""; render(); };
+  const f = $("#simcfix"); if (f) f.onclick = async () => {
+    if (!confirm("計算機のスロットのファイル（計算機のキャラ.json）が読めません。\n\n別の名前（計算機のキャラ.壊れた_日時.json）にして残し、空のスロットから作り直します。よろしいですか?")) return;
+    try { const r = await fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ quarantine: 1 }) }); if (!r.ok) throw new Error("HTTP " + r.status); SIMC.loadErr = ""; SIMC.chars = null; render(); }
+    catch (e) { SIMC.loadErr = "別名にできませんでした: " + e.message; render(); }
+  };
+}
 const simcClone = (x) => JSON.parse(JSON.stringify(x));
 // いまログインしているキャラ(複数つながっているときは、いちばん最近動きがあったもの)。「いま着ている装備」は、このキャラの装備だけを指す
 // いまログインしているキャラ。キャラ選択画面に戻っている間は空 → 「現在のキャラ」のボタンは、最後にログインしていたキャラ(装備・職業を覚えている中で、いちばん新しいもの)で使えるようにする
@@ -1563,7 +1570,7 @@ const simcStripSb = (m) => { if (!m || !m.foxSb) return m; const c = Object.assi
 const simcDirtySlot = (c) => !!c && !!c.saved && JSON.stringify(simcStripSb(c.model)) !== JSON.stringify(simcStripSb(c.saved));
 function simcSave() {                     // 少しまとめてから保存
   clearTimeout(SIMC.saveT);
-  SIMC.saveT = setTimeout(() => { SIMC.saveT = null; const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }); }, 600);
+  SIMC.saveT = setTimeout(() => { SIMC.saveT = null; const c = simcCur(); if (c) fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: SIMC.cur, name: c.name, model: c.model, saved: c.saved }) }).then((r) => { if (!r.ok) SIMC.msg = "計算機のスロットを保存できませんでした（ファイルが読めない状態です）。"; }).catch(() => {}); }, 600);
 }
 function simcSelect(id) { SIMC.cur = id; store.set("md_simchar", id); SIMC.res = null; }
 const simcPut = (id) => fetch("/api/simchars", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, name: SIMC.chars[id].name, model: SIMC.chars[id].model, saved: SIMC.chars[id].saved || SIMC.chars[id].model }) });
@@ -3540,14 +3547,15 @@ async function simcRegister(shadow, take) {     // いまの計算機の装備�
 const SIMC_FOXBITS = [[256, 2], [512, 3], [1, 4], [16, 6], [2, 0], [32, 5], [4, 7], [64, 8], [8, 9], [128, 10]];     // [Fox の場所のビット, ラトリオの場所]
 const SIMC_FOXSH = [[65536, 19], [131072, 14], [262144, 15], [524288, 21], [1048576, 22], [2097152, 23]];
 function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して。候補の名前の先頭の「【習】」などは外して比べる(「【習】デイヴィッドシールド」= ゲームの「デイヴィッドシールド」)。【】の無い候補があれば、そちらを先に選ぶ
-  const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = ratLinkOf(gameId);
+  const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = (SETTINGS.ratLinks || {})[gameId], shared = (SHARED.links || {})[gameId];
   if (link) { const o = opts.find((x) => nm(x) === link); if (o) return o; }
+  const viaShared = () => { const o = shared && opts.find((x) => nm(x) === shared); return o || null; };      // 共有の表は、名前で見つからなかったときだけ
   const n = ratNorm(name);
-  if (!n || /^ID\d+$/.test(n)) return null;
+  if (!n || /^ID\d+$/.test(n)) return viaShared();
   const bare = n.replace(/^\[[^\]]*\]/, ""), base = (t) => ratNorm(String(t).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "").replace(/\[\d\]$/, ""));
   const real = opts.filter((o) => o.v), pick = (f) => real.find((o) => !/^【/.test(String(nm(o) ?? "")) && f(o)) || real.find(f);
   return pick((o) => ratNorm(nmS(o)) === n) || pick((o) => base(nmS(o)) === n) || (bare !== n ? pick((o) => base(nmS(o)) === bare) : null)
-    || (isCard ? pick((o) => base(nmS(o)) === n.replace(/カード$/, "")) : null) || null;
+    || (isCard ? pick((o) => base(nmS(o)) === n.replace(/カード$/, "")) : null) || viaShared();
 }
 function simcWearCards(m, region, it) {   // Fox は空の枠を詰めて覚えているので、「その名前が候補にある、まだ空いている枠」に入れる
   const rows = [], opts = simcCardOpts(region, m.equip[region]), cs = SIMC_CARD[region], free = [0, 1, 2, 3].filter((i) => opts[i].length > 1);
@@ -4254,15 +4262,16 @@ function ratNone(sel) {                    // 「なし」の選択肢(検索つ
 }
 function ratFindOption(sel, name, gameId, isCard) {   // 選択肢を探す: 結びつけ → 同じ名前 → [3] などを外して同じ → カードは「カード」を外して
   if (!sel) return null;
-  const opts = [...sel.options], link = ratLinkOf(gameId);
+  const opts = [...sel.options], link = (SETTINGS.ratLinks || {})[gameId], shared = (SHARED.links || {})[gameId];
   if (link) { const o = opts.find((x) => x.text === link); if (o) return o; }
+  const viaShared = () => (shared && opts.find((x) => x.text === shared)) || null;      // 共有の表は、名前で見つからなかったときだけ
   const n = ratNorm(name);
-  if (!n || /^ID\d+$/.test(n)) return null;
+  if (!n || /^ID\d+$/.test(n)) return viaShared();
   const bare = n.replace(/^\[[^\]]*\]/, "");        // 先頭の「[シャドウ]」などを外した名前(ラトリオ側に付いていないものがある)
   const base = (t) => ratNorm(String(t).replace(/\s*[(（]\+\d+以上[)）]\s*$/, "").replace(/\[\d\]$/, ""));   // 「 (+10以上)」「[3]」を外した名前
   return opts.find((o) => ratNorm(o.text) === n) || opts.find((o) => base(o.text) === n)
     || (bare !== n ? opts.find((o) => base(o.text) === bare) : null)
-    || (isCard ? opts.find((o) => base(o.text) === n.replace(/カード$/, "")) : null) || null;
+    || (isCard ? opts.find((o) => base(o.text) === n.replace(/カード$/, "")) : null) || viaShared();
 }
 function ratFillBar(chars) {
   const EQ = DATA.equip || {}, E = EQ.chars || {};
@@ -5398,7 +5407,7 @@ function showLicense() {
 // ---------------- 利用キー(初回だけ入力。サーバーで確認。停止・台数超過もここに出る) ----------------
 // ---------------- 共有の結びつけ(配布元が承認した 番号 → ラトリオの名前。自分の結びつけが優先) ----------------
 let SHARED = { links: {}, v: -1, t: 0 };
-const ratLinkOf = (id) => (SETTINGS.ratLinks || {})[id] ?? (SHARED.links || {})[id];
+const ratLinkOf = (id) => (SETTINGS.ratLinks || {})[id] ?? (SHARED.links || {})[id];      // (計算機の装備の引き当てでは使わない: 自分の結びつけ → 名前の一致 → 共有の表、の順にするため。simcFind・ratFindOption を見る)
 async function sharedLoad() {
   try { const j = await (await fetch("/api/links")).json(); if (j && j.links) SHARED = j; } catch (e) {}
 }
@@ -5613,7 +5622,7 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
       const loc = await syncCollect();
       let rem, merged;
       if (r.empty) { rem = null; merged = loc; }
-      else if (r.same) { rem = base; merged = (loc.ui === undefined && base && base.ui !== undefined) ? { ...loc, ui: base.ui } : loc; }      // 画面の記憶を揃えない PC は、預けてある ui をそのまま残す
+      else if (r.same) { rem = base; merged = { ...loc }; if (base) ["settings", "simchars", "ui"].forEach((k) => { if (loc[k] === undefined && base[k] !== undefined) merged[k] = base[k]; }); }      // オフの項目は、預けてある分をそのまま残す
       else {
         rem = await syncDec(r.data);
         merged = (!base && opt && opt.take) ? rem : syncMergePayload(base, loc, rem);
@@ -5627,7 +5636,8 @@ async function syncNow(opt) {          // opt.take = 初回だけ「ほかの PC
         if (p.ok === false) continue;           // 先に別の PC が書いた → もう一度(取り込んで混ぜ直す)
         newVer = p.v;
       }
-      store.set("md_syncver", String(newVer)); store.set("md_syncbase", JSON.stringify(merged));      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
+      try { localStorage.setItem("md_syncbase", JSON.stringify(merged)); localStorage.setItem("md_syncver", String(newVer)); }      // 預けた内容(混ぜた結果)を「前回の内容」として覚える
+      catch (e) { store.del("md_syncbase"); store.del("md_syncver"); throw new Error("前回の同期の内容を、この画面に保存できませんでした（保存の容量がいっぱいです）。計算機のスロットを整理するか、同期の項目を減らしてください"); }
       SYNC.t = Date.now(); store.set("md_synct", String(SYNC.t)); SYNC.msg = changed ? "ほかの PC の変更を取り込みました。" : "同期しました。"; SYNC.badPw = false; done = true;
     }
     if (!done && !SYNC.hold) SYNC.msg = "混み合っていて同期できませんでした。もう一度試してください。";
@@ -5746,10 +5756,11 @@ async function recPull(mode) {
     const useDmg = recDmgOn() && !!d.records.dmg;
     const pv = await syncRecordsApi({ op: "preview", remote: d.records, dmg: useDmg });
     let text;
-    if (mode === "replace") text = "この PC の記録（キャラ " + pv.local.chars + "人・装備セット " + pv.local.sets + "個）を、預けてある記録（" + recWhen(d.t) + "・キャラ " + pv.remote.chars + "人・装備セット " + pv.remote.sets + "個）で置きかえます。\n\nこの PC だけにあるキャラ・装備セットは消えます（元の記録は「同期前のバックアップ」フォルダに残ります）。";
+    if (mode === "replace") text = "この PC の記録（キャラ " + pv.local.chars + "人・装備セット " + pv.local.sets + "個）を、預けてある記録（" + recWhen(d.t) + "・キャラ " + pv.remote.chars + "人・装備セット " + pv.remote.sets + "個）で置きかえます。\n\nこの PC だけにあるキャラ・装備セットは消えます（元の記録は「同期前のバックアップ」フォルダに残ります）。この PC だけで作った装備セットを着せていた計算機のスロットは、装備セットとの紐づけが外れることがあります（装備そのものは残ります）。";
     else text = "預けてある記録（" + recWhen(d.t) + "）から、この PC に無いものを足します。\n\n足されるキャラ: " + (pv.n_add_chars ? pv.n_add_chars + "人（" + pv.add_chars.map((n) => n.replace(/@.*$/, "")).slice(0, 8).join("、") + (pv.n_add_chars > 8 ? "…" : "") + "）" : "なし") + "\nこの PC にある記録は変わりません。";
     if (recDmgOn() && !d.records.dmg) text += "\n\n※ 預けてある記録に被ダメの記録は入っていません（預ける側でも「被ダメの記録も含める」をオンにして預け直してください）。";
     if (useDmg) text += mode === "replace" ? "\n\n被ダメの記録（キャラ " + pv.dmg_remote_chars + "人分）も、預けてある記録で置きかえます。この PC の被ダメの記録は、バックアップに残ります。" : "\n\n被ダメの記録は、この PC に無いキャラの分（" + pv.dmg_add_chars + "人）だけ足します。";
+    if (mode === "replace" && pv.remote.chars < pv.local.chars) text = "⚠ 預けてある記録のほうが、キャラが少ないです（この PC " + pv.local.chars + "人 → 預けてある記録 " + pv.remote.chars + "人）。置きかえると、差の分のキャラの記録が消えます。\n\n" + text;
     if (pv.live && pv.live.length) text += "\n\n※ いまログイン中のキャラ（" + pv.live.map((n) => n.replace(/@.*$/, "")).join("、") + "）の記録は置きかえません。ゲームを終了している場合は、そのまま進めて大丈夫です。";
     if (!confirm(text + "\n\nよろしいですか?")) { recMsg(""); return; }
     const a = await syncRecordsApi({ op: "apply", mode, remote: d.records, dmg: useDmg });
