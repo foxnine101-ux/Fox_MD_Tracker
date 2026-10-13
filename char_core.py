@@ -28,7 +28,9 @@ import os
 import struct
 import time
 
-WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E}
+WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA}
+STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x0B41, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
+WANT_OPS |= set(STORAGE_OPS)
 # スキルの一覧(覚えているスキルと Lv)。jRO のリプレイで確かめた形:
 #   0x0B32 [op2][長さ2] + 15バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 上げられる1 Lv(2)2
 #   0x010F [op2][長さ2] + 37バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 名前24 上げられる1
@@ -218,6 +220,7 @@ class CharCore(object):
         self.sim_links = {}    # 計算機(ラトリオ)の名前 -> ゲームのアイテム番号。手で結びつけたもの(0 = わざと結びつけない)
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
+        self._diag = {}        # 倉庫まわりの通信(確認用): op -> 受け取った回数
         self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
 
     # ---------- 外から呼ぶ ----------
@@ -539,7 +542,7 @@ class CharCore(object):
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                            "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")),
-                           "now": [self._item_view(it) for it in self._worn(ch)], "status": self._status_view(name, ch),
+                           "now": [self._item_view(it) for it in self._worn(ch)], "carry": self.carry_view(ch), "status": self._status_view(name, ch),
                            "skills": ch.get("skills") or {}, "updated": ch.get("updated") or 0}
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
 
@@ -839,6 +842,15 @@ class CharCore(object):
                 ch.setdefault("skills", {})[str(skid)] = lv
                 self.changed = True
 
+        elif op == 0x07FA and len(pkt) >= 8:             # 持ち物から消えた [理由2][番号2][個数2]。装備が消えたなら、倉庫などに入れた(持ったままではなくなった)
+            reason, idx, _amt = struct.unpack_from("<HHH", pkt, 2)
+            self._gone(idx, reason)
+
+        elif op in STORAGE_OPS:                          # 倉庫まわりの通信(本物の形の確認用。最初の数回だけ中身を記録する)
+            n = self._diag[op] = self._diag.get(op, 0) + 1
+            if n <= 4:
+                self.log("[倉庫] 通信 {:04X} {}バイト({}回目): {}".format(op, len(pkt), n, pkt[:48].hex()))
+
         elif op == 0x0999 and len(pkt) >= 11:            # 装備した(結果 0 = 成功)
             idx, loc = struct.unpack_from("<HI", pkt, 2)
             self.log("[装備] {} 装備した 結果={} 持ち物の番号={} 場所={}".format(self._name(), pkt[10], idx, loc))
@@ -883,6 +895,34 @@ class CharCore(object):
             ch["updated"] = int(time.time())
             self.changed = True
             self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
+
+    def _gone(self, idx, reason):
+        """持ち物から消えた(0x07FA)。装備(0B39 の一覧にあるもの)が消えたなら「持ったまま」から外し、記録に残す(倉庫に入れた・売った・使った など。reason は通信の値のまま)。"""
+        if getattr(self, "_key", None) not in self._synced:       # 一覧を受け取っていない接続は、持ち物の番号が当てにならない
+            return
+        ch = self._ch()
+        eq, bag = ch.get("equips") or [], ch.get("bag") or []
+        item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
+        if item is None:                                          # 装備ではない(薬・素材など)
+            return
+        for lst in (eq, bag):
+            if item in lst:
+                lst.remove(item)
+        now = int(time.time())
+        ev = ch.setdefault("gone", [])
+        ev.append({"t": now, "itemId": item.get("itemId"), "name": self._item_name(item.get("itemId")), "refine": item.get("refine", 0), "reason": reason})
+        del ev[:-30]
+        ch["updated"] = now
+        self.changed = True
+        self.log("[装備] {} が持ち物から外れました: {} +{} (理由={}・持ったままの装備 残り {}点)".format(
+            self._name(), self._item_name(item.get("itemId")), item.get("refine", 0), reason, len(self._worn(ch)) + len(bag)))
+
+    def carry_view(self, ch):
+        """倉庫に入れていない(持ったままの)装備。着ている装備(衣装は除く)+ 着ていない持ち物の装備。"""
+        worn, bag = self._worn(ch), list(ch.get("bag") or [])
+        items = [self._item_view(it) for it in worn] + [dict(self._item_view(it), slot="持ち物（着ていない）") for it in bag]
+        return {"known": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")), "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
+                "gone": (ch.get("gone") or [])[-5:]}
 
     def _wear(self, idx, loc, on):
         """装備した/外した。0x0B39 の一覧(equips と bag)の中で入れかえる。"""

@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.12"
+VERSION = "2.58.13"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -976,7 +976,7 @@ class _Scanner(gp.StreamScanner):
                 return                               # 記録しないサーバー(露店用など)
         if len(pkt) >= 2:
             op = pkt[0] | (pkt[1] << 8)
-            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB, 0x0B39, 0x0999, 0x099A):   # 被ダメ・装備関係も数える
+            if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB, 0x0B39, 0x0999, 0x099A, 0x07FA, 0x00F4, 0x01C4, 0x0A0A, 0x0B41, 0x00F6, 0x00F2):   # 被ダメ・装備・倉庫関係も数える
                 STATS["ops"][op] = STATS["ops"].get(op, 0) + 1
         with self.lock:
             try:
