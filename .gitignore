@@ -39,3 +39,6 @@ GitHubトークン.txt
 # Divine Pride の API キー(開発者の手元だけ)
 api.txt
 tools/dp_cache/
+
+# 利用者(開発者)本人のデータを置いた作業用フォルダ。鍵・記録・公式の画像が入るので、絶対にコミットしない
+/Fox_MD_Tracker/
