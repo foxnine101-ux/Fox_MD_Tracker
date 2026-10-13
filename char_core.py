@@ -238,7 +238,7 @@ class CharCore(object):
             if self.changed:
                 name = self._name()
                 ch = self.chars.get(name)
-                if ch is not None and name != UNKNOWN and ch.get("equips"):
+                if ch is not None and name != UNKNOWN and ch.get("equips") is not None:      # 空(全部外した)でも、いまのセットを更新する
                     self._update_set(name, ch)
         except (struct.error, IndexError):
             pass
@@ -922,6 +922,7 @@ class CharCore(object):
         worn, bag = self._worn(ch), list(ch.get("bag") or [])
         items = [self._item_view(it) for it in worn] + [dict(self._item_view(it), slot="持ち物（着ていない）") for it in bag]
         return {"known": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")), "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
+                "set": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                 "gone": (ch.get("gone") or [])[-5:]}
 
     def _wear(self, idx, loc, on):

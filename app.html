@@ -64,6 +64,7 @@
   td.char { cursor: pointer; }
   .carry { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 8px; font-size: 11px; font-weight: 700; background: #b45309; color: #fff; cursor: pointer; vertical-align: baseline; }
   .carry.stale { opacity: .55; }
+  .carry.set { background: none; padding: 0; } .carry .ctag { display: inline-block; min-width: 14px; padding: 0 4px; margin-right: 2px; border-radius: 4px; color: #fff; text-align: center; }
   .carry-box { margin-top: 8px; } .carry-box h3 { margin: 10px 0 2px; font-size: 13px; }
   td.char .ch-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 16px; line-height: 1.2; }
   .stag { color: #fff !important; font-weight: 700; }
@@ -1288,7 +1289,11 @@ const carryOf = (c) => { const e = ((DATA.equip || {}).chars || {})[c], k = e &&
 function carryChip(c, always) {         // MD の表のキャラの横。いまログインしているキャラは、ふつうは装備を着ているので出さない(always で出す)
   const k = carryOf(c); if (!k || !k.n || (!always && (DATA.now_chars || []).includes(c))) return "";
   const names = k.items.slice(0, 6).map((it) => it.name).join("、") + (k.n > 6 ? ` ほか ${k.n - 6} 点` : "");
-  return `<span class="carry${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）: ${names}${k.stale ? "。このログインでは装備の一覧が読めていないので、古い記録です" : ""}。クリックでキャラ詳細`)}">🎒${k.n}</span>`;
+  // 着ている装備が記号つきの装備セット(A・B…)なら、その記号(色つき)。そうでなければ服のアイコン(個数はマウスを置くと出る)
+  const EQ = DATA.equip || {}, st = k.set && (EQ.sets || {})[k.set], sh = k.shadow && (EQ.shadows || {})[k.shadow];
+  const tags = [st && st.tag ? st : null, sh && sh.tag ? sh : null].filter(Boolean);
+  const label = tags.length ? tags.map((x) => `<span class="ctag" style="background:${tagColor(x)}">${esc(x.tag)}</span>`).join("") : "👕";
+  return `<span class="carry${tags.length ? " set" : ""}${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）${tags.length ? "。着ているのは装備スロット " + tags.map((x) => x.tag).join("・") : ""}: ${names}${k.stale ? "。このログインでは装備の一覧が読めていないので、古い記録です" : ""}。クリックでキャラ詳細`)}">${label}</span>`;
 }
 function carryHtml(c) {                 // キャラ詳細: 倉庫に入れていない(持ったままの)装備
   const k = carryOf(c);
