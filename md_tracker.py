@@ -22,6 +22,12 @@ import netutil
 
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 sys.path.insert(0, HERE)
+# 記録・設定・ラトリオなど「利用者のデータ」を置く場所。ふつうは exe(またはこのファイル)と同じ場所。
+# 環境変数 FOX_MD_HOME があればそこ(開発用: ソースから動かしても、リポジトリを汚さず、別の場所のデータで動く)。
+# 同梱の部品(id2name.json など)・アップデートの入れ替えは HERE のまま。
+DATA_HOME = os.path.abspath(os.environ.get("FOX_MD_HOME") or HERE)
+if DATA_HOME != HERE:
+    os.makedirs(DATA_HOME, exist_ok=True)
 
 import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと共通)
 import md_core
@@ -39,33 +45,33 @@ try:
 except Exception:
     DEV = False
 EDITION = "開発版" if DEV else "公開版"
-CONFIG_FILE = os.path.join(HERE, "設定.json")
-STATE_FILE = os.path.join(HERE, "md_state.json")
-CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
-DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
-OFFICIAL_FILE = os.path.join(HERE, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
-SANDBAG_FILE = os.path.join(HERE, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
+CONFIG_FILE = os.path.join(DATA_HOME, "設定.json")
+STATE_FILE = os.path.join(DATA_HOME, "md_state.json")
+CHAR_STATE_FILE = os.path.join(DATA_HOME, "char_state.json")
+DMG_FILE = os.path.join(DATA_HOME, "被ダメ記録.json")
+OFFICIAL_FILE = os.path.join(DATA_HOME, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
+SANDBAG_FILE = os.path.join(DATA_HOME, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
 SANDBAG_MAX = 200
-SHARED_LINKS_FILE = os.path.join(HERE, "共有の結びつけ.json")      # 配布元が承認した、ゲームのアイテム番号 → ラトリオの名前 {v, links, t}
-SIM_CHARS_FILE = os.path.join(HERE, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
-ITEM_FIX_FILE = os.path.join(HERE, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
-SKILL_FIX_FILE = os.path.join(HERE, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
-DMG_RAW_FILE = os.path.join(HERE, "被ダメ_確認用データ.json")   # 通信そのもの(形を確かめる用)
-NAMES_CACHE = os.path.join(HERE, "quest_names_cache.json")
+SHARED_LINKS_FILE = os.path.join(DATA_HOME, "共有の結びつけ.json")      # 配布元が承認した、ゲームのアイテム番号 → ラトリオの名前 {v, links, t}
+SIM_CHARS_FILE = os.path.join(DATA_HOME, "計算機のキャラ.json")       # 計算機(キャラ・装備のシミュ)で作ったキャラ {ID: {name, model, updated}}
+ITEM_FIX_FILE = os.path.join(DATA_HOME, "アイテム名の手直し.json")     # 手で付けた(スクショから読んだ)アイテム名 {"番号": "名前"}
+SKILL_FIX_FILE = os.path.join(DATA_HOME, "スキル名の手直し.json")     # 手で付けたスキル名 {"番号": "名前"}
+DMG_RAW_FILE = os.path.join(DATA_HOME, "被ダメ_確認用データ.json")   # 通信そのもの(形を確かめる用)
+NAMES_CACHE = os.path.join(DATA_HOME, "quest_names_cache.json")
 LOCK_FILE = os.path.join(os.environ.get("TEMP", "/tmp"), "md_tracker.lock")
-LOG_FILE = os.path.join(HERE, "動作ログ.txt")
+LOG_FILE = os.path.join(DATA_HOME, "動作ログ.txt")
 
 _print = print
 
 
 GUI = sys.stdout is None or "--tray" in sys.argv   # 黒い画面なし(タスクトレイ常駐)
 if sys.stdout is None:   # exe(--noconsole)だと出力先が無い → 部品のエラー表示で落ちないように
-    sys.stdout = sys.stderr = open(os.path.join(HERE, "エラーログ.txt"), "a", encoding="utf-8", buffering=1)
+    sys.stdout = sys.stderr = open(os.path.join(DATA_HOME, "エラーログ.txt"), "a", encoding="utf-8", buffering=1)
 TRAY = None
 SHOW_HOOK = None   # 専用の窓を前に出す関数(窓があるとき)
 UPD = None         # updater.Updater(アップデート)
 CALC_DATA = {}     # calc_data.json(属性の相性表など。ラトリオのデータから tools/make_calc_data.py で作る)
-RATORIO = ratorio_core.Ratorio(os.path.join(HERE, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
+RATORIO = ratorio_core.Ratorio(os.path.join(DATA_HOME, "ラトリオ"), log=print)   # 計算機(ROラトリオHub)。/ratorio/… で配る
 QUIT_HOOK = None   # アプリを終える関数(アップデートの入れ替え用)
 LIC = None        # license_core.License(利用キー)
 QUIT_ALL = None    # 画面の「アプリを終了」から呼ぶ(トレイの「終了」と同じ)
@@ -76,7 +82,7 @@ _log_n = 0
 
 
 LOG_KEEP = False           # True のとき(自分用のトグル): 回したログを捨てずに 動作ログ保存/ に日付つきで取っておく
-LOG_KEEP_DIR = os.path.join(HERE, "動作ログ保存")
+LOG_KEEP_DIR = os.path.join(DATA_HOME, "動作ログ保存")
 
 
 def _log_rotate():
@@ -251,7 +257,7 @@ def save_servers():
         print("[サーバー] 保存できませんでした:", e)
 
 
-ACCOUNTS_FILE = os.path.join(HERE, "accounts.json")
+ACCOUNTS_FILE = os.path.join(DATA_HOME, "accounts.json")
 
 
 def load_accounts(core):
@@ -271,7 +277,7 @@ def save_accounts(core):
         pass
 
 
-NYAR_FIX_FILE = os.path.join(HERE, "nyar_fix.json")
+NYAR_FIX_FILE = os.path.join(DATA_HOME, "nyar_fix.json")
 
 
 def apply_nyar_fix(core):
@@ -346,8 +352,8 @@ def build_payload(core, history=100):
 #  (この PC の中だけ。ネットには出ない・Netlifyのクレジットも使わない)
 # ---------------------------------------------------------------
 LIVE_PORT = 8788
-SERVERS_FILE = os.path.join(HERE, "サーバー.json")   # 見たことのあるサーバー(キャラ選択サーバーの IP)と、そこで遊んだキャラ
-VIEW_SETTINGS_FILE = os.path.join(HERE, "表示の設定.json")   # ローカル表示の設定(MDの分類・キャラの並び など)
+SERVERS_FILE = os.path.join(DATA_HOME, "サーバー.json")   # 見たことのあるサーバー(キャラ選択サーバーの IP)と、そこで遊んだキャラ
+VIEW_SETTINGS_FILE = os.path.join(DATA_HOME, "表示の設定.json")   # ローカル表示の設定(MDの分類・キャラの並び など)
 
 
 def resource(name):
@@ -1040,7 +1046,7 @@ def records_export(core, dmg=False):
 def records_backup():
     """記録を書きかえる前に、いまのファイルを「同期前のバックアップ」に写す(新しい7つだけ残す)"""
     import shutil
-    root = os.path.join(HERE, "同期前のバックアップ")
+    root = os.path.join(DATA_HOME, "同期前のバックアップ")
     stamp, n = time.strftime("%Y%m%d_%H%M%S"), 0
     dst = os.path.join(root, stamp)
     while os.path.exists(dst):                     # 同じ秒にもう一度作るときは、上書きせず番号をつける
@@ -1573,7 +1579,7 @@ def main():
     global LIC
     try:
         import license_core
-        LIC = license_core.License(HERE, cfg.get("利用キー確認先") or None, log=print)
+        LIC = license_core.License(DATA_HOME, cfg.get("利用キー確認先") or None, log=print)
     except Exception as e:
         print("[利用キー] 使えません:", e)
         LIC = None
@@ -1599,7 +1605,7 @@ def main():
         print(e)
         fail("通信の読み取りを始められませんでした。\nNpcap が入っているか確認してね (https://npcap.com/)\n\n{}".format(e))
         return
-    print("[起動] v{} データの置き場所: {} / 作業フォルダ: {} / exe: {}".format(VERSION, HERE, os.getcwd(), sys.executable))     # 「ファイルがデスクトップに出る」などの調査用
+    print("[起動] v{} データの置き場所: {} / 作業フォルダ: {} / exe: {}".format(VERSION, DATA_HOME, os.getcwd(), sys.executable))     # 「ファイルがデスクトップに出る」などの調査用
     print("通信を読んでいます。ROでログイン・マップ移動するとCTが記録されます。")
     local_only = upload(cfg, build_payload(core)) is None
     if local_only:
@@ -1636,7 +1642,7 @@ def main():
             try:
                 import appwin
                 if appwin.AppWindow.available():
-                    app = appwin.AppWindow(local_url(), HERE, show=not args.hidden, log=print,
+                    app = appwin.AppWindow(local_url(), DATA_HOME, show=not args.hidden, log=print,
                                            on_hide=lambda: TRAY and TRAY.notify("右下のアイコンに隠れました。ダブルクリックでまた開けます。終了は右クリックから。", "Fox_MD_Tracker"))
                 else:
                     print("[窓] 専用の窓の部品(pywebview)が使えないので、画面はブラウザで開きます。理由:", getattr(appwin, "IMPORT_ERR", "") or "不明")
@@ -1695,7 +1701,7 @@ def main():
                     msg = {"none": "最新版です (v{})".format(VERSION), "available": "新しい版 v{} があります".format((st.get("latest") or {}).get("version"))}.get(st["state"], st.get("error") or "")
                     TRAY.notify(msg, "Fox_MD_Tracker")
             TRAY = tray.Tray(resource("tray.png") or resource("icon.ico"), local_url(), (local_url() + "live") if DEV else "",
-                             ((cfg.get("ウェブのURL") or "").strip() if web_on(cfg) else ""), LOG_FILE, HERE,
+                             ((cfg.get("ウェブのURL") or "").strip() if web_on(cfg) else ""), LOG_FILE, DATA_HOME,
                              on_quit=quit_all, status=status, open_main=(app.show if app else None),
                              update=(upd_text, upd_act),
                              extras=[("動作ログを長期保存(自分用)", lambda: set_log_keep(not LOG_KEEP), lambda: LOG_KEEP)])
