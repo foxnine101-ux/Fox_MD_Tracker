@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.9"
+VERSION = "2.58.10"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -160,7 +160,27 @@ def find_ro_dir(cfg):
     return None
 
 
+_MUTEX = None
+
+
 def single_instance():
+    """二重起動の防止。Windows は名前つきの排他(mutex)を使う: プロセスが終われば OS が自動で解放するので、
+    強制終了・再起動のあとに「番号を書いたファイル」が残って、別のソフトが同じ番号を使い回していても、起動を断らない。"""
+    global _MUTEX
+    if os.name == "nt":
+        try:
+            import ctypes
+            k = ctypes.WinDLL("kernel32", use_last_error=True)
+            k.CreateMutexW.restype = ctypes.c_void_p
+            k.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+            h = k.CreateMutexW(None, False, "Local\\Fox_MD_Tracker_single_instance")
+            if h:
+                if ctypes.get_last_error() == 183:      # ERROR_ALREADY_EXISTS = 別の Fox_MD_Tracker が動いている
+                    return False
+                _MUTEX = h                                  # 持ち続ける(プロセスの終わりで解放される)
+                return True
+        except Exception as e:
+            print("二重起動の確認(mutex)に失敗。番号ファイルで確認します:", e)
     try:
         if os.path.exists(LOCK_FILE):
             with open(LOCK_FILE) as f:
