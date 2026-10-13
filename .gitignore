@@ -38,3 +38,4 @@ GitHubトークン.txt
 
 # Divine Pride の API キー(開発者の手元だけ)
 api.txt
+tools/dp_cache/
