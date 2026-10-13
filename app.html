@@ -3620,6 +3620,7 @@ const SIMC_FOXSH = [[65536, 19], [131072, 14], [262144, 15], [524288, 21], [1048
 function simcFind(opts, name, gameId, isCard) {   // 候補を探す: 手で結びつけたもの → 同じ名前 → [3] や (+10以上) を外して同じ → 先頭の [シャドウ] を外して → カードは「カード」を外して。候補の名前の先頭の「【習】」などは外して比べる(「【習】デイヴィッドシールド」= ゲームの「デイヴィッドシールド」)。【】の無い候補があれば、そちらを先に選ぶ
   const nm = (o) => o.n || o.t, nmS = (o) => String(nm(o) ?? "").replace(/^【[^】]*】\s*/, ""), link = (SETTINGS.ratLinks || {})[gameId], shared = (SHARED.links || {})[gameId];
   if (link) { const o = opts.find((x) => nm(x) === link); if (o) return o; }
+  const tv = itemLinkOf(gameId, isCard); if (tv) { const o = opts.find((x) => x.v === tv); if (o) return o; }
   const viaShared = () => { const o = shared && opts.find((x) => nm(x) === shared); return o || null; };      // 共有の表は、名前で見つからなかったときだけ
   const n = ratNorm(name);
   if (!n || /^ID\d+$/.test(n)) return viaShared();
@@ -4335,6 +4336,7 @@ function ratFindOption(sel, name, gameId, isCard) {   // 選択肢を探す: 結
   if (!sel) return null;
   const opts = [...sel.options], link = (SETTINGS.ratLinks || {})[gameId], shared = (SHARED.links || {})[gameId];
   if (link) { const o = opts.find((x) => x.text === link); if (o) return o; }
+  const tv = itemLinkOf(gameId, isCard); if (tv) { const o = opts.find((x) => +x.value === tv); if (o) return o; }
   const viaShared = () => (shared && opts.find((x) => x.text === shared)) || null;      // 共有の表は、名前で見つからなかったときだけ
   const n = ratNorm(name);
   if (!n || /^ID\d+$/.test(n)) return viaShared();
@@ -5577,6 +5579,10 @@ function showLicense() {
 // ---------------- 利用キー(初回だけ入力。サーバーで確認。停止・台数超過もここに出る) ----------------
 // ---------------- 共有の結びつけ(配布元が承認した 番号 → ラトリオの名前。自分の結びつけが優先) ----------------
 let SHARED = { links: {}, v: -1, t: 0 };
+// ゲームのアイテム番号 → ラトリオの番号(item_link.json。tools/make_item_link.py が名前の照合を作るときに1回だけやった表)。実行時の名前の照合より先に引き、候補の中にあるときだけ使う
+let ITEMLINK = { i: {}, c: {} };
+fetch("/api/itemlink").then((r) => r.json()).then((d) => { if (d && d.i) ITEMLINK = d; }).catch(() => {});
+const itemLinkOf = (gameId, isCard) => (ITEMLINK[isCard ? "c" : "i"] || {})[gameId];
 const ratLinkOf = (id) => (SETTINGS.ratLinks || {})[id] ?? (SHARED.links || {})[id];      // (計算機の装備の引き当てでは使わない: 自分の結びつけ → 名前の一致 → 共有の表、の順にするため。simcFind・ratFindOption を見る)
 async function sharedLoad() {
   try { const j = await (await fetch("/api/links")).json(); if (j && j.links) SHARED = j; } catch (e) {}

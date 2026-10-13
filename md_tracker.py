@@ -33,7 +33,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.11"
+VERSION = "2.58.12"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -490,6 +490,12 @@ def start_live_server(core, lock, cfg):
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
                 return self._send(200, json.dumps(names, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/itemlink" and self._local_only():      # ゲームのアイテム番号 → ラトリオの番号(同梱の item_link.json)
+                try:
+                    with open(resource("item_link.json") or "", "rb") as f:
+                        return self._send(200, f.read(), "application/json; charset=utf-8", "max-age=3600")
+                except OSError:
+                    return self._send(200, b"{}", "application/json")
             if path == "/api/sandbag":            # サンドバックマンの記録(この PC に保存)
                 return self._send(200, json.dumps({"records": load_sandbag()}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
