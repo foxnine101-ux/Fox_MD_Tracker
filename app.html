@@ -1285,7 +1285,8 @@ function itemLine(it, sim) {
     + ((it.options || []).length ? `<div class="eq-opt">${it.options.map((o) => esc(o.text)).join(" ／ ")}</div>` : "");
 }
 // ---- 装備の外し忘れ: ログアウト(または別のキャラへ)したあとも、装備を持ったままのキャラに印を付ける ----
-const carryOf = (c) => { const e = ((DATA.equip || {}).chars || {})[c], k = e && e.carry; return k && k.known ? k : null; };
+const CARRY_ON = false;       // 外し忘れの表示。「持ったまま」の判定が甘いので、直すまで画面に出さない(通信の記録 = char_core の carry・[倉庫] ログは続けている)
+const carryOf = (c) => { if (!CARRY_ON) return null;  const e = ((DATA.equip || {}).chars || {})[c], k = e && e.carry; return k && k.known ? k : null; };
 function carryChip(c, always) {         // MD の表のキャラの横。いまログインしているキャラは、ふつうは装備を着ているので出さない(always で出す)
   const k = carryOf(c); if (!k || !k.n || (!always && (DATA.now_chars || []).includes(c))) return "";
   const names = k.items.slice(0, 6).map((it) => it.name).join("、") + (k.n > 6 ? ` ほか ${k.n - 6} 点` : "");
@@ -1297,6 +1298,7 @@ function carryChip(c, always) {         // MD の表のキャラの横。いま�
 }
 function carryHtml(c) {                 // キャラ詳細: 倉庫に入れていない(持ったままの)装備
   const k = carryOf(c);
+  if (!CARRY_ON) return "";
   if (!k) return `<div class="carry-box"><h3>倉庫に入れていない装備</h3><div class="muted">まだ装備を読めていません（このキャラでログインすると読めます）。</div></div>`;
   const gone = (k.gone || []).slice().reverse();
   return `<div class="carry-box"><h3>倉庫に入れていない装備（持ったまま ${k.n}点）</h3>
