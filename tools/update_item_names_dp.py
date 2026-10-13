@@ -2,6 +2,7 @@
 
 開発者(あなた)が手元で実行するツール。APIキーはアプリ(exe)には入れない・リポジトリにも書かない。
   set DP_API_KEY=キー         (Windows)  /  export DP_API_KEY=キー
+  (環境変数が無いときは、リポジトリ直下の api.txt の1行目を使う。api.txt は .gitignore 済み)
   python tools/update_item_names_dp.py            # 何が足りないか表示するだけ
   python tools/update_item_names_dp.py --write    # item_names_fix.json に書く
   python tools/update_item_names_dp.py --start 2026-09-01   # 14日の窓の開始日(古いパッチを取るとき。窓ごとに繰り返す)
@@ -63,7 +64,13 @@ def main():
     a = ap.parse_args()
     key = os.environ.get("DP_API_KEY", "").strip()
     if not key:
-        sys.exit("環境変数 DP_API_KEY にキーを入れてください。")
+        try:
+            with open(os.path.join(ROOT, "api.txt"), encoding="utf-8-sig") as f:
+                key = f.readline().strip()
+        except OSError:
+            pass
+    if not key:
+        sys.exit("環境変数 DP_API_KEY か、リポジトリ直下の api.txt にキーを入れてください。")
 
     known = set(load("id2name.json")) | set(load("item_names_fix.json"))
     p = {"type": "item"}
