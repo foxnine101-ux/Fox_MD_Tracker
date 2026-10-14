@@ -493,12 +493,14 @@ function reportJsError(msg, stack) {
 window.addEventListener("error", (e) => reportJsError(e.message, e.error && e.error.stack));
 window.addEventListener("unhandledrejection", (e) => reportJsError((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
 const HSCROLL_SEL = ".tablewrap, .dm-box, #stp, .cmpbox";       // 横にスクロールできる枠(描き直すと左端に戻ってしまうので、位置を覚えて戻す)
+let LAST_RENDER_MS = 0, LAST_RENDER_AT = 0, RENDER_LATER = 0;      // 直前の描き直しにかかった時間・時刻(重い画面は、自動の読み直しで頻繁に描き直さないため)
 function render() {
-  const y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
+  const t0 = performance.now(), y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
   try { renderNow(); } catch (e) {
     console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
   }
+  LAST_RENDER_MS = performance.now() - t0; LAST_RENDER_AT = Date.now();
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
   try { applyCharColors(); } catch (e) { /* 色は飾りなので、失敗しても画面は出す */ }
   if (hs.tab === TAB && hs.v.some((x) => x > 0)) { const now = [...document.querySelectorAll(HSCROLL_SEL)]; if (now.length === hs.v.length) now.forEach((e, i) => { if (hs.v[i] > 0) e.scrollLeft = hs.v[i]; }); }      // 横の位置も戻す(同じタブで、枠の数が同じときだけ)
@@ -5574,7 +5576,12 @@ async function load(quiet) {      // quiet = 自動の読み直し。前と同�
     if (!saveTimer && !SAVING) SETTINGS = j.settings || {};   // 保存待ちのあいだは手元の設定を使う(並びが一瞬戻らないように)
     $("#login").hidden = true; $("#app").hidden = false;
     store.set("md_pw", PW);
-    if (!same) render();
+    if (!same) {
+      // 重い画面(被ダメなど。1回 60ms 以上)は、自動の読み直しでは 15 秒に1回まで。戦闘中は数秒おきに記録が増え、そのたびに画面が止まるため。操作したときの描き直しは、すぐ行う
+      const wait = 15000 - (Date.now() - LAST_RENDER_AT);
+      if (quiet && LAST_RENDER_MS > 60 && wait > 0) { if (!RENDER_LATER) RENDER_LATER = setTimeout(() => { RENDER_LATER = 0; render(); }, wait); }
+      else render();
+    }
     else if ($("#upd")) $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
   } catch (e) {
     if (e.message === "401") { showLogin(PW ? "合言葉が違います" : ""); PW = ""; store.del("md_pw"); }

@@ -222,6 +222,7 @@ class CharCore(object):
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
         self._diag = {}        # 倉庫まわりの通信(確認用): op -> 受け取った回数
+        self._pending = {}     # 接続 -> 名前が決まる前に届いた分の記録(装備の一覧など)。名前が決まったら、そのキャラの記録に合流させる
         self._inv_chunk = {}   # 接続 -> (最後に持ち物の一覧が届いた時刻, その件数)。100件で区切られた続きかを見分ける
         self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
         self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
@@ -248,6 +249,7 @@ class CharCore(object):
         self.changed = self.changed or was
 
     def snapshot(self):
+        self.flush_pending()
         return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "sim_links": self.sim_links, "updated": int(time.time())}
 
     def restore(self, data):
@@ -534,6 +536,7 @@ class CharCore(object):
 
     def equip_view(self):
         """画面用: {"chars": キャラごとのいまの装備, "sets": 装備セット, "shadows": シャドウセット}"""
+        self.flush_pending()
         self._auto_names(self.sets)
         self._auto_names(self.shadows, (131072, 65536, 262144))
         for table in (self.sets, self.shadows):          # 軽減のまとめ(計算機の被ダメの検証用。毎回いまの耐性の表で出す)
@@ -541,7 +544,7 @@ class CharCore(object):
                 s["prof"] = self.items_profile(s.get("items"))
         chars = {}
         for name, ch in self.chars.items():
-            if name == UNKNOWN or not (ch.get("equips") or ch.get("stats") or ch.get("skills")):
+            if name == UNKNOWN or not (ch.get("equips") or "bag" in ch or ch.get("stats") or ch.get("skills")):      # 全部はずしているキャラ(装備が空)も、持ち物の一覧を受け取っていれば出す
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                            "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "inv": "bag" in ch, "stale": bool(ch.get("eq_stale")),
@@ -773,15 +776,58 @@ class CharCore(object):
             else:
                 cur = getattr(self.md, "current", None)
         if cur:
-            # 名前が分かる前に貯めた分があれば、そっちへ引き継ぐ
-            if UNKNOWN in self.chars and cur not in self.chars:
+            key = getattr(self, "_key", None)
+            rec = self._pending.pop(key, None)
+            if rec is not None:                       # 名前が分かる前に、この接続で貯めた分(装備の一覧など)を、このキャラの記録に合流させる
+                self._merge_pending(cur, rec)
+            elif UNKNOWN in self.chars and cur not in self.chars:      # 前の版が残した「(キャラ不明)」の分
                 self.chars[cur] = self.chars.pop(UNKNOWN)
                 self.log("[キャラ] {} のデータとして確定".format(cur))
             return cur
         return UNKNOWN
 
+    def _merge_pending(self, cur, rec):
+        """名前待ちの記録 rec を、キャラ cur の記録に合流させる(既にいるキャラでも、新しい分で更新する)。"""
+        ch = self.chars.get(cur)
+        if ch is None:
+            self.chars[cur] = rec
+            self.log("[キャラ] {} のデータとして確定".format(cur))
+        else:
+            ch.setdefault("stats", {}).update(rec.get("stats") or {})
+            ch.setdefault("derived", {}).update(rec.get("derived") or {})
+            if rec.get("statusPoint") is not None:
+                ch["statusPoint"] = rec["statusPoint"]
+            if rec.get("skills"):
+                ch["skills"] = rec["skills"]
+            if "bag" in rec:                          # 持ち物の一覧を受け取っている → 装備の記録は、こちらが新しい
+                for k in ("equips", "bag", "eq_stale"):
+                    if k in rec:
+                        ch[k] = rec[k]
+                if rec.get("gone"):
+                    ch["gone"] = ((ch.get("gone") or []) + rec["gone"])[-30:]
+            ch["updated"] = max(ch.get("updated") or 0, rec.get("updated") or 0)
+            self.log("[キャラ] {} の記録に、名前が決まる前に届いた分({})を合流させました".format(cur, "装備の一覧あり" if "bag" in rec else "装備の一覧なし"))
+        self.changed = True
+
+    def flush_pending(self):
+        """名前が決まった接続の名前待ちの記録を、キャラの記録に合流させる(画面や保存の前に呼ぶ。次の通信を待たなくてよい)。"""
+        if not self._pending or self.md is None or not hasattr(self.md, "name_for"):
+            return
+        for key in list(self._pending):
+            cur = self.md.name_for(key)
+            if cur:
+                self._merge_pending(cur, self._pending.pop(key))
+                ch = self.chars.get(cur)
+                if ch is not None and ch.get("equips") is not None:
+                    self._update_set(cur, ch)
+
     def _ch(self):
         name = self._name()
+        if name == UNKNOWN:                           # 名前が決まる前: この接続の名前待ちの記録に貯める(別のキャラの分と混ぜない)
+            key = getattr(self, "_key", None)
+            if len(self._pending) > 20 and key not in self._pending:
+                self._pending.pop(next(iter(self._pending)))
+            return self._pending.setdefault(key, {"stats": {}, "derived": {}, "statusPoint": None, "equips": [], "updated": 0})
         ch = self.chars.get(name)
         if ch is None:
             ch = {"stats": {}, "derived": {}, "statusPoint": None,
@@ -942,6 +988,9 @@ class CharCore(object):
         bag.append(item)
         ch["updated"] = int(now)
         self.changed = True
+        self._diagadd = getattr(self, "_diagadd", 0) + 1
+        if self._diagadd <= 100:
+            self.log("[倉庫] 持ち物に装備が増えました(0B41): {} +{} 番号={} 部位={}".format(item["name"], item["refine"], idx, loc))
 
     def _gone(self, idx, reason):
         """持ち物から消えた(0x07FA)。装備(0B39 の一覧にあるもの)が消えたなら「持ったまま」から外し、記録に残す(倉庫に入れた・売った・使った など。reason は通信の値のまま)。"""
@@ -990,6 +1039,8 @@ class CharCore(object):
         item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
         if item is None:
             self.log("[装備] 持ち物の一覧に番号 {} が無いので、装備の変更を反映できません(一覧 {} 件)".format(idx, len(eq) + len(bag)))
+            ch["eq_stale"] = True                       # 記録とずれている(取り出した装備の通信を取りこぼした など)。次にログインして一覧を受け取るまで、古い記録として扱う
+            self.changed = True
             return
         if item in eq:
             eq.remove(item)
