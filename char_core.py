@@ -28,8 +28,9 @@ import os
 import struct
 import time
 
-WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA}
-STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x0B41, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
+WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA, 0x0B41}
+INV_PAGE = 100      # 一覧は100件で区切って届く
+STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
 WANT_OPS |= set(STORAGE_OPS)
 # スキルの一覧(覚えているスキルと Lv)。jRO のリプレイで確かめた形:
 #   0x0B32 [op2][長さ2] + 15バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 上げられる1 Lv(2)2
@@ -221,6 +222,8 @@ class CharCore(object):
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
         self._diag = {}        # 倉庫まわりの通信(確認用): op -> 受け取った回数
+        self._inv_chunk = {}   # 接続 -> (最後に持ち物の一覧が届いた時刻, その件数)。100件で区切られた続きかを見分ける
+        self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
         self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
 
     # ---------- 外から呼ぶ ----------
@@ -541,7 +544,7 @@ class CharCore(object):
             if name == UNKNOWN or not (ch.get("equips") or ch.get("stats") or ch.get("skills")):
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
-                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")),
+                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "inv": "bag" in ch, "stale": bool(ch.get("eq_stale")),
                            "now": [self._item_view(it) for it in self._worn(ch)], "carry": self.carry_view(ch), "status": self._status_view(name, ch),
                            "skills": ch.get("skills") or {}, "updated": ch.get("updated") or 0}
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
@@ -870,37 +873,75 @@ class CharCore(object):
                 self._wear(idx, loc, False)
 
         elif op == 0x0B39:
+            # 種類(pkt[4]): 0 = 自分の持ち物・1 = カート・2〜4 = 倉庫(RO Storage Manager の読み方と、Fox の実測で確認)。持ち物の一覧だけ使う
+            kind = pkt[4]
             body = pkt[5:]
-            if len(body) < EQUIP_SIZE or len(body) % EQUIP_SIZE:
+            if kind != 0:
+                self._diag0b39 = getattr(self, "_diag0b39", 0) + 1
+                if self._diag0b39 <= 6:
+                    self.log("[装備] 持ち物以外の装備の一覧(0B39 種類={}・全{}件)は使いません".format(kind, len(body) // EQUIP_SIZE if len(body) >= EQUIP_SIZE else 0))
+                return
+            if len(body) % EQUIP_SIZE:
                 self.log("[装備] 装備の一覧(0B39)の長さが想定と違うので読めません: 全体={}バイト 本体={} 1件={}バイトで割った余り={} 先頭={}".format(
                     len(pkt), len(body), EQUIP_SIZE, len(body) % EQUIP_SIZE, pkt[:24].hex()))
                 return
-            items = [self._equip(body[i * EQUIP_SIZE:(i + 1) * EQUIP_SIZE])
-                     for i in range(len(body) // EQUIP_SIZE)]
-            worn = [e for e in items if e["wear"]]
-            if not worn:
-                self.log("[装備] 装備の一覧(0B39)を受け取りましたが、着ているものがありません(全{}件・種類={})".format(len(items), pkt[4]))
-                return
+            items = [self._equip(body[i * EQUIP_SIZE:(i + 1) * EQUIP_SIZE]) for i in range(len(body) // EQUIP_SIZE)]
             ch = self._ch()
+            key, now = getattr(self, "_key", None), time.time()
+            prev = self._inv_chunk.get(key)
+            more = bool(prev and prev[1] >= INV_PAGE and now - prev[0] < 3.0 and key in self._synced)      # 100件で区切って届く(倉庫の一覧がそうだった)。前が満杯なら続き
+            self._inv_chunk[key] = (now, len(items))
+            worn = [e for e in items if e["wear"]]
+            bag = [e for e in items if not e["wear"]]
+            if more:
+                have = {x.get("inventoryIndex") for x in (ch.get("equips") or []) + (ch.get("bag") or [])}
+                worn = (ch.get("equips") or []) + [e for e in worn if e.get("inventoryIndex") not in have]
+                bag = (ch.get("bag") or []) + [e for e in bag if e.get("inventoryIndex") not in have]
             MAIN = 1023 | 65536 | 131072 | 262144 | 524288 | 1048576 | 2097152      # 衣装(1024〜8192)をのぞく、ふつうの装備・シャドウ装備の場所
             main = [e for e in worn if e["wear"] & MAIN]
-            self.log("[装備] 一覧(0B39) 種類={} 全{}件・着ている{}件(ふつうの装備・シャドウ {}・衣装 {})".format(pkt[4], len(items), len(worn), len(main), len(worn) - len(main)))
-            if not main:
-                # 衣装だけの一覧。これでふつうの装備の記録を消さない(前の記録のふつうの装備は残し、衣装だけ入れかえる)。本体の一覧はまだ → 着替えは反映しない
-                old = [e for e in (ch.get("equips") or []) if e["wear"] & MAIN]
-                ch["equips"] = old + worn
-                ch["eq_stale"] = True
-                ch["updated"] = int(time.time())
-                self.changed = True
-                self.log("[装備] 衣装だけの一覧でした({}点)。ふつうの装備の一覧は、まだ届いていません(前の記録の{}点を残します)".format(len(worn), len(old)))
-                return
-            self._synced.add(getattr(self, "_key", None))
+            self.log("[装備] 持ち物の装備の一覧(0B39) 全{}件・着ている{}件(ふつうの装備・シャドウ {}・衣装 {})・着ていない{}件{}".format(
+                len(items), len(worn), len(main), len(worn) - len(main), len(bag), "・続き" if more else ""))
+            self._synced.add(key)                  # 着ているものが無くても(全部倉庫に入れてあっても)、これが持ち物の一覧
             ch["eq_stale"] = False
             ch["equips"] = worn
-            ch["bag"] = [e for e in items if not e["wear"]]
+            ch["bag"] = bag
             ch["updated"] = int(time.time())
             self.changed = True
-            self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
+            if not more:
+                self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
+
+        elif op == 0x0B41 and len(pkt) >= 70:            # 持ち物への追加(拾った・買った・倉庫から取り出した)。装備なら持ち物の装備に足す
+            self._inv_add(pkt)
+
+    def _inv_add(self, pkt):
+        """0x0B41(70バイト・持ち物への追加)。+2 持ち物の番号 u16・+4 個数 u16・+6 アイテム番号 u32・+12/16/20/24 カード ×4(u32)・
+        +28 装備部位 u32(0 = 装備でない)・+40 ランダムオプション 5枠×5バイト・+68 精錬 u8・+69 超越 u8。装備なら、持ち物の装備(bag)に足す。"""
+        key = getattr(self, "_key", None)
+        idx, _cnt, itid = struct.unpack_from("<HHI", pkt, 2)
+        loc = struct.unpack_from("<I", pkt, 28)[0]
+        if not (itid and 0 < loc <= 0x200000):                 # 装備ではない(薬・素材など)
+            return
+        now = time.time()
+        recent = [r for r in self._recent_add.get(key, []) if now - r[1] < 2.0]
+        recent.append((itid, now))
+        self._recent_add[key] = recent
+        if key not in self._synced:                            # 一覧を受け取っていない接続は、持ち物の番号が当てにならない
+            return
+        cards = [{"id": c, "name": self._item_name(c)} for c in struct.unpack_from("<4I", pkt, 12) if c]
+        opts = []
+        for k in range(5):
+            oi, ov = struct.unpack_from("<HH", pkt, 40 + k * 5)
+            if oi or ov:
+                opts.append({"index": oi, "value": ov, "param": pkt[40 + k * 5 + 4]})
+        item = {"slot": "", "wear": 0, "loc": loc, "itemId": itid, "name": self._item_name(itid), "refine": pkt[68], "grade": pkt[69],
+                "cards": cards, "options": opts, "inventoryIndex": idx}
+        ch = self._ch()
+        eq, bag = ch.get("equips") or [], ch.setdefault("bag", [])
+        bag[:] = [x for x in bag if x.get("inventoryIndex") != idx]       # 同じ番号は使い回される(前の品は消えている)
+        eq[:] = [x for x in eq if x.get("inventoryIndex") != idx]
+        bag.append(item)
+        ch["updated"] = int(now)
+        self.changed = True
 
     def _gone(self, idx, reason):
         """持ち物から消えた(0x07FA)。装備(0B39 の一覧にあるもの)が消えたなら「持ったまま」から外し、記録に残す(倉庫に入れた・売った・使った など。reason は通信の値のまま)。"""
@@ -910,6 +951,10 @@ class CharCore(object):
         eq, bag = ch.get("equips") or [], ch.get("bag") or []
         item = next((x for x in eq + bag if x.get("inventoryIndex") == idx), None)
         if item is None:                                          # 装備ではない(薬・素材など)
+            return
+        key = getattr(self, "_key", None)
+        if reason == 4 and any(r[0] == item.get("itemId") and time.time() - r[1] < 1.0 for r in self._recent_add.get(key, [])):
+            self.log("[装備] 倉庫に入れられなかった(直前に持ち物へ戻っている): {}".format(self._item_name(item.get("itemId"))))      # 倉庫に入れられない品は、先に持ち物へ戻り、そのあと「倉庫へ」が届く
             return
         for lst in (eq, bag):
             if item in lst:
@@ -925,9 +970,10 @@ class CharCore(object):
 
     def carry_view(self, ch):
         """倉庫に入れていない(持ったままの)装備。着ている装備(衣装は除く)+ 着ていない持ち物の装備。"""
-        worn, bag = self._worn(ch), list(ch.get("bag") or [])
+        worn = self._worn(ch)
+        bag = [x for x in (ch.get("bag") or []) if x.get("loc") is None or (x.get("loc", 0) & ~COSTUME_BITS)]        # 衣装(見た目だけの装備)は数えない
         items = [self._item_view(it) for it in worn] + [dict(self._item_view(it), slot="持ち物（着ていない）") for it in bag]
-        return {"known": bool(ch.get("equips")), "stale": bool(ch.get("eq_stale")), "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
+        return {"known": "bag" in ch, "stale": bool(ch.get("eq_stale")), "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
                 "set": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                 "gone": (ch.get("gone") or [])[-5:]}
 
@@ -977,6 +1023,7 @@ class CharCore(object):
         return {
             "slot": LOC_NAMES.get(wear, str(wear)) if wear else "",
             "wear": wear,
+            "loc": loc,
             "itemId": itid,
             "name": self._item_name(itid),
             "refine": e[65],

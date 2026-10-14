@@ -1285,7 +1285,7 @@ function itemLine(it, sim) {
     + ((it.options || []).length ? `<div class="eq-opt">${it.options.map((o) => esc(o.text)).join(" ／ ")}</div>` : "");
 }
 // ---- 装備の外し忘れ: ログアウト(または別のキャラへ)したあとも、装備を持ったままのキャラに印を付ける ----
-const CARRY_ON = false;       // 外し忘れの表示。「持ったまま」の判定が甘いので、直すまで画面に出さない(通信の記録 = char_core の carry・[倉庫] ログは続けている)
+const CARRY_ON = true;        // 外し忘れの表示。「持ったまま」の判定が甘いので、直すまで画面に出さない(通信の記録 = char_core の carry・[倉庫] ログは続けている)
 const carryOf = (c) => { if (!CARRY_ON) return null;  const e = ((DATA.equip || {}).chars || {})[c], k = e && e.carry; return k && k.known ? k : null; };
 function carryChip(c, always) {         // MD の表のキャラの横。いまログインしているキャラは、ふつうは装備を着ているので出さない(always で出す)
   const k = carryOf(c); if (!k || !k.n || (!always && (DATA.now_chars || []).includes(c))) return "";
@@ -4608,6 +4608,7 @@ let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false, GS_HISTALL = fa
 const GS_HISTN = 10;
 function nowGearHtml(chars) {       // いま着ている装備 = いまログインしているキャラの装備。ここからスロットに登録・上書きできる
   const EQ = DATA.equip || {}, E = EQ.chars || {}, c = nowChar();
+  if (c && E[c] && !E[c].has_equip && E[c].inv) return `<h2>いま着ている装備 <span class="muted" style="font-weight:400;font-size:13px">（いまログインしている ${esc(cn(c))}）</span></h2><div class="panel eq-box"><span class="muted">いま着ている装備はありません（全部はずしています）。</span></div>` + unknownItemsHtml(EQ.unknown || []);
   if (!c || !E[c].has_equip) return `<h2>いま着ている装備</h2><div class="panel eq-box"><span class="muted">いまログインしているキャラがいません（ゲームにログインすると、そのキャラが着ている装備がここに出ます）。</span></div>` + unknownItemsHtml(EQ.unknown || []);
   EQ_CHAR = c;
   const e = E[c], S = EQ.sets || {}, SH = EQ.shadows || {};
