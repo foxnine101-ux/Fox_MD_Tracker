@@ -843,7 +843,13 @@ class CharCore(object):
                 self.changed = True
 
         elif op == 0x07FA and len(pkt) >= 8:             # 持ち物から消えた [理由2][番号2][個数2]。装備が消えたなら、倉庫などに入れた(持ったままではなくなった)
-            reason, idx, _amt = struct.unpack_from("<HHH", pkt, 2)
+            reason, idx, amt = struct.unpack_from("<HHH", pkt, 2)
+            self._diag07 = getattr(self, "_diag07", 0) + 1
+            if self._diag07 <= 60:       # 確認用: 持ち物から消えた通信(薬なども含めて)の最初の60回。装備の一覧にある番号かも書く
+                ch0 = self._ch()
+                is_eq = any(x.get("inventoryIndex") == idx for x in (ch0.get("equips") or []) + (ch0.get("bag") or []))
+                self.log("[倉庫] 持ち物から消えた(07FA) 理由={} 番号={} 個数={} {}{}".format(
+                    reason, idx, amt, "装備の一覧にある" if is_eq else "装備の一覧に無い", "" if getattr(self, "_key", None) in self._synced else "・この接続は一覧を受け取っていない"))
             self._gone(idx, reason)
 
         elif op in STORAGE_OPS:                          # 倉庫まわりの通信(本物の形の確認用。最初の数回だけ中身を記録する)
@@ -873,7 +879,7 @@ class CharCore(object):
                      for i in range(len(body) // EQUIP_SIZE)]
             worn = [e for e in items if e["wear"]]
             if not worn:
-                self.log("[装備] 装備の一覧(0B39)を受け取りましたが、着ているものがありません(全{}件)".format(len(items)))
+                self.log("[装備] 装備の一覧(0B39)を受け取りましたが、着ているものがありません(全{}件・種類={})".format(len(items), pkt[4]))
                 return
             ch = self._ch()
             MAIN = 1023 | 65536 | 131072 | 262144 | 524288 | 1048576 | 2097152      # 衣装(1024〜8192)をのぞく、ふつうの装備・シャドウ装備の場所
