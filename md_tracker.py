@@ -39,7 +39,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.18"
+VERSION = "2.58.19"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -984,6 +984,13 @@ class _Scanner(gp.StreamScanner):
             op = pkt[0] | (pkt[1] << 8)
             if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB, 0x0B39, 0x0999, 0x099A, 0x07FA, 0x00F4, 0x01C4, 0x0A0A, 0x0B41, 0x00F6, 0x00F2):   # 被ダメ・装備・倉庫関係も数える
                 STATS["ops"][op] = STATS["ops"].get(op, 0) + 1
+            _OP_TOTAL[op] = _OP_TOTAL.get(op, 0) + 1
+            if op == 0x00F6:                                 # 倉庫から取り出した: 直後 2.5 秒は、ふだん見ない通信を記録する(確認用。取り出した装備の通信が、0B41 以外で届いていないかを調べる)
+                _TAKE_WIN[0] = time.time() + 2.5
+            elif time.time() < _TAKE_WIN[0] and _OP_TOTAL[op] < 40 and (op, len(pkt)) not in _TAKE_SEEN and _TAKE_LOGS[0] < 80:
+                _TAKE_SEEN.add((op, len(pkt)))
+                _TAKE_LOGS[0] += 1
+                print("[倉庫] 取り出しの前後の、ふだん見ない通信 {:04X} {}バイト: {}".format(op, len(pkt), pkt[:48].hex()))
         with self.lock:
             try:
                 self.core.feed(self.key, pkt)
@@ -1008,6 +1015,7 @@ class _Scanner(gp.StreamScanner):
 
 
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
+_OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)

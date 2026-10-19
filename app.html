@@ -64,6 +64,7 @@
   td.char { cursor: pointer; }
   .carry { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 8px; font-size: 11px; font-weight: 700; background: #b45309; color: #fff; cursor: pointer; vertical-align: baseline; }
   .carry.stale { opacity: .55; }
+  .eq-t tr.dim td, .eq-t tr.dim th { opacity: .45; } button.cig { margin-left: 6px; padding: 0 6px; font-size: 11px; }
   .carry.set { background: none; padding: 0; } .carry .ctag { display: inline-block; min-width: 14px; padding: 0 4px; margin-right: 2px; border-radius: 4px; color: #fff; text-align: center; }
   .carry-box { margin-top: 8px; } .carry-box h3 { margin: 10px 0 2px; font-size: 13px; }
   td.char .ch-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted); margin-left: 16px; line-height: 1.2; }
@@ -1288,7 +1289,15 @@ function itemLine(it, sim) {
 }
 // ---- 装備の外し忘れ: ログアウト(または別のキャラへ)したあとも、装備を持ったままのキャラに印を付ける ----
 const CARRY_ON = true;        // 外し忘れの表示。「持ったまま」の判定が甘いので、直すまで画面に出さない(通信の記録 = char_core の carry・[倉庫] ログは続けている)
-const carryOf = (c) => { if (!CARRY_ON) return null;  const e = ((DATA.equip || {}).chars || {})[c], k = e && e.carry; return k && k.known ? k : null; };
+const carryKey = (it) => it.itemId + ":" + (it.refine || 0);       // 「数えない」装備の見分け(アイテム番号と精錬値)
+const carryIgnored = (c) => new Set(((SETTINGS.carryIgnore || {})[c]) || []);
+const carryAll = (c) => { if (!CARRY_ON) return null; const e = ((DATA.equip || {}).chars || {})[c], k = e && e.carry; return k && k.known ? k : null; };
+function carryOf(c) {                    // 「いつも持つスペア」(数えない)を引いた、持ったままの装備
+  const k = carryAll(c); if (!k) return null;
+  const ig = carryIgnored(c); if (!ig.size) return k;
+  const items = k.items.filter((it) => !ig.has(carryKey(it)));
+  return { ...k, items, n: items.length, worn: items.filter((it) => it.slot !== "持ち物（着ていない）").length, bag: items.filter((it) => it.slot === "持ち物（着ていない）").length };
+}
 function carryChip(c, always) {         // MD の表のキャラの横。いまログインしているキャラは、ふつうは装備を着ているので出さない(always で出す)
   const k = carryOf(c); if (!k || !k.n || (!always && (DATA.now_chars || []).includes(c))) return "";
   const names = k.items.slice(0, 6).map((it) => it.name).join("、") + (k.n > 6 ? ` ほか ${k.n - 6} 点` : "");
@@ -1299,14 +1308,15 @@ function carryChip(c, always) {         // MD の表のキャラの横。いま�
   return `<span class="carry${tags.length ? " set" : ""}${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）${tags.length ? "。着ているのは装備スロット " + tags.map((x) => x.tag).join("・") : ""}: ${names}${k.stale ? "。このログインでは装備の一覧が読めていないので、古い記録です" : ""}。クリックでキャラ詳細`)}">${label}</span>`;
 }
 function carryHtml(c) {                 // キャラ詳細: 倉庫に入れていない(持ったままの)装備
-  const k = carryOf(c);
+  const all = carryAll(c);
   if (!CARRY_ON) return "";
-  if (!k) return `<div class="carry-box"><h3>倉庫に入れていない装備</h3><div class="muted">まだ装備を読めていません（このキャラでログインすると読めます）。</div></div>`;
-  const gone = (k.gone || []).slice().reverse();
-  return `<div class="carry-box"><h3>倉庫に入れていない装備（持ったまま ${k.n}点）</h3>
-    ${k.stale ? `<div class="warn" style="margin:4px 0">このログインでは装備の一覧（ログイン時に届く通信）を受け取れていないので、下は古い記録です。</div>` : ""}
-    ${k.n ? itemsTable(k.items) : `<div class="muted">持ったままの装備はありません（着ている装備も、持ち物の装備もありません）。</div>`}
-    <div class="muted" style="font-size:12px;margin-top:4px">着ている装備（衣装は除く）と、着ていない持ち物の装備です。持ち物から消えた装備は、倉庫に入れたとみなします（途中で取り出して持ったままにした分は、次にログインするまで反映されません）。${gone.length ? `<br>最後に持ち物から外れた装備: ${gone.map((g) => `${esc(g.refine ? "+" + g.refine + " " : "")}${esc(g.name)}（${when(g.t)}）`).join("、")}` : ""}</div></div>`;
+  if (!all) return `<div class="carry-box"><h3>倉庫に入れていない装備</h3><div class="muted">まだ装備を読めていません（このキャラでログインすると読めます）。</div></div>`;
+  const ig = carryIgnored(c), k = carryOf(c), gone = (all.gone || []).slice().reverse();
+  const rows = all.items.map((it) => { const off = ig.has(carryKey(it)); return `<tr class="${off ? "dim" : ""}"><th>${esc(it.slot)}</th><td>${itemLine(it)} <button class="ghost cig" data-cig="${esc(c)}" data-cigk="${esc(carryKey(it))}" title="${off ? "また数えます" : "いつも持っている装備(スペア)は、外し忘れの数に入れません"}">${off ? "数える" : "数えない"}</button></td></tr>`; }).join("");
+  return `<div class="carry-box"><h3>倉庫に入れていない装備（持ったまま ${k.n}点${all.n !== k.n ? `・数えないもの ${all.n - k.n}点` : ""}）</h3>
+    ${all.stale ? `<div class="warn" style="margin:4px 0">このログインでは装備の一覧（ログイン時に届く通信）を受け取れていないので、下は古い記録です。</div>` : ""}
+    ${all.n ? `<table class="eq-t"><tbody>${rows}</tbody></table>` : `<div class="muted">持ったままの装備はありません（着ている装備も、持ち物の装備もありません）。</div>`}
+    <div class="muted" style="font-size:12px;margin-top:4px">着ている装備（衣装は除く）と、着ていない持ち物の装備です。いつも持っているスペアは「数えない」で、数から外せます（同じ名前・同じ精錬値のものが全部対象。キャラごとの設定）。持ち物から消えた装備は、倉庫に入れたとみなします（途中で取り出して持ったままにした分は、取り出しの通信を読めたときだけ反映されます）。${gone.length ? `<br>最後に持ち物から外れた装備: ${gone.map((g) => `${esc(g.refine ? "+" + g.refine + " " : "")}${esc(g.name)}（${when(g.t)}）`).join("、")}` : ""}</div></div>`;
 }
 function itemsTable(items, sim) {
   return `<table class="eq-t"><tbody>${items.map((it) => `<tr><th>${esc(it.slot)}</th><td>${itemLine(it, sim)}</td></tr>`).join("")}</tbody></table>`;
@@ -4596,6 +4606,12 @@ function renderChars(chars) {
   h += `<p class="hint">キャラをクリックすると、ベース/ジョブLv・ステータス・覚えているスキルが開きます（通信から読んだもの。装備は「装備セット」タブ）。ベース/ジョブLv はキャラ選択画面から、ステータスとスキルはログインしたときに読みます。</p>`;
   $("#view").innerHTML = h;
   $("#view").querySelectorAll(".ch-h").forEach((el) => el.onclick = () => { CH_OPEN = CH_OPEN === el.dataset.ch ? "" : el.dataset.ch; render(); });
+  $("#view").querySelectorAll("button.cig").forEach((b) => b.onclick = (e) => {        // 外し忘れ: スペアを「数えない」・また「数える」
+    e.stopPropagation(); const c = b.dataset.cig, k = b.dataset.cigk; SETTINGS.carryIgnore = SETTINGS.carryIgnore || {};
+    const set = new Set(SETTINGS.carryIgnore[c] || []); set.has(k) ? set.delete(k) : set.add(k);
+    if (set.size) SETTINGS.carryIgnore[c] = [...set]; else delete SETTINGS.carryIgnore[c];
+    saveSettings(); render();
+  });
   $("#view").querySelectorAll("a[data-gs]").forEach((a) => a.onclick = (e) => { e.preventDefault(); GS_OPEN[a.dataset.gs] = true; GS_FOCUS = a.dataset.gs; TAB = "gsets"; store.set("md_tab", TAB); render(); });
   if (CH_FOCUS) {            // MD の表から来たキャラを見せる
     const el = [...$("#view").querySelectorAll(".ch-h")].find((x) => x.dataset.ch === CH_FOCUS);
