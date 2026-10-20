@@ -43,6 +43,7 @@ class License:
         self.log = log
         self.lock = threading.Lock()
         self.d = {}                                   # {key, name, last_ok, bad: 理由 or ""}
+        self._dk_try = {}
         self.msg = ""
         try:
             with open(self.path, encoding="utf-8") as f:
@@ -106,6 +107,27 @@ class License:
                             "limit": "このキーで登録できる台数({}台)に達しています。使わない PC で「この PC をはずす」を押してください。".format(r.get("limit")),
                             }.get(r.get("reason"), "登録できませんでした。")
             return self.status()
+
+    def data_key(self, name="lantern", fetch=True):
+        """同梱データの鍵。利用キーが有効なら、サーバーから1度もらって覚える(オフラインでも使える)。無ければ """""
+        if not self._usable():
+            return ""
+        k = (self.d.get("dkeys") or {}).get(name, "")
+        if k or not fetch or time.time() - self._dk_try.get(name, 0) < 600:
+            return k
+        self._dk_try[name] = time.time()
+        try:
+            r = self._post("/data/key", dict(self._body(), name=name))
+        except Exception as e:
+            self.log("[利用キー] 同梱データの鍵を取れません:", e)
+            return ""
+        k = r.get("k") if r.get("ok") else ""
+        if isinstance(k, str) and len(k) == 64:
+            with self.lock:
+                self.d.setdefault("dkeys", {})[name] = k
+                self._save()
+            return k
+        return ""
 
     # ---- 共有の結びつけ(ゲームのアイテム番号 → ラトリオの名前。承認式) ----
     def _need(self):

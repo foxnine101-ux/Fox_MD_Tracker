@@ -40,7 +40,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.22"
+VERSION = "2.58.23"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1251,9 +1251,10 @@ def _lantern_seed():
     try:
         import zlib
         p = resource("lantern_seed.bin")
-        if p:
+        k = LIC.data_key("lantern") if LIC is not None else ""
+        if p and k:
             with open(p, "rb") as f:
-                return json.loads(zlib.decompress(f.read()).decode("utf-8")).get("items") or []
+                return json.loads(zlib.decompress(lantern_core.unseal(f.read(), k)).decode("utf-8")).get("items") or []
     except Exception as e:
         print("[ランタン] 同梱の座標を読めませんでした:", e)
     return []
@@ -1288,7 +1289,8 @@ def lantern_payload(d=None):
             if it["map"] not in names:
                 names.append(it["map"])
     ml = OFFICIAL.maplist if OFFICIAL is not None else []
-    return {"sets": d["sets"], "manual": d["manual"], "ids": lantern_core.resolve_ids(names, ml, d["manual"]), "mapn": len(ml), "official": OFFICIAL is not None}
+    return {"sets": d["sets"], "manual": d["manual"], "ids": lantern_core.resolve_ids(names, ml, d["manual"]), "mapn": len(ml), "official": OFFICIAL is not None,
+            "needkey": not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed") and not (LIC is not None and LIC.data_key("lantern", fetch=False))}
 
 
 def _lantern_fetch_text(u):

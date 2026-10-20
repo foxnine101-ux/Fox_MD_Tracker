@@ -8,7 +8,10 @@
 - マップ ID(/navi2 に使う)は、①公式サイトのマップ一覧(Fox が集めたもの。[ファイル名, 名前])で名前が1つに決まるもの → ②町・フィールドの名前の決まり(推定)の順。決まらないものは None。
 """
 import csv
+import hashlib
+import hmac
 import io
+import os
 import re
 import unicodedata
 
@@ -142,3 +145,35 @@ def fetch_sheets(url, sheets, fetch, pause=0.4, log=print):
             log("[ランタン] シート {} を取れませんでした: {}".format(name, e))
         time.sleep(pause)
     return "\n".join(out), got
+
+
+# ---- 同梱の座標の暗号(標準ライブラリだけ。鍵はアプリに入れず、利用キーの確認が通った人にだけサーバーが渡す) ----
+SEED_MAGIC = b"FXE1"
+
+
+def _stream(key, nonce, n):
+    out = b""
+    i = 0
+    while len(out) < n:
+        out += hmac.new(key, b"enc" + nonce + i.to_bytes(4, "big"), hashlib.sha256).digest()
+        i += 1
+    return out[:n]
+
+
+def seal(plain, key_hex):
+    """bytes を暗号化 → FXE1 + nonce(16) + 改ざん検査(32) + 本体"""
+    key = bytes.fromhex(key_hex)
+    nonce = os.urandom(16)
+    ct = bytes(a ^ b for a, b in zip(plain, _stream(key, nonce, len(plain))))
+    return SEED_MAGIC + nonce + hmac.new(key, b"mac" + nonce + ct, hashlib.sha256).digest() + ct
+
+
+def unseal(blob, key_hex):
+    """seal の逆。鍵が違う・壊れているときは ValueError"""
+    key = bytes.fromhex(key_hex)
+    if blob[:4] != SEED_MAGIC or len(blob) < 52:
+        raise ValueError("形式が違います")
+    nonce, tag, ct = blob[4:20], blob[20:52], blob[52:]
+    if not hmac.compare_digest(tag, hmac.new(key, b"mac" + nonce + ct, hashlib.sha256).digest()):
+        raise ValueError("鍵が違うか、壊れています")
+    return bytes(a ^ b for a, b in zip(ct, _stream(key, nonce, len(ct))))
