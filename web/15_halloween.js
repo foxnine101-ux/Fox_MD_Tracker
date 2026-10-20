@@ -180,10 +180,9 @@ function lntHtml(chars) {
       <input id="lntq" type="search" placeholder="マップ名・メモで絞る" value="${esc(LNT.q)}"><label><input type="checkbox" id="lnttodo" ${LNT.todo ? "checked" : ""}> 未発見だけ</label>
       ${nextIt ? `<button class="ghost" data-lcp="${esc(lntNavi(nextIt).cmd)}" title="${esc(nextIt.n + "番 " + nextIt.map + " " + nextIt.x + "," + nextIt.y)}">次の未発見をコピー（${nextIt.n}番）</button>` : ""}
       <span class="muted">${list.length} 件を表示</span></div></div>`;
-  h += `<div class="panel tablewrap"><table class="lnt"><thead><tr><th>✓</th><th>番号</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th><th>ナビ</th></tr></thead><tbody>`
+  h += `<div class="panel tablewrap"><table class="lnt"><thead><tr><th>✓</th><th>番号</th><th>ナビ</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th></tr></thead><tbody>`
     + list.map((it) => { const nv = lntNavi(it), m = (D.ids || {})[it.map] || {}, on = checks.has(it.n);
-      return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-lck="${it.n}" ${on ? "checked" : ""}></td><td>${it.n}</td><td>${esc(it.map)}${m.id ? ` <span class="muted lid" title="${m.how === "手" ? "自分で決めたマップ ID" : m.how === "公式" ? "公式サイトのマップ一覧から" : "名前の決まりからの推定(違っていたら、右クリックで直せます)"}">${esc(m.id)}${m.how === "推定" ? "?" : ""}</span>` : ""}</td><td>${it.x}</td><td>${it.y}</td><td class="muted">${esc(it.memo)}</td>
-        <td><button class="navi" data-lcp="${esc(nv.cmd)}" data-lmap="${esc(it.map)}" title="クリックでコピー（チャットに貼り付けて実行）。右クリック = このマップの ID を決める">${m.id ? "/navi2" : "コピー"}</button></td></tr>`; }).join("")
+      return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-lck="${it.n}" ${on ? "checked" : ""}></td><td>${it.n}</td><td><button class="navi" data-lcp="${esc(nv.cmd)}" data-lmap="${esc(it.map)}" title="クリックでコピー（チャットに貼り付けて実行）。右クリック = このマップの ID を決める">${m.id ? "/navi2" : "コピー"}</button></td><td>${esc(it.map)}${m.id ? ` <span class="muted lid" title="${m.how === "手" ? "自分で決めたマップ ID" : m.how === "公式" ? "公式サイトのマップ一覧から" : "名前の決まりからの推定(違っていたら、右クリックで直せます)"}">${esc(m.id)}${m.how === "推定" ? "?" : ""}</span>` : ""}</td><td>${it.x}</td><td>${it.y}</td><td class="muted">${esc(it.memo)}</td></tr>`; }).join("")
     + `</tbody></table></div><p class="hint">ナビ = <code>/navi2 マップID X/Y 1/1/1</code> をコピーします（チャットに貼り付けると経路案内。マップ ID が分からない所は「マップ名 X/Y」をコピー）。マップ ID は、公式サイトのマップ一覧と名前の決まりから出しています（<span class="muted">?</span> は推定）。違うときは、ナビのボタンを右クリックして直せます。</p>`;
   return h + imp;
 }

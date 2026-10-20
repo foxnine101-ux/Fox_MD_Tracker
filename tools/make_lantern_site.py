@@ -63,7 +63,7 @@ code{background:var(--line);padding:1px 5px;border-radius:4px}
 <div class="sub">見つけたらチェック。ナビのボタンで、ゲームのチャットに貼る文をコピーできます。チェックはこのブラウザだけに保存されます。</div>
 <div class="panel row tabs" id="tabs"></div>
 <div class="panel" id="ctl"></div>
-<div class="panel wrap"><table><thead><tr><th>✓</th><th>番号</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th><th>ナビ</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="panel wrap"><table><thead><tr><th>✓</th><th>番号</th><th>ナビ</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th></tr></thead><tbody id="rows"></tbody></table></div>
 <div class="panel row" id="tools"></div>
 <footer>
 出典: スプレッドシート「2610ハロウィン」・RO忘備録(sites.google.com/view/romemo)。作成者の同意を得て、身内向けに公開しています。URL は他の人に広めないでください。<br>
@@ -108,9 +108,8 @@ function draw() {
     <input id="q" type="search" placeholder="マップ名・メモで絞る" value="${esc(ST.q)}"><label><input type="checkbox" id="todo" ${ST.todo ? "checked" : ""}> 未発見だけ</label>
     ${nextIt ? `<button class="pri" data-cp="${esc(navi(nextIt))}">次の未発見をコピー(${nextIt.n}番)</button>` : ""}<span class="mid">${list.length} 件を表示</span></div>`;
   $("#rows").innerHTML = list.map((it) => { const m = { id: (DATA.ids[it.map] || [])[0], how: (DATA.ids[it.map] || [])[1] }, on = chk.has(it.n);
-    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td>
-      <td>${esc(it.map)}${m.id ? ` <span class="mid">${esc(m.id)}${m.how === "推" ? "?" : ""}</span>` : ""}</td><td class="x">${it.x}</td><td class="y">${it.y}</td><td class="memo">${esc(it.memo)}</td>
-      <td><button data-cp="${esc(navi(it))}">${m.id ? "/navi2" : "コピー"}</button></td></tr>`; }).join("");
+    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td><td><button data-cp="${esc(navi(it))}">${m.id ? "/navi2" : "コピー"}</button></td>
+      <td>${esc(it.map)}${m.id ? ` <span class="mid">${esc(m.id)}${m.how === "推" ? "?" : ""}</span>` : ""}</td><td class="x">${it.x}</td><td class="y">${it.y}</td><td class="memo">${esc(it.memo)}</td></tr>`; }).join("");
   $("#tools").innerHTML = `<button id="exp">チェックを書き出す</button><button id="imp">チェックを読み込む</button><span class="mid">別の端末に移すとき用(文字をコピー・貼り付け)</span>`;
 }
 document.addEventListener("click", (e) => {
