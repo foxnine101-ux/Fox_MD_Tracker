@@ -12,6 +12,7 @@ ROの通信を「読むだけ」で、キャラごとの MD の再入場でき�
 import argparse
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -40,7 +41,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.24"
+VERSION = "2.58.25"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -440,6 +441,9 @@ def start_live_server(core, lock, cfg):
             path = self.path.split("?")[0]
             if path in ("/", "/index.html", "/app.html"):
                 return self._file("app.html", "text/html; charset=utf-8")
+            m = re.fullmatch(r"/web/([A-Za-z0-9_]+\.js)", path)         # 画面の中身(機能ごとに分けた JavaScript)
+            if m:
+                return self._file("web/" + m.group(1), "text/javascript; charset=utf-8")
             if DEV and path in ("/live", "/live.html"):   # 耐性リアルタイムは開発版だけ
                 return self._file("live.html", "text/html; charset=utf-8")
             if path == "/api/links" and self._local_only():
@@ -762,45 +766,13 @@ def start_live_server(core, lock, cfg):
                     act, sk = str(b.get("action") or ""), str(b.get("set") or "lantern")
                     if sk not in ("lantern", "more"):
                         raise ValueError
-                    msg = ""
-                    if act == "sheet":
-                        text, got = lantern_core.fetch_sheets(str(b.get("url") or ""), lantern_core.MAIN_SHEETS if sk == "lantern" else lantern_core.MORE_SHEETS, _lantern_fetch_text, log=print)
-                        items = lantern_core.parse_text(text)
-                        if not items:
-                            return self._send(200, json.dumps({"ok": False, "msg": "座標を読めませんでした(リンクで共有されているか・シートの名前が合っているか、確認してください)"}, ensure_ascii=False), "application/json; charset=utf-8")
-                        msg = "{} か所を取り込みました(シート {})".format(len(items), "・".join(got))
+                    try:
+                        items, msg = lantern_core.read_import(act, sk, b, _lantern_fetch_text, log=print)
+                    except lantern_core.Msg as m:
+                        return self._send(200, json.dumps({"ok": False, "msg": str(m)}, ensure_ascii=False), "application/json; charset=utf-8")
                     with lock:
                         d = load_lantern()
-                        if act in ("text", "sheet"):
-                            if act == "text":
-                                items = lantern_core.parse_text(str(b.get("text") or ""))
-                                if not items:
-                                    return self._send(200, json.dumps({"ok": False, "msg": "座標を読めませんでした(1行 = 番号・マップ名・X・Y・備考 の形で貼ってください)"}, ensure_ascii=False), "application/json; charset=utf-8")
-                                msg = "{} か所を取り込みました".format(len(items))
-                            st = d["sets"].setdefault(sk, {"items": []})
-                            have = {x["n"]: x for x in st.get("items") or []}
-                            have.update({x["n"]: x for x in items})                                  # 番号で合流(新しい方で置きかえ)
-                            st["items"] = [have[k] for k in sorted(have)]
-                            st["t"] = int(time.time())
-                            st["src"] = "貼り付け" if act == "text" else "スプレッドシート"
-                        elif act == "clear":
-                            d["sets"].pop(sk, None)
-                            d["noseed" if sk == "lantern" else "noseed_more"] = True                                                # 消したあとは、同梱の座標を出さない(「同梱に戻す」で戻る)
-                            msg = "消しました"
-                        elif act == "reseed":
-                            d.pop("noseed" if sk == "lantern" else "noseed_more", None)
-                            d["sets"].pop(sk, None)
-                            msg = "同梱の座標に戻しました"
-                        elif act == "mapid":
-                            nm, mid = str(b.get("name") or "").strip(), str(b.get("id") or "").strip()
-                            if not nm or len(mid) > 40:
-                                raise ValueError
-                            if mid:
-                                d["manual"][nm] = mid
-                            else:
-                                d["manual"].pop(nm, None)
-                        else:
-                            raise ValueError
+                        msg = lantern_core.apply_action(d, act, sk, b, items, msg)
                         _write_json(LANTERN_FILE, d)
                         out = dict(lantern_payload(load_lantern()), ok=True, msg=msg)       # 保存したものを読み直して返す(同梱の初期値・「消した」の扱いも、読み込みと同じ)
                 except Exception as e:
@@ -1245,52 +1217,24 @@ def load_skill_fix():
     return names, attrs
 
 
-def _lantern_seed(which="lantern"):
-    """同梱の座標(lantern_seed.bin = 暗号化した zlib の JSON。lantern = ランタン・ハント / more = もっとランタン・ハント)。無い・読めなければ []。"""
-    try:
-        import zlib
-        p = resource("lantern_seed.bin")
-        k = LIC.data_key("lantern") if LIC is not None else ""
-        if p and k:
-            with open(p, "rb") as f:
-                return json.loads(zlib.decompress(lantern_core.unseal(f.read(), k)).decode("utf-8")).get("items" if which == "lantern" else which) or []
-    except Exception as e:
-        print("[ランタン] 同梱の座標を読めませんでした:", e)
-    return []
+def _lantern_blob():
+    """同梱の座標(lantern_seed.bin)の中身。無ければ None。"""
+    p = resource("lantern_seed.bin")
+    if not p:
+        return None
+    with open(p, "rb") as f:
+        return f.read()
 
 
 def load_lantern():
-    """ランタンハント.json → {"sets": {"lantern": {items, t, src}, "more": {…}}, "manual": {マップ名: ID}}。
-    利用者の一覧(ランタン・ハント)が無いときは、同梱の座標を初期値にする(「消す」を押したあとは出さない: noseed)。"""
-    d = {"sets": {}, "manual": {}}
-    try:
-        with open(LANTERN_FILE, "r", encoding="utf-8") as f:
-            x = json.load(f)
-        if isinstance(x, dict):
-            d = x
-            d.setdefault("sets", {})
-            d.setdefault("manual", {})
-    except (OSError, ValueError):
-        pass
-    for sk, flag in (("lantern", "noseed"), ("more", "noseed_more")):
-        if not (d["sets"].get(sk) or {}).get("items") and not d.get(flag):
-            seed = _lantern_seed(sk)
-            if seed:
-                d["sets"][sk] = {"items": seed, "t": 0, "src": "同梱"}
-    return d
+    """ランタンハント.json + 同梱の座標(利用キーで開く)。中身の決まりは lantern_core.load"""
+    return lantern_core.load(LANTERN_FILE, _lantern_blob, lambda: LIC.data_key("lantern") if LIC is not None else "")
 
 
 def lantern_payload(d=None):
-    """画面に渡す形: 一覧 + マップ名ごとのマップ ID(公式のマップ一覧 → 名前の決まり → 手で決めたもの)"""
-    d = d or load_lantern()
-    names = []
-    for st in d["sets"].values():
-        for it in st.get("items") or []:
-            if it["map"] not in names:
-                names.append(it["map"])
+    """画面に渡す形(lantern_core.payload)"""
     ml = OFFICIAL.maplist if OFFICIAL is not None else []
-    return {"sets": d["sets"], "manual": d["manual"], "ids": lantern_core.resolve_ids(names, ml, d["manual"]), "mapn": len(ml), "official": OFFICIAL is not None,
-            "needkey": not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed") and not (LIC is not None and LIC.data_key("lantern", fetch=False))}
+    return lantern_core.payload(d or load_lantern(), ml, OFFICIAL is not None, bool(LIC is not None and LIC.data_key("lantern", fetch=False)))
 
 
 def _lantern_fetch_text(u):

@@ -51,8 +51,14 @@ if rd("md_state.json"):
 # app.html は 8788 を「本物の exe」と見なす箇所があるので、テスト用ポートに読みかえた写しを配る
 html = open(mt.resource("app.html"), encoding="utf-8").read().replace('location.port === "8788"', 'location.port === "%d"' % a.port)
 open(os.path.join(T, "app.html"), "w", encoding="utf-8").write(html)
+os.makedirs(os.path.join(T, "web"), exist_ok=True)           # 画面の中身(web/*.js)も同じ読みかえをして配る
+_webdir = os.path.dirname(mt.resource("app.html")) + os.sep + "web"
+for _f in os.listdir(_webdir):
+    if _f.endswith(".js"):
+        _js = open(os.path.join(_webdir, _f), encoding="utf-8").read().replace('location.port === "8788"', 'location.port === "%d"' % a.port)
+        open(os.path.join(T, "web", _f), "w", encoding="utf-8").write(_js)
 _orig = mt.resource
-mt.resource = lambda n: os.path.join(T, "app.html") if n == "app.html" else _orig(n)
+mt.resource = lambda n: os.path.join(T, n) if n == "app.html" or n.startswith("web/") else _orig(n)
 mt.CHARS = char_core.CharCore(md=core, log=print)
 if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))

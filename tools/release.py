@@ -30,12 +30,10 @@ if not re.fullmatch(r"\d+\.\d+\.\d+", a.version):
 
 # 検査
 run(sys.executable, "-m", "pyflakes", *[f for f in os.listdir(".") if f.endswith(".py")])
-html = open("app.html", encoding="utf-8").read()
-js = re.findall(r"<script>(.*?)</script>", html, re.S)[-1]
-tmp = os.path.join(tempfile.gettempdir(), "fox_app_check.js")
-open(tmp, "w", encoding="utf-8").write(js)
-run("node", "--check", tmp)
-print("検査OK(pyflakes・app.html の構文)")
+for f in sorted(os.listdir("web")):                       # 画面の中身(web/*.js)を1つずつ構文検査
+    if f.endswith(".js"):
+        run("node", "--check", os.path.join("web", f))
+print("検査OK(pyflakes・web/*.js の構文)")
 if a.dry_run:
     sys.exit(0)
 

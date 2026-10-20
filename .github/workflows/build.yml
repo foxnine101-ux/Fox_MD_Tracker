@@ -48,7 +48,7 @@ jobs:
         run: |
           Set-Content -Path edition.py -Encoding utf8 -Value "DEV = False"
           python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker --icon icon.ico `
-            --add-data "app.html;." `
+            --add-data "app.html;." --add-data "web;web" `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." --add-data "ratorio_cdn;ratorio_cdn" `
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "mob_ids.json;." --add-data "skill_hits.json;." --add-data "skill_counter.json;." --add-data "ail_counter.json;." --add-data "item_names_fix.json;." --add-data "calc_data.json;." --add-data "item_link.json;." --add-data "lantern_seed.bin;." --add-data "option_names.json;." `
             --hidden-import edition `
@@ -66,7 +66,7 @@ jobs:
         run: |
           Set-Content -Path edition.py -Encoding utf8 -Value "DEV = True"
           python -m PyInstaller --noconfirm --onefile --noconsole --name Fox_MD_Tracker_dev --icon icon.ico `
-            --add-data "app.html;." --add-data "live.html;." `
+            --add-data "app.html;." --add-data "web;web" --add-data "live.html;." `
             --add-data "packet_lengths.json;." --add-data "id2name.json;." --add-data "ratorio_cdn;ratorio_cdn" `
             --add-data "tray.png;." --add-data "icon.ico;." --add-data "skill_names.json;." --add-data "skill_info.json;." --add-data "gear_info.json;." --add-data "mob_info.json;." --add-data "mob_ids.json;." --add-data "skill_hits.json;." --add-data "skill_counter.json;." --add-data "ail_counter.json;." --add-data "item_names_fix.json;." --add-data "calc_data.json;." --add-data "item_link.json;." --add-data "lantern_seed.bin;." --add-data "option_names.json;." `
             --hidden-import edition `

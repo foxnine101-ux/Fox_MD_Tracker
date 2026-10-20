@@ -337,6 +337,34 @@
 - 残り(2 は v2.21.0 で済み): 2 装備の編集(プルダウン・検索)と Fox のキャラ/装備セットの取り込み、3 支援・アイテムのオンオフ(数が多いので目的別のタブ・検索・オンのものだけ表示・よく使う組み合わせ)、
   4 保存URL の書き出しと「複数の装備セットで 無詠唱/ASPD193 を満たすか」、5 ダメージ・被ダメとの連携(被ダメの検証を合流)
 
+## 画面の部品の地図(v2.58.25 で app.html を機能ごとに分けた)
+`app.html` は枠(スタイルと `<div>`)だけ。中身の JavaScript は **`web/NN_名前.js`** に分けて、番号の順に `<script src>` で読む(1つの名前空間を共有する = 以前の1ファイルと同じ動き。各ファイルの頭に `"use strict";`)。サーバーは `/web/<名前>.js` で配る(md_tracker の `do_GET`)・exe には build.yml の `--add-data "web;web"`(2か所)で同梱。**この CLAUDE.md の古い記述の「app.html の ○○」は、いまは下のどれかのファイルにある**(`grep -n "名前" web/*.js` で探す)。
+| ファイル | 中身 |
+|---|---|
+| `01_base.js` | 定数・設定(SETTINGS)・MDのまとめ方・サーバー(ワールド)・複数選択・アカウント・キャラの並び替え・画面(render)の骨組み |
+| `02_menu.js` | 右クリックのメニュー |
+| `03_resist.js` | MD耐性の共通部品・耐性タブ(スタイルの注入もここ) |
+| `04_dmg_equip.js` | 被ダメ(タブ)・装備・外し忘れ(CARRY) |
+| `05_sim_core.js` | 計算機の土台(`ENG` 計算係・`SIMC`・キャラシミュレーターの画面) |
+| `06_sim_gear.js` | 装備の編集・装備スロット(箱)・支援/アイテム/スキル |
+| `07_sim_status.js` | ステータスシミュレーター(ASPD・詠唱・ステ振り・ASPD の目安・ローテーション) |
+| `08_sim_compare.js` | 装備セットを並べて比べる・効く支援の欄 |
+| `09_sim_sandbag.js` | サンドバックマン・精霊 |
+| `10_sim_atk.js` | 与ダメシミュレーター(時限効果・期待値) |
+| `11_sim_fox.js` | Fox のキャラ・装備セットの取り込み(`simcFromFox`・`simcWear`・`simcFind`) |
+| `12_sim_dmgcheck.js` | 被ダメの検証(被ダメシミュ) |
+| `13_ratorio.js` | ラトリオ(計算機タブ)・つなぎ役 `ratFill`・名前がわからないアイテム |
+| `14_chars.js` | キャラタブ |
+| `15_halloween.js` | ハロウィン 2026(ガーリン次郎・経験値・ランタンハント) |
+| `16_equipset.js` | 装備セットタブ |
+| `17_official.js` | 公式モンスター情報・名前の分からない相手の紐付け |
+| `18_events.js` / `19_nyar.js` | イベント / ニャル様 |
+| `20_monsters_maps.js` | モンスタータブ・マップ読み込み |
+| `21_license_sync.js` | 通信(fetch の共通部)・利用キー・共有の結びつけ・2台の同期・記録の引っ越し |
+| `22_update.js` / `23_boot.js` | アップデート / 起動(最後に読む。`load()` を呼ぶ) |
+**分けるときの注意**: ①全部が1つの名前空間なので、ファイルをまたいで関数・`let`/`const` をそのまま使える。②関数宣言は同じファイルの中でしか「先に使える」(巻き上げ)にならない。**読み込み中(トップレベル)に、あとのファイルの関数を呼ばない**(呼ぶのは 23_boot.js か、イベント・タイマーの中だけ)。③ファイルを足したら app.html の `<script src>` に番号の順で足す・各ファイルが単独で `node --check` を通ること。④確認の型: 古い版(HEAD)と新しい版を別のポートで動かし、全タブ・サブタブの描画結果(数字をそろえたハッシュ)が一致すること(v2.58.25 はこれで 23 画面すべて一致)。
+**Python 側**: ランタンの保存・同梱の初期値・取り込みの操作は `lantern_core.py`(`load`・`payload`・`read_import`・`apply_action`・`seal/unseal`)に移した。`md_tracker.py` の `load_lantern`/`lantern_payload` は保存先・利用キーを渡す薄い呼び出しだけ(テストが `mt.LANTERN_FILE`/`mt.LIC` を差しかえるため、名前は残してある)。**まだ分けていない**: `start_live_server` の中の巨大な `Handler`(約 600 行・`core`/`lock`/`cfg` を閉じ込めている)・`Sniffer`・`main`・記録の引っ越し(`records_*`)・サンドバック/共有の結びつけ/計算機のキャラの保存(`load_*`/`save_*`)。
+
 ## 計算機(被ダメの検証。app.html の `renderSim`)
 - 記録から逆算: 軽減前 = (受けたダメージ + 引かれる分) ÷ 受けたときの軽減 → 別の装備セットの軽減をかけ直す
 - 軽減の段階(`simStages`): 鎧の属性の相性 × 属性耐性(上限95%) × 種族 × ボス/一般 × サイズ × 遠距離/魔法 × DEF(4000+d)/(4000+10d) または MDEF(1000+d)/(1000+10d) × RES/MRES(2000+r)/(2000+5r) × 補助。最後にステータスの DEF/MDEF を引く
@@ -360,7 +388,7 @@
 `設定.json` `表示の設定.json`(画面の設定。`ignoreServers` も) `サーバー.json` `md_state.json` `char_state.json` `被ダメ記録.json` `被ダメ_確認用データ.json` `スキル名の手直し.json` `アイテム名の手直し.json` `計算機のキャラ.json` `公式モンスター.json`(公式サイトから集めた、その PC だけのデータ。配らない) `ラトリオ/`(取り込んだ計算機) `動作ログ.txt` `アップデートログ.txt`
 
 ## テストのしかた
-- `python -m pyflakes *.py`、app.html の `<script>` を取り出して `node --check`
+- `python -m pyflakes *.py`、`web/*.js` を1つずつ `node --check`(`tools/release.py` がやる)
 - 画面(おすすめは上の `tools/ui_test_server.py`): md_tracker を import → `md_core.MDCore` にダミーのキャラ・通信を流す → `start_live_server` → Playwright(Chromium)で操作・スクショ
   - 保存先の定数(`DMG_FILE` など)は一時フォルダに差しかえてから動かす(リポジトリを汚さない)
 - 利用者が送ってくれた本物の通信(確認用データの `hex`)をそのまま流して確かめるのがいちばん確実

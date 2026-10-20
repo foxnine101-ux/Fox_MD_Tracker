@@ -184,3 +184,106 @@ def unseal(blob, key_hex):
     if not hmac.compare_digest(tag, hmac.new(key, b"mac" + nonce + ct, hashlib.sha256).digest()):
         raise ValueError("鍵が違うか、壊れています")
     return bytes(a ^ b for a, b in zip(ct, _stream(key, nonce, len(ct))))
+
+
+# ---- 保存ファイル(ランタンハント.json)の読み書きと、画面の操作。通信・保存先・利用キーは呼び出し側(md_tracker)が渡す ----
+SETS = (("lantern", "noseed"), ("more", "noseed_more"))          # (セット名, 「消した」の印)
+
+
+class Msg(Exception):
+    """利用者に見せる断り(画面には ok:false と文で返す)"""
+
+
+def seed_items(which, blob, key):
+    """同梱の座標(暗号化した zlib の JSON)から、which のセットの座標を取り出す。取り出せなければ []。"""
+    import json
+    import zlib
+    try:
+        return json.loads(zlib.decompress(unseal(blob, key)).decode("utf-8")).get("items" if which == "lantern" else which) or []
+    except Exception as e:
+        print("[ランタン] 同梱の座標を読めませんでした:", e)
+        return []
+
+
+def load(path, seed_blob, data_key):
+    """ランタンハント.json → {"sets": {"lantern": {items, t, src}, "more": {…}}, "manual": {マップ名: ID}}。
+    利用者の一覧が無いときは、同梱の座標を初期値にする(「消す」を押したあとは出さない: noseed / noseed_more)。
+    seed_blob() → 同梱の bin の中身(無ければ None)・data_key() → 鍵(無ければ "")。どちらも必要になったときだけ呼ぶ。"""
+    import json
+    d = {"sets": {}, "manual": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            x = json.load(f)
+        if isinstance(x, dict):
+            d = x
+            d.setdefault("sets", {})
+            d.setdefault("manual", {})
+    except (OSError, ValueError):
+        pass
+    for sk, flag in SETS:
+        if not (d["sets"].get(sk) or {}).get("items") and not d.get(flag):
+            blob, key = seed_blob(), data_key()
+            seed = seed_items(sk, blob, key) if blob and key else []
+            if seed:
+                d["sets"][sk] = {"items": seed, "t": 0, "src": "同梱"}
+    return d
+
+
+def payload(d, maplist, official_on, has_key):
+    """画面に渡す形: 一覧 + マップ名ごとのマップ ID(公式のマップ一覧 → 名前の決まり → 手で決めたもの)。has_key = 鍵をもう持っているか"""
+    names = []
+    for st in d["sets"].values():
+        for it in st.get("items") or []:
+            if it["map"] not in names:
+                names.append(it["map"])
+    return {"sets": d["sets"], "manual": d["manual"], "ids": resolve_ids(names, maplist, d["manual"]), "mapn": len(maplist), "official": official_on,
+            "needkey": not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed") and not has_key}
+
+
+def read_import(act, sk, b, fetch_text, log=print):
+    """貼り付け(text)・スプレッドシート(sheet)のとき、取り込む座標を読む → (items, msg)。それ以外は ([], "")。読めなければ Msg。
+    通信が入るので、保存の鍵(lock)の外で呼ぶ。"""
+    if act == "sheet":
+        text, got = fetch_sheets(str(b.get("url") or ""), MAIN_SHEETS if sk == "lantern" else MORE_SHEETS, fetch_text, log=log)
+        items = parse_text(text)
+        if not items:
+            raise Msg("座標を読めませんでした(リンクで共有されているか・シートの名前が合っているか、確認してください)")
+        return items, "{} か所を取り込みました(シート {})".format(len(items), "・".join(got))
+    if act == "text":
+        items = parse_text(str(b.get("text") or ""))
+        if not items:
+            raise Msg("座標を読めませんでした(1行 = 番号・マップ名・X・Y・備考 の形で貼ってください)")
+        return items, "{} か所を取り込みました".format(len(items))
+    return [], ""
+
+
+def apply_action(d, act, sk, b, items, msg):
+    """d(load の結果)を操作して書きかえる → 利用者に見せる文。書き込みは呼び出し側。不正な操作は ValueError。"""
+    import time
+    flag = dict(SETS)[sk]
+    if act in ("text", "sheet"):
+        st = d["sets"].setdefault(sk, {"items": []})
+        have = {x["n"]: x for x in st.get("items") or []}
+        have.update({x["n"]: x for x in items})                                  # 番号で合流(新しい方で置きかえ)
+        st["items"] = [have[k] for k in sorted(have)]
+        st["t"] = int(time.time())
+        st["src"] = "貼り付け" if act == "text" else "スプレッドシート"
+        return msg
+    if act == "clear":
+        d["sets"].pop(sk, None)
+        d[flag] = True                                                           # 消したあとは、同梱の座標を出さない(「同梱に戻す」で戻る)
+        return "消しました"
+    if act == "reseed":
+        d.pop(flag, None)
+        d["sets"].pop(sk, None)
+        return "同梱の座標に戻しました"
+    if act == "mapid":
+        nm, mid = str(b.get("name") or "").strip(), str(b.get("id") or "").strip()
+        if not nm or len(mid) > 40:
+            raise ValueError("マップ名・ID が不正です")
+        if mid:
+            d["manual"][nm] = mid
+        else:
+            d["manual"].pop(nm, None)
+        return ""
+    raise ValueError("不明な操作です")
