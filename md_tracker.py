@@ -19,6 +19,7 @@ import urllib.parse
 import urllib.request
 
 import netutil
+import lantern_core
 
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
 sys.path.insert(0, HERE)
@@ -39,7 +40,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.19"
+VERSION = "2.58.20"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -50,6 +51,7 @@ STATE_FILE = os.path.join(DATA_HOME, "md_state.json")
 CHAR_STATE_FILE = os.path.join(DATA_HOME, "char_state.json")
 DMG_FILE = os.path.join(DATA_HOME, "被ダメ記録.json")
 OFFICIAL_FILE = os.path.join(DATA_HOME, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
+LANTERN_FILE = os.path.join(DATA_HOME, "ランタンハント.json")      # ランタンの座標の一覧(利用者が貼り付けた・取り込んだもの。同梱しない・配らない)
 SANDBAG_FILE = os.path.join(DATA_HOME, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
 SANDBAG_MAX = 200
 SHARED_LINKS_FILE = os.path.join(DATA_HOME, "共有の結びつけ.json")      # 配布元が承認した、ゲームのアイテム番号 → ラトリオの名前 {v, links, t}
@@ -502,6 +504,13 @@ def start_live_server(core, lock, cfg):
                         return self._send(200, f.read(), "application/json; charset=utf-8", "max-age=3600")
                 except OSError:
                     return self._send(200, b"{}", "application/json")
+            if path == "/api/lantern" and self._local_only():      # ランタンハント(ハロウィンのタブ)
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if q.get("fetch") and OFFICIAL is not None and not OFFICIAL.maplist:       # 公式のマップ一覧が無ければ、1回だけ取る(裏で。マップ ID を引くため)
+                    threading.Thread(target=OFFICIAL.fetch_maplist, daemon=True).start()
+                with lock:
+                    out = lantern_payload()
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/sandbag":            # サンドバックマンの記録(この PC に保存)
                 return self._send(200, json.dumps({"records": load_sandbag()}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/simchars":           # 計算機のキャラ(この PC に保存)
@@ -745,6 +754,54 @@ def start_live_server(core, lock, cfg):
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, '{"ok":true}', "application/json")
+            if self.path.split("?")[0] == "/api/lantern" and self._local_only():
+                # ランタンの一覧: {action: "text", set, text} 貼り付け / {action: "sheet", set, url} スプレッドシートから / {action: "clear", set} / {action: "mapid", name, id} 手で決めたマップ ID
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 1000000)).decode("utf-8"))
+                    act, sk = str(b.get("action") or ""), str(b.get("set") or "lantern")
+                    if sk not in ("lantern", "more"):
+                        raise ValueError
+                    msg = ""
+                    if act == "sheet":
+                        text, got = lantern_core.fetch_sheets(str(b.get("url") or ""), lantern_core.MAIN_SHEETS if sk == "lantern" else lantern_core.MORE_SHEETS, _lantern_fetch_text, log=print)
+                        items = lantern_core.parse_text(text)
+                        if not items:
+                            return self._send(200, json.dumps({"ok": False, "msg": "座標を読めませんでした(リンクで共有されているか・シートの名前が合っているか、確認してください)"}, ensure_ascii=False), "application/json; charset=utf-8")
+                        msg = "{} か所を取り込みました(シート {})".format(len(items), "・".join(got))
+                    with lock:
+                        d = load_lantern()
+                        if act in ("text", "sheet"):
+                            if act == "text":
+                                items = lantern_core.parse_text(str(b.get("text") or ""))
+                                if not items:
+                                    return self._send(200, json.dumps({"ok": False, "msg": "座標を読めませんでした(1行 = 番号・マップ名・X・Y・備考 の形で貼ってください)"}, ensure_ascii=False), "application/json; charset=utf-8")
+                                msg = "{} か所を取り込みました".format(len(items))
+                            st = d["sets"].setdefault(sk, {"items": []})
+                            have = {x["n"]: x for x in st.get("items") or []}
+                            have.update({x["n"]: x for x in items})                                  # 番号で合流(新しい方で置きかえ)
+                            st["items"] = [have[k] for k in sorted(have)]
+                            st["t"] = int(time.time())
+                            st["src"] = "貼り付け" if act == "text" else "スプレッドシート"
+                        elif act == "clear":
+                            d["sets"].pop(sk, None)
+                            msg = "消しました"
+                        elif act == "mapid":
+                            nm, mid = str(b.get("name") or "").strip(), str(b.get("id") or "").strip()
+                            if not nm or len(mid) > 40:
+                                raise ValueError
+                            if mid:
+                                d["manual"][nm] = mid
+                            else:
+                                d["manual"].pop(nm, None)
+                        else:
+                            raise ValueError
+                        _write_json(LANTERN_FILE, d)
+                        out = dict(lantern_payload(d), ok=True, msg=msg)
+                except Exception as e:
+                    print("[ランタン] 取り込みに失敗:", e)
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/sandbag" and self._local_only():
                 # サンドバックマンの記録: {add: 記録} / {delete: ID} / {note: [ID, 文]}。同じ中身(key)の記録は1つにまとめる。最大 SANDBAG_MAX 件(古いものから消える)
                 try:
@@ -1181,6 +1238,38 @@ def load_skill_fix():
     except Exception as e:
         print("[被ダメ] スキル名の手直しが読めませんでした:", e)
     return names, attrs
+
+
+def load_lantern():
+    """ランタンハント.json → {"sets": {"lantern": {items, t, src}, "more": {…}}, "manual": {マップ名: ID}}"""
+    try:
+        with open(LANTERN_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if isinstance(d, dict):
+            d.setdefault("sets", {})
+            d.setdefault("manual", {})
+            return d
+    except (OSError, ValueError):
+        pass
+    return {"sets": {}, "manual": {}}
+
+
+def lantern_payload(d=None):
+    """画面に渡す形: 一覧 + マップ名ごとのマップ ID(公式のマップ一覧 → 名前の決まり → 手で決めたもの)"""
+    d = d or load_lantern()
+    names = []
+    for st in d["sets"].values():
+        for it in st.get("items") or []:
+            if it["map"] not in names:
+                names.append(it["map"])
+    ml = OFFICIAL.maplist if OFFICIAL is not None else []
+    return {"sets": d["sets"], "manual": d["manual"], "ids": lantern_core.resolve_ids(names, ml, d["manual"]), "mapn": len(ml), "official": OFFICIAL is not None}
+
+
+def _lantern_fetch_text(u):
+    req = urllib.request.Request(u, headers={"User-Agent": "Fox_MD_Tracker (personal)"})
+    with urllib.request.urlopen(req, timeout=20, context=netutil.CTX) as r:
+        return r.read(3000000).decode("utf-8", "replace")
 
 
 def load_sandbag():

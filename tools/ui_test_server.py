@@ -20,7 +20,7 @@ a = ap.parse_args()
 import md_tracker as mt, md_core, char_core, dmg_core
 T = tempfile.mkdtemp(prefix="fox_ui_")
 for k in ("CONFIG_FILE", "STATE_FILE", "CHAR_STATE_FILE", "DMG_FILE", "SKILL_FIX_FILE", "DMG_RAW_FILE", "LOG_FILE", "ACCOUNTS_FILE",
-          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE"):
+          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE"):
     if hasattr(mt, k):
         setattr(mt, k, os.path.join(T, os.path.basename(getattr(mt, k))))
 if a.data:      # 計算機のスロットも、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)
@@ -28,6 +28,10 @@ if a.data:      # 計算機のスロットも、本物の写しを一時フォ�
     if os.path.exists(_sc):
         import shutil
         shutil.copy(_sc, mt.SIM_CHARS_FILE)
+if a.data and os.path.exists(os.path.join(a.data, "公式モンスター.json")):      # 公式のマップ一覧(ランタンのマップ ID を引く用)。写しを一時フォルダに置いて読む(取りにいく処理は動かさない)
+    import shutil, ro_official
+    shutil.copy(os.path.join(a.data, "公式モンスター.json"), mt.OFFICIAL_FILE)
+    mt.OFFICIAL = ro_official.Official(mt.OFFICIAL_FILE, log=lambda *x: None)
 mt.LIVE_PORT = a.port
 mt.CALC_DATA.update(json.load(open(mt.resource("calc_data.json"), encoding="utf-8")))
 if a.ratorio:

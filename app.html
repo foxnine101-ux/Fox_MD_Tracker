@@ -64,6 +64,9 @@
   td.char { cursor: pointer; }
   .carry { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 8px; font-size: 11px; font-weight: 700; background: #b45309; color: #fff; cursor: pointer; vertical-align: baseline; }
   .carry.stale { opacity: .55; }
+  .hwd { display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; text-align: center; } .hwd-s { background: #2b6cb0; } .hwd-e { background: #b7791f; }
+  table.hwt td, table.lnt td { text-align: left; } table.lnt tr.done td { opacity: .45; } table.lnt tr.done td:nth-child(3) { text-decoration: line-through; } .lid { font-size: 11px; }
+  .lbar { display: inline-block; width: 160px; height: 8px; background: rgba(128,128,128,.25); border-radius: 4px; overflow: hidden; } .lbar i { display: block; height: 100%; background: #2f9e44; }
   .eq-t tr.dim td, .eq-t tr.dim th { opacity: .45; } button.cig { margin-left: 6px; padding: 0 6px; font-size: 11px; }
   .carry.set { background: none; padding: 0; } .carry .ctag { display: inline-block; min-width: 14px; padding: 0 4px; margin-right: 2px; border-radius: 4px; color: #fff; text-align: center; }
   .carry-box { margin-top: 8px; } .carry-box h3 { margin: 10px 0 2px; font-size: 13px; }
@@ -482,7 +485,7 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["nyar", "ニャル様"], ["hw", "ハロウィン"]];   // イベント・入場履歴・設定は見出しの歯車(⚙)のメニューから
 const GEAR_TABS = [["event", "イベント"], ["history", "入場履歴"], ["mapview", "マップ読み込み"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
@@ -540,6 +543,7 @@ function renderNow() {
   if (TAB === "dmg") return renderDmg(chars, now);
   if (TAB === "mons") return renderMons();
   if (TAB === "chars" || TAB === "equip") return renderChars(chars);
+  if (TAB === "hw") return renderHalloween(chars, now);
   if (TAB === "gsets") return renderGSets(chars);
   if (TAB === "sim") return renderSim(chars);
   if (TAB === "settings") return renderSettings(groups);
@@ -4620,6 +4624,154 @@ function renderChars(chars) {
   }
 }
 
+// ---------- ハロウィンパーティ 2026(サブタブ: ガーリン次郎のMD / ランタンハント) ----------
+// 出典: 公式特設ページ https://ragnarokonline.gungho.jp/special/halloweenparty2026/ (期間 2026-10-20 〜 11-10 のメンテナンス開始まで)
+// 巨大ガーリン次郎(稀に出現)が出るメモリアルダンジョン。g = Fox のMDの表の列の名前(無いものは "")。drop: 盾 = ディザスターシールド・耳 = ディザスターイヤリング
+const HW_JIRO = [
+  { nm: "星座の塔", map: "1@ct4", at: "星座の塔 女神の祭壇", x: 39, y: 90, drop: "盾", g: "星座の塔" },
+  { nm: "生体工学研究所の記録（4thモード）", map: "1@gol2b2", at: "死体保管所(4th)", x: 49, y: 26, drop: "盾", g: "生体工学研究所の記録‐4th" },
+  { nm: "生命の殿堂", map: "1@hol4", at: "生命の殿堂 攻略エリア3", x: 54, y: 50, drop: "耳", g: "生命の殿堂" },
+  { nm: "欺瞞の別荘", map: "3@advs", at: "欺瞞の別荘(礼拝堂)", x: 123, y: 352, drop: "盾", g: "欺瞞の別荘" },
+  { nm: "悔恨の墓", map: "3@spa2", at: "地下墓地", x: 211, y: 55, drop: "盾", g: "悔恨の墓" },
+  { nm: "呪われた次元（3rd）", map: "4@gl_he", at: "汚染された次元", x: 158, y: 239, drop: "耳", g: "" },
+  { nm: "呪われた次元（4th）", map: "4@ghc4", at: "呪いの源", x: 158, y: 235, drop: "耳", g: "呪われた次元（4th）" },
+  { nm: "タナトスの記憶", map: "9@thts23", at: "タナトスの記憶 13", x: 136, y: 132, drop: "耳", g: "" },
+  { nm: "試練の迷宮", map: "4@la_00", at: "夢の終点", x: 133, y: 194, drop: "盾", g: "夢幻の迷宮" },
+  { nm: "封印の迷宮", map: "4@lb_00", at: "夢の終点", x: 133, y: 194, drop: "耳", g: "夢幻の迷宮" },
+  { nm: "異形の迷宮", map: "4@lc_00", at: "夢の終点", x: 131, y: 73, drop: "耳", g: "夢幻の迷宮" },
+  { nm: "幻影の迷宮", map: "4@ld100", at: "夢の終点", x: 61, y: 149, drop: "盾", g: "夢幻の迷宮" },
+  { nm: "幻影の迷宮", map: "4@ld200", at: "夢の終点", x: 133, y: 194, drop: "耳", g: "夢幻の迷宮" },
+  { nm: "幻影の迷宮(幻影ルート)", map: "4@le100", at: "夢の終点", x: 61, y: 149, drop: "耳", g: "夢幻の迷宮" },
+  { nm: "幻影の迷宮(試練ルート)", map: "4@lf200", at: "夢の終点", x: 133, y: 194, drop: "盾", g: "夢幻の迷宮" },
+  { nm: "亜空の迷宮", map: "4@lg100", at: "夢の終点", x: 185, y: 180, drop: "盾", g: "夢幻の迷宮" },
+  { nm: "ファロス燈台地下迷宮(ノーマル)", map: "7@infi", at: "無限の空間(深部)", x: 366, y: 366, drop: "盾", g: "ファロス燈台地下迷宮" },
+  { nm: "ファロス燈台地下迷宮(ハード)", map: "7@a_inf", at: "無限の空間(深部)", x: 366, y: 366, drop: "盾", g: "ファロス燈台地下迷宮" },
+  { nm: "特異点 名もなき島（ノーマル）", map: "1@nls5", at: "隠された礼拝堂", x: 58, y: 42, drop: "盾", g: "特異点 名もなき島" },
+  { nm: "特異点 名もなき島（インフェルノ）", map: "2@nls5", at: "隠された礼拝堂", x: 58, y: 42, drop: "耳", g: "特異点 名もなき島" },
+  { nm: "特異点 生体工学研究所（インフェルノ）", map: "2@lhj8", at: "02 観測エリア", x: 55, y: 152, drop: "耳", g: "" },
+  { nm: "特異点 タナトスタワー（インフェルノ）", map: "1@thj27", at: "頂上", x: 135, y: 130, drop: "盾", g: "" },
+  { nm: "特異点 タナトスタワー（チャレンジ）", map: "2@thj27", at: "頂上", x: 135, y: 130, drop: "耳", g: "" },
+];
+const HW_DROPN = { "盾": "ディザスターシールド", "耳": "ディザスターイヤリング" };
+let HWV = store.get("md_hwv") || "jiro", HW_DROP = "all", HW_ONLYOK = false;
+const hwNav = () => `<div class="simnav"><button data-hwv="jiro" class="${HWV === "jiro" ? "on" : ""}">ガーリン次郎のMD</button><button data-hwv="lantern" class="${HWV === "lantern" ? "on" : ""}">ランタンハント</button></div>`;
+function renderHalloween(chars, now) {
+  const body = HWV === "lantern" ? lntHtml(chars) : hwJiroHtml(chars, now);
+  $("#view").innerHTML = `${hwNav()}${body}`;
+  $("#view").querySelectorAll("[data-hwv]").forEach((b) => b.onclick = () => { HWV = b.dataset.hwv; store.set("md_hwv", HWV); render(); });
+  if (HWV === "lantern") lntBind(chars); else hwJiroBind();
+}
+// ---- ガーリン次郎のMD: 対象のMDだけ抜き出したマトリクス(メインの表と同じ記録・同じ見方) ----
+function hwJiroHtml(chars, now) {
+  const groups = new Map(buildGroups().map((G) => [G.name, G]));
+  const ents = HW_JIRO.filter((e) => HW_DROP === "all" || e.drop === HW_DROP);
+  let cols = [];
+  for (const e of ents) {
+    const key = e.g || "x:" + e.nm; let col = cols.find((c) => c.key === key);
+    if (!col) { col = { key, name: e.g || e.nm, G: e.g ? groups.get(e.g) || null : null, ents: [] }; cols.push(col); }
+    col.ents.push(e);
+  }
+  if (HW_ONLYOK) cols = cols.filter((c) => c.G && chars.some((ch) => { const t = endOf(ch, c.G); return t !== null && t <= now; }));
+  const chip = (c) => [...new Set(c.ents.map((e) => e.drop))].map((d) => `<span class="hwd hwd-${d === "盾" ? "s" : "e"}" title="${esc(HW_DROPN[d])}">${d}</span>`).join("");
+  let h = `<div class="panel" style="padding:10px 14px"><b>ハロウィンパーティ 2026 ～ガーリン次郎～</b> <span class="muted">（10/20 メンテ後 〜 11/10 メンテ開始まで）</span>
+    <div class="muted" style="font-size:12px;margin-top:4px">メモリアルダンジョンに出る<b>巨大ガーリン次郎（稀）</b>は、ディザスターシールド(<span class="hwd hwd-s">盾</span>)・ディザスターイヤリング(<span class="hwd hwd-e">耳</span>)を落とします。少なめに出るガーリン次郎は ハロウィンコイン。下は、対象のMDだけを抜き出した表です（● = いま行ける / 数字 = あと何時間 / ー = 記録なし）。出典: <a href="https://ragnarokonline.gungho.jp/special/halloweenparty2026/" target="_blank" rel="noopener">公式特設ページ</a></div></div>
+    <div class="opts"><span>落とすもの:</span> ${[["all", "すべて"], ["盾", "シールド"], ["耳", "イヤリング"]].map(([v, l]) => `<label><input type="radio" name="hwdrop" value="${v}" ${HW_DROP === v ? "checked" : ""}> ${l}</label>`).join("")}
+      <label><input type="checkbox" id="hwonlyok" ${HW_ONLYOK ? "checked" : ""}> 行けるMDがある列だけ</label></div>`;
+  if (!chars.length) return h + `<div class="panel empty">まだキャラの記録がありません。</div>`;
+  h += `<div class="panel tablewrap"><table><thead><tr><th class="char">キャラ</th>` + cols.map((c) => `<th title="${esc(c.ents.map((e) => e.nm + "（" + e.drop + "）").join("\n"))}${c.G ? "" : "\nこのMDは、MDの表に列がありません(クエストの記録を読めていません)"}"><span class="mxn">${esc(c.name)}</span><br>${chip(c)}${c.ents.length > 1 ? ` <span class="muted" style="font-size:10px">×${c.ents.length}</span>` : ""}${c.G ? "" : ` <span class="muted" style="font-size:10px">記録なし</span>`}</th>`).join("") + `</tr></thead><tbody>`;
+  for (const ch of chars) {
+    h += `<tr data-char="${esc(ch)}"><td class="char" title="${esc(cn(ch))}">${esc(cn(ch))}${carryChip(ch)}<span class="ch-sub">${esc(charLvText(ch))}${jobChip(charJob(ch))}</span></td>`;
+    for (const c of cols) {
+      const t = c.G ? endOf(ch, c.G) : null;
+      if (t === null) h += `<td class="cell none">ー</td>`;
+      else if (t <= now) h += `<td class="cell okc">●</td>`;
+      else { const r = t - now; h += `<td class="cell ${r < 3 * 3600 ? "soon" : "wait"}">${remain(r)}<span class="when">${when(t)}</span></td>`; }
+    }
+    h += `</tr>`;
+  }
+  h += `</tbody></table></div>`;
+  h += `<h3 style="margin:12px 0 4px;font-size:13px">出現場所（巨大ガーリン次郎）</h3><div class="panel tablewrap"><table class="hwt"><thead><tr><th>MD</th><th>出現マップ</th><th>座標</th><th>落とすもの</th></tr></thead><tbody>`
+    + ents.map((e) => `<tr><td>${esc(e.nm)}</td><td>${esc(e.at)} <span class="muted">(${esc(e.map)})</span></td><td>${e.x}, ${e.y}</td><td><span class="hwd hwd-${e.drop === "盾" ? "s" : "e"}">${e.drop}</span> ${esc(HW_DROPN[e.drop])}</td></tr>`).join("") + `</tbody></table></div>`;
+  return h;
+}
+function hwJiroBind() {
+  $("#view").querySelectorAll("input[name=hwdrop]").forEach((r) => r.onchange = () => { HW_DROP = r.value; render(); });
+  const o = $("#hwonlyok"); if (o) o.onchange = () => { HW_ONLYOK = o.checked; render(); };
+}
+// ---- ランタンハント: 座標の一覧(利用者が取り込む)。ナビ用のコピーと、見つけたもののチェック ----
+// 一覧は「ランタンハント.json」(この PC だけ。同梱しない)。チェックは SETTINGS.lanternChecks = { キャラ(空 = 共通): { lantern: [番号…], more: […] } }
+const LNT = { data: null, loading: false, msg: "", set: store.get("md_lntset") || "lantern", who: store.get("md_lntwho") || "", area: "all", q: "", todo: false, open: false };
+const LNT_AREAS = [["all", "すべて"], ["town", "街・室内（1〜301）"], ["field", "フィールド（302〜600）"], ["sp", "特殊（601〜650）"]];     // 「301番まで街/室内のローテ、600番までフィールド、601〜650番が特殊配置」(一覧のルール欄)
+async function lntLoad(fetchMaps) {
+  if (!LOCAL) return; LNT.loading = true;
+  try { LNT.data = await fetch("/api/lantern" + (fetchMaps ? "?fetch=1" : "")).then((r) => r.json()); } catch (e) { LNT.msg = "読み込めませんでした: " + e.message; }
+  LNT.loading = false; if (TAB === "hw" && HWV === "lantern") render();
+  if (fetchMaps && LNT.data && LNT.data.official && !LNT.data.mapn) setTimeout(() => lntLoad(false), 6000);     // 公式のマップ一覧を裏で取っている間は、少し待ってもう一度(マップ ID が引ける)
+}
+async function lntPost(body) {
+  try {
+    const r = await fetch("/api/lantern", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), j = await r.json();
+    LNT.msg = j.msg || (j.ok === false ? "失敗しました" : ""); if (j.sets) LNT.data = j;
+  } catch (e) { LNT.msg = "失敗しました: " + e.message; }
+  render();
+}
+const lntChecks = () => { SETTINGS.lanternChecks = SETTINGS.lanternChecks || {}; const w = SETTINGS.lanternChecks[LNT.who] = SETTINGS.lanternChecks[LNT.who] || {}; return (w[LNT.set] = w[LNT.set] || []); };
+function lntNavi(it) {              // コピーする文字: マップ ID が分かれば /navi2、分からなければ 名前 X/Y
+  const m = (LNT.data.ids || {})[it.map] || {}, id = m.id;
+  return id ? { cmd: `/navi2 ${id} ${it.x}/${it.y} 1/1/1`, kind: m.how } : { cmd: `${it.map} ${it.x}/${it.y}`, kind: "" };
+}
+function lntHtml(chars) {
+  if (!LOCAL) return `<div class="panel empty">ランタンハントは、パソコンで動かしている Fox_MD_Tracker の画面で使えます。</div>`;
+  if (!LNT.data) { if (!LNT.loading) lntLoad(true); return `<div class="panel empty">読み込んでいます…</div>`; }
+  const D = LNT.data, S = (D.sets || {})[LNT.set], items = (S && S.items) || [];
+  const setTabs = `<div class="opts"><span>一覧:</span><label><input type="radio" name="lntset" value="lantern" ${LNT.set === "lantern" ? "checked" : ""}> ランタン・ハント</label><label><input type="radio" name="lntset" value="more" ${LNT.set === "more" ? "checked" : ""}> もっとランタン・ハント</label></div>`;
+  const imp = `<details class="panel" style="padding:8px 12px" ${LNT.open || !items.length ? "open" : ""} id="lntimp"><summary><b>データの取り込み</b> <span class="muted">${items.length ? `（${items.length} か所入っています。足す・入れ直す）` : "（まだ入っていません）"}</span></summary>
+    <div class="muted" style="font-size:12px;margin:6px 0">座標の一覧は、他の人がまとめたスプレッドシートなどから、<b>自分で取り込みます</b>（このツールには入れていません）。リンクで共有されているスプレッドシートの URL を入れるか、番号・マップ名・X・Y・備考 の列をコピーして貼り付けてください（何回かに分けて貼ってよい。同じ番号は新しいもので置きかえ）。2026年の一覧は、2024年と同じ座標のようです（ランタンを追加で見つけたら、貼り付けで足せます）。</div>
+    <div class="opts"><input id="lntu" type="text" placeholder="スプレッドシートの URL（https://docs.google.com/spreadsheets/d/…）" style="min-width:340px"><button class="ghost" id="lntgo">URL から取り込む</button></div>
+    <textarea id="lntt" rows="4" style="width:100%;margin-top:6px" placeholder="ここに貼り付け（例: 3, プロンテラ, 155, 290, 握手像裏 ／ スプレッドシートからコピーした列そのままでも可）"></textarea>
+    <div class="opts"><button class="ghost" id="lntpaste">貼り付けた分を取り込む</button><label class="ghost" style="cursor:pointer">ファイルから <input type="file" id="lntf" accept=".csv,.tsv,.txt" hidden></label>${items.length ? `<button class="ghost" id="lntclr">この一覧を消す</button>` : ""}<span class="muted">${esc(LNT.msg)}</span></div></details>`;
+  if (!items.length) return setTabs + imp;
+  const checks = new Set(((((SETTINGS.lanternChecks || {})[LNT.who]) || {})[LNT.set]) || []);
+  const inArea = (it) => LNT.set !== "lantern" || LNT.area === "all" || (LNT.area === "town" ? it.n <= 301 : LNT.area === "field" ? it.n >= 302 && it.n <= 600 : it.n >= 601);
+  const q = ratNorm(LNT.q), list = items.filter((it) => inArea(it) && (!q || ratNorm(it.map + " " + it.memo).includes(q)) && (!LNT.todo || !checks.has(it.n)));
+  const done = items.filter((it) => checks.has(it.n)).length, nextIt = list.find((it) => !checks.has(it.n));
+  const who = `<select id="lntwho"><option value="">共通（みんなで1つ）</option>${chars.map((c) => `<option value="${esc(c)}" ${LNT.who === c ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select>`;
+  let h = setTabs + `<div class="panel" style="padding:10px 14px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>見つけた ${done} / ${items.length}</b>
+      <span class="lbar"><i style="width:${items.length ? Math.round(done * 100 / items.length) : 0}%"></i></span> <span class="muted">チェックの対象:</span> ${who}</div>
+    <div class="opts" style="margin-top:6px"><select id="lntarea" ${LNT.set === "lantern" ? "" : "hidden"}>${LNT_AREAS.map(([v, l]) => `<option value="${v}" ${LNT.area === v ? "selected" : ""}>${l}</option>`).join("")}</select>
+      <input id="lntq" type="search" placeholder="マップ名・メモで絞る" value="${esc(LNT.q)}"><label><input type="checkbox" id="lnttodo" ${LNT.todo ? "checked" : ""}> 未発見だけ</label>
+      ${nextIt ? `<button class="ghost" data-lcp="${esc(lntNavi(nextIt).cmd)}" title="${esc(nextIt.n + "番 " + nextIt.map + " " + nextIt.x + "," + nextIt.y)}">次の未発見をコピー（${nextIt.n}番）</button>` : ""}
+      <span class="muted">${list.length} 件を表示</span></div></div>`;
+  h += `<div class="panel tablewrap"><table class="lnt"><thead><tr><th>✓</th><th>番号</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th><th>ナビ</th></tr></thead><tbody>`
+    + list.map((it) => { const nv = lntNavi(it), m = (D.ids || {})[it.map] || {}, on = checks.has(it.n);
+      return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-lck="${it.n}" ${on ? "checked" : ""}></td><td>${it.n}</td><td>${esc(it.map)}${m.id ? ` <span class="muted lid" title="${m.how === "手" ? "自分で決めたマップ ID" : m.how === "公式" ? "公式サイトのマップ一覧から" : "名前の決まりからの推定(違っていたら、右クリックで直せます)"}">${esc(m.id)}${m.how === "推定" ? "?" : ""}</span>` : ""}</td><td>${it.x}</td><td>${it.y}</td><td class="muted">${esc(it.memo)}</td>
+        <td><button class="navi" data-lcp="${esc(nv.cmd)}" data-lmap="${esc(it.map)}" title="クリックでコピー（チャットに貼り付けて実行）。右クリック = このマップの ID を決める">${m.id ? "/navi2" : "コピー"}</button></td></tr>`; }).join("")
+    + `</tbody></table></div><p class="hint">ナビ = <code>/navi2 マップID X/Y 1/1/1</code> をコピーします（チャットに貼り付けると経路案内。マップ ID が分からない所は「マップ名 X/Y」をコピー）。マップ ID は、公式サイトのマップ一覧と名前の決まりから出しています（<span class="muted">?</span> は推定）。違うときは、ナビのボタンを右クリックして直せます。</p>`;
+  return h + imp;
+}
+function lntBind(chars) {
+  const v = $("#view");
+  v.querySelectorAll("input[name=lntset]").forEach((r) => r.onchange = () => { LNT.set = r.value; store.set("md_lntset", LNT.set); render(); });
+  const w = $("#lntwho"); if (w) w.onchange = () => { LNT.who = w.value; store.set("md_lntwho", LNT.who); render(); };
+  const a = $("#lntarea"); if (a) a.onchange = () => { LNT.area = a.value; render(); };
+  const q = $("#lntq"); if (q) q.oninput = () => { LNT.q = q.value; clearTimeout(LNT.qt); LNT.qt = setTimeout(() => { render(); const e = $("#lntq"); if (e) { e.focus(); e.setSelectionRange(e.value.length, e.value.length); } }, 300); };
+  const t = $("#lnttodo"); if (t) t.onchange = () => { LNT.todo = t.checked; render(); };
+  v.querySelectorAll("[data-lck]").forEach((c) => c.onchange = () => {              // 見つけた・見つけていない
+    const n = +c.dataset.lck, arr = lntChecks(), i = arr.indexOf(n); if (c.checked && i < 0) arr.push(n); else if (!c.checked && i >= 0) arr.splice(i, 1);
+    saveSettings(); render();
+  });
+  v.querySelectorAll("[data-lcp]").forEach((b) => b.onclick = async () => { try { await navigator.clipboard.writeText(b.dataset.lcp); } catch (e) { const ta = document.createElement("textarea"); ta.value = b.dataset.lcp; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch (e2) {} ta.remove(); } b.classList.add("copied"); setTimeout(() => b.classList.remove("copied"), 1200); });
+  v.querySelectorAll("[data-lmap]").forEach((b) => b.oncontextmenu = (e) => {       // マップ ID を手で決める
+    e.preventDefault(); const nm = b.dataset.lmap, cur = ((LNT.data.ids || {})[nm] || {}).id || "";
+    const id = prompt(`「${nm}」のマップ ID（例: prontera, prt_fild00）。空にすると、手で決めたものを消します。`, cur);
+    if (id !== null) lntPost({ action: "mapid", name: nm, id: id.trim() });
+  });
+  const imp = $("#lntimp"); if (imp) imp.ontoggle = () => { LNT.open = imp.open; };
+  const go = $("#lntgo"); if (go) go.onclick = () => { const u = $("#lntu").value.trim(); if (!u) { LNT.msg = "URL を入れてください"; return render(); } LNT.msg = "取り込んでいます…（シートごとに少し間をあけて取ります）"; LNT.open = true; render(); lntPost({ action: "sheet", set: LNT.set, url: u }); };
+  const pa = $("#lntpaste"); if (pa) pa.onclick = () => { const x = $("#lntt").value; if (!x.trim()) { LNT.msg = "貼り付ける文字がありません"; return render(); } LNT.open = true; lntPost({ action: "text", set: LNT.set, text: x }); };
+  const fl = $("#lntf"); if (fl) fl.onchange = async () => { const f = fl.files[0]; if (!f) return; LNT.open = true; lntPost({ action: "text", set: LNT.set, text: await f.text() }); };
+  const cl = $("#lntclr"); if (cl) cl.onclick = () => { if (confirm("この一覧(座標のデータ)を消します。見つけたもののチェックは残ります。")) lntPost({ action: "clear", set: LNT.set }); };
+}
 // ---------- 装備セット ----------
 // 装備セット(メイン10か所)・シャドウセット(6か所)。同じ中身はキャラが違っても同じセット。記号(A, B… / S1, S2…)と名前を付けられる
 let GS_OPEN = {}, GS_FOCUS = "", GS_ALL = false, GS_NOW = false, GS_HISTALL = false;
