@@ -4654,12 +4654,12 @@ const HW_JIRO = [
 ];
 const HW_DROPN = { "盾": "ディザスターシールド", "耳": "ディザスターイヤリング" };
 let HWV = store.get("md_hwv") || "jiro", HW_DROP = "all", HW_ONLYOK = false;
-const hwNav = () => `<div class="simnav"><button data-hwv="jiro" class="${HWV === "jiro" ? "on" : ""}">ガーリン次郎のMD</button><button data-hwv="lantern" class="${HWV === "lantern" ? "on" : ""}">ランタンハント</button></div>`;
+const hwNav = () => `<div class="simnav"><button data-hwv="jiro" class="${HWV === "jiro" ? "on" : ""}">ガーリン次郎のMD</button><button data-hwv="lantern" class="${HWV === "lantern" ? "on" : ""}">ランタンハント</button><button data-hwv="exp" class="${HWV === "exp" ? "on" : ""}">経験値</button></div>`;
 function renderHalloween(chars, now) {
-  const body = HWV === "lantern" ? lntHtml(chars) : hwJiroHtml(chars, now);
+  const body = HWV === "lantern" ? lntHtml(chars) : HWV === "exp" ? hwExpHtml(chars, now) : hwJiroHtml(chars, now);
   $("#view").innerHTML = `${hwNav()}${body}`;
   $("#view").querySelectorAll("[data-hwv]").forEach((b) => b.onclick = () => { HWV = b.dataset.hwv; store.set("md_hwv", HWV); render(); });
-  if (HWV === "lantern") lntBind(chars); else hwJiroBind();
+  if (HWV === "lantern") lntBind(chars); else if (HWV === "exp") hwExpBind(); else hwJiroBind();
 }
 // ---- ガーリン次郎のMD: 対象のMDだけ抜き出したマトリクス(メインの表と同じ記録・同じ見方) ----
 function hwJiroHtml(chars, now) {
@@ -4697,6 +4697,69 @@ function hwJiroHtml(chars, now) {
 function hwJiroBind() {
   $("#view").querySelectorAll("input[name=hwdrop]").forEach((r) => r.onchange = () => { HW_DROP = r.value; render(); });
   const o = $("#hwonlyok"); if (o) o.onchange = () => { HW_ONLYOK = o.checked; render(); };
+}
+// ---- 経験値(ニャル様のタブと同じ見方): ミニスパイダリン捕獲作戦(1アカウント1日1回)・リベンジャーズ・ナイト(1アカウント1週1回) ----
+// 出典: 公式特設ページの表(2026-10-20 に原文を確認)。4次職以外は BaseLv に関係なく同じ。経験値は分割して受け取ることがある。
+const HW_EXP_ROWS = [      // [BaseLv の下限, 上限, スパイダリン Base, 同 Job, リベンジャーズ Base, 同 Job]
+  [200, 209, 56.25e9, 42.1875e9, 22.5e9, 16.875e9], [210, 219, 84.375e9, 63.28125e9, 33.75e9, 25.3125e9], [220, 229, 112.5e9, 84.375e9, 45e9, 33.75e9],
+  [230, 239, 154.5e9, 115.875e9, 61.8e9, 46.35e9], [240, 249, 206.5e9, 154.875e9, 82.6e9, 61.95e9], [250, 259, 292.5e9, 219.375e9, 117e9, 87.75e9],
+  [260, 269, 427.5e9, 269.325e9, 171e9, 107.73e9], [270, 284, 632.8e9, 314.1e9, 253.12e9, 125.64e9],
+];
+const HW_EXP_NON4 = [15e9, 7.5e9, 6e9, 3e9];                 // 4次職以外
+const HW_EXP_MAX = [0, 314.1e9, 0, 125.64e9];                // 4次職・BaseLv 285 かつ JobLv 65 未満(Base なし)
+const HW_FOURTH = new Set(["ドラゴンナイト", "マイスター", "シャドウクロス", "アークメイジ", "カーディナル", "ウィンドホーク", "インペリアルガード", "バイオロ", "アビスチェイサー", "エレメンタルマスター", "インクイジター", "トルバドゥール", "トルヴェール", "天帝", "ソウルアセティック", "蜃気楼", "不知火", "ナイトウォッチ", "ハイパーノービス", "スピリットハンドラー"]);
+const HW_END = Date.UTC(2026, 10, 9, 23, 0) / 1000;           // 11/10(火) 8:00(日本時間)ごろ = 定期メンテナンス開始(目安)
+const hwDayKey = (now) => Math.floor((now + 9 * 3600 - 5 * 3600) / 86400);      // デイリーは 5:00(日本時間)で切りかわる
+function hwExpOf(c) {                 // そのキャラの 1回あたり [スパイダリン Base, Job, リベンジャーズ Base, Job] と区分の名前
+  const info = DATA.chars[c] || {}, st = ((((DATA.equip || {}).chars || {})[c]) || {}).status || {};
+  const lv = st.lv ?? info.lv ?? 0, jlv = st.jobLv ?? info.jobLv ?? 0, job = charJob(c), four = HW_FOURTH.has(job);
+  if (!four) return { v: HW_EXP_NON4, label: job ? "4次職以外" : "4次職以外（職業不明）", lv, jlv };
+  if (lv >= 285) return jlv && jlv < 65 ? { v: HW_EXP_MAX, label: "285・JobLv65未満（Baseなし）", lv, jlv } : { v: [0, 0, 0, 0], label: "対象外（285・JobLv65以上）", lv, jlv };
+  const r = HW_EXP_ROWS.find((x) => lv >= x[0] && lv <= x[1]);
+  return r ? { v: r.slice(2), label: `4次職 BaseLv ${r[0]}〜${r[1]}`, lv, jlv } : { v: HW_EXP_NON4, label: "4次職（Lv200未満）", lv, jlv };
+}
+function hwExpHtml(chars, now) {
+  const C = SETTINGS.hwExp || {}, dk = hwDayKey(now), ws = weekStart(now);
+  const known = [...new Set(chars.map((c) => accOfChar(c)).filter(Boolean))];
+  const accOf = (c) => accOfChar(c) || (known.length === 1 ? known[0] : "?");
+  const accs = new Map();
+  for (const c of chars) { const a = accOf(c); if (!accs.has(a)) accs.set(a, { chars: [] }); accs.get(a).chars.push(c); }
+  const left = (a) => {               // アカウントの残りの回数(いまの分が済みでなければ +1、このあとのリセットの数)
+    const A = accs.get(a), spDone = A.chars.some((c) => (C[c] || {}).sp === dk), rvDone = A.chars.some((c) => (C[c] || {}).rv === ws);
+    let sp = spDone ? 0 : 1, rv = rvDone ? 0 : 1;
+    for (let t = (dk + 1) * 86400 - 4 * 3600; t < HW_END; t += 86400) sp++;       // 次のリセット(5:00)が 終わりより前の数
+    for (let t = ws + 7 * 86400; t < HW_END; t += 7 * 86400) rv++;
+    return { sp, rv, spDone, rvDone };
+  };
+  const live = now < HW_END;
+  let h = `<div class="cards"><div class="panel card"><span>開催期間</span><b>10/20〜11/10</b><span>${live ? "開催中" : "終了"}・メンテナンス開始まで（目安 11/10 8:00）</span></div>
+    <div class="panel card"><span>デイリーのリセット</span><b>${remain((dk + 1) * 86400 - 4 * 3600 - now)}</b><span>毎日 5:00</span></div>
+    <div class="panel card"><span>ウィークリーのリセット</span><b>${remain(ws + 7 * 86400 - now)}</b><span>火曜 12:00</span></div>`;
+  for (const [a] of accs) { const L = left(a); h += `<div class="panel card"><span>${esc(accLabel(a))}</span><b>スパイダリン 残り ${L.sp} 回</b><span>今日 ${L.spDone ? "済" : "まだ"}・リベンジャーズ 残り ${L.rv} 回（今週 ${L.rvDone ? "済" : "まだ"}）</span></div>`; }
+  h += `</div>`;
+  const rows = chars.map((c) => ({ c, e: hwExpOf(c), a: accOf(c) })).sort((x, y) => (y.e.v[0] + y.e.v[1]) - (x.e.v[0] + x.e.v[1]) || y.e.lv - x.e.lv);
+  const best = new Map(); for (const r of rows) if (!best.has(r.a) && r.e.v[0] + r.e.v[1] > 0) best.set(r.a, r.c);
+  const pair = (b, j) => b || j ? `${b ? oku(b) : "なし"} / ${oku(j)}` : "-";
+  h += `<h2>キャラ別（1回あたりの経験値が多い順）</h2><div class="panel tablewrap"><table><thead><tr><th class="char">キャラ</th><th>Base/Job</th><th>区分</th><th>スパイダリン 1回<br><span class="muted">Base / Job</span></th><th>リベンジャーズ 1回<br><span class="muted">Base / Job</span></th><th>やった</th><th>残りを全部やると<br><span class="muted">Base / Job</span></th></tr></thead><tbody>`;
+  for (const r of rows) {
+    const L = left(r.a), v = r.e.v, mine = C[r.c] || {};
+    const tot = [v[0] * L.sp + v[2] * L.rv, v[1] * L.sp + v[3] * L.rv];
+    h += `<tr data-char="${esc(r.c)}"><td class="char">${esc(cn(r.c))}${best.get(r.a) === r.c && accs.size > 0 ? ` <span class="tag on" title="このアカウントで、1回あたりの経験値がいちばん多いキャラ">いちばん</span>` : ""}${jobChip(charJob(r.c))}</td>
+      <td>${r.e.lv || "?"}/${r.e.jlv || "?"}</td><td class="muted" style="text-align:left">${esc(r.e.label)}</td><td>${pair(v[0], v[1])}</td><td>${pair(v[2], v[3])}</td>
+      <td><label title="このキャラで、今日のスパイダリンを済ませた(アカウントでは1日1回。同じアカウントのキャラは、済み扱いになります)"><input type="checkbox" data-hwdone="sp" data-c="${esc(r.c)}" ${mine.sp === dk ? "checked" : ""}>今日</label>
+        <label title="このキャラで、今週のリベンジャーズ・ナイトを済ませた(アカウントでは週1回)"><input type="checkbox" data-hwdone="rv" data-c="${esc(r.c)}" ${mine.rv === ws ? "checked" : ""}>今週</label></td>
+      <td>${tot[0] || tot[1] ? pair(tot[0], tot[1]) : "-"}</td></tr>`;
+  }
+  h += `</tbody></table></div><p class="hint">出典: 公式特設ページ（ミニスパイダリン捕獲作戦 = 1アカウント1日1回・リベンジャーズ・ナイト = 1アカウント1週間に1回）。経験値は分割して受け取ることがあります。「残りを全部やると」は、そのキャラが残りの回数を全部やったときの合計です（残りの回数は、アカウントごと・目安）。「やった」は手で付けます（毎日 5:00・火曜 12:00 に、自動で外れます）。区分は、キャラの職業と BaseLv から決めています（職業が分からないときは「4次職以外」の数字）。</p>`;
+  return h;
+}
+function hwExpBind() {
+  $("#view").querySelectorAll("input[data-hwdone]").forEach((b) => b.onchange = () => {
+    const c = b.dataset.c, k = b.dataset.hwdone, now = Date.now() / 1000; SETTINGS.hwExp = SETTINGS.hwExp || {}; const m = SETTINGS.hwExp[c] = SETTINGS.hwExp[c] || {};
+    if (b.checked) m[k] = k === "sp" ? hwDayKey(now) : weekStart(now); else delete m[k];
+    if (!Object.keys(m).length) delete SETTINGS.hwExp[c];
+    saveSettings(); render();
+  });
 }
 // ---- ランタンハント: 座標の一覧(利用者が取り込む)。ナビ用のコピーと、見つけたもののチェック ----
 // 一覧は「ランタンハント.json」(この PC だけ。同梱しない)。チェックは SETTINGS.lanternChecks = { キャラ(空 = 共通): { lantern: [番号…], more: […] } }
