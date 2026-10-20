@@ -39,6 +39,13 @@ def parse_text(text):
             cells = cells[1:]
         if len(cells) < 4 or not cells[0].isdigit():
             continue
+        if len(cells) >= 6 and cells[3] and not cells[3].isdigit() and cells[4].isdigit() and cells[5].isdigit():
+            # 熊の形: 番号, マップ, (空 または入口などのメモ), 属性(固定・俳諧・曜日固定・曜日俳諧), X, Y, 月木, 火金, 水土(〇が出る曜日)
+            n, x, y = int(cells[0]), int(cells[4]), int(cells[5])
+            days = [d for d, c in zip(("月木", "火金", "水土"), cells[6:9]) if c in ("〇", "○", "◯", "O")]
+            if 0 < n < 100000 and cells[1]:
+                out[n] = {"n": n, "map": cells[1], "x": x, "y": y, "memo": " ".join([cells[3]] + days + ([cells[2]] if cells[2] else []))}
+            continue
         try:
             n, x, y = int(cells[0]), int(float(cells[2])), int(float(cells[3]))
         except ValueError:

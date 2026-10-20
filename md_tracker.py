@@ -40,7 +40,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.23"
+VERSION = "2.58.24"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -785,12 +785,11 @@ def start_live_server(core, lock, cfg):
                             st["src"] = "貼り付け" if act == "text" else "スプレッドシート"
                         elif act == "clear":
                             d["sets"].pop(sk, None)
-                            if sk == "lantern":
-                                d["noseed"] = True                                                # 消したあとは、同梱の座標を出さない(「同梱に戻す」で戻る)
+                            d["noseed" if sk == "lantern" else "noseed_more"] = True                                                # 消したあとは、同梱の座標を出さない(「同梱に戻す」で戻る)
                             msg = "消しました"
                         elif act == "reseed":
-                            d.pop("noseed", None)
-                            d["sets"].pop("lantern", None)
+                            d.pop("noseed" if sk == "lantern" else "noseed_more", None)
+                            d["sets"].pop(sk, None)
                             msg = "同梱の座標に戻しました"
                         elif act == "mapid":
                             nm, mid = str(b.get("name") or "").strip(), str(b.get("id") or "").strip()
@@ -1246,15 +1245,15 @@ def load_skill_fix():
     return names, attrs
 
 
-def _lantern_seed():
-    """同梱の座標(lantern_seed.bin = zlib で圧縮した JSON)。無い・読めなければ []。"""
+def _lantern_seed(which="lantern"):
+    """同梱の座標(lantern_seed.bin = 暗号化した zlib の JSON。lantern = ランタン・ハント / more = もっとランタン・ハント)。無い・読めなければ []。"""
     try:
         import zlib
         p = resource("lantern_seed.bin")
         k = LIC.data_key("lantern") if LIC is not None else ""
         if p and k:
             with open(p, "rb") as f:
-                return json.loads(zlib.decompress(lantern_core.unseal(f.read(), k)).decode("utf-8")).get("items") or []
+                return json.loads(zlib.decompress(lantern_core.unseal(f.read(), k)).decode("utf-8")).get("items" if which == "lantern" else which) or []
     except Exception as e:
         print("[ランタン] 同梱の座標を読めませんでした:", e)
     return []
@@ -1273,10 +1272,11 @@ def load_lantern():
             d.setdefault("manual", {})
     except (OSError, ValueError):
         pass
-    if not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed"):
-        seed = _lantern_seed()
-        if seed:
-            d["sets"]["lantern"] = {"items": seed, "t": 0, "src": "同梱"}
+    for sk, flag in (("lantern", "noseed"), ("more", "noseed_more")):
+        if not (d["sets"].get(sk) or {}).get("items") and not d.get(flag):
+            seed = _lantern_seed(sk)
+            if seed:
+                d["sets"][sk] = {"items": seed, "t": 0, "src": "同梱"}
     return d
 
 

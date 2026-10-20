@@ -27,18 +27,22 @@ def main(args):
         files += sorted(glob.glob(os.path.join(a, "*.csv"))) if os.path.isdir(a) else [a]
     if not files:
         sys.exit("CSV のファイル(またはフォルダ)を渡してください")
+    more = [f for f in files if os.path.basename(f).startswith("more")]            # もっとランタン・ハント(熊)は more*.csv
+    files = [f for f in files if f not in more]
     text = "\n".join(open(f, encoding="utf-8").read() for f in files)
     items = lantern_core.parse_text(text)
+    more_items = lantern_core.parse_text("\n".join(open(f, encoding="utf-8").read() for f in more))
     if not items:
         sys.exit("座標を読めませんでした")
     key = os.environ.get("FOX_SEED_KEY", "").strip()
     if len(key) != 64:
         sys.exit("環境変数 FOX_SEED_KEY に、64桁の16進数の鍵を入れてください(鍵はリポジトリに置かない)")
     out = os.path.join(ROOT, "lantern_seed.bin")
-    raw = zlib.compress(json.dumps({"v": 1, "items": items}, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)
+    raw = zlib.compress(json.dumps({"v": 2, "items": items, "more": more_items}, ensure_ascii=False, separators=(",", ":")).encode("utf-8"), 9)
     with open(out, "wb") as f:
         f.write(lantern_core.seal(raw, key))
     nums = [x["n"] for x in items]
+    print("もっと: {} か所".format(len(more_items)))
     print("{} か所({}〜{})→ {} ({} バイト)".format(len(items), nums[0], nums[-1], out, os.path.getsize(out)))
 
 

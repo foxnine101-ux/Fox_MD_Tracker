@@ -4792,7 +4792,7 @@ function lntHtml(chars) {
     <div class="muted" style="font-size:12px;margin:6px 0">ランタン・ハントの座標（650か所）は、最初から入っています（出典: スプレッドシート「2610ハロウィン」・RO忘備録 sites.google.com/view/romemo。2024年と同じ座標）。ランタンを追加で見つけたときや、「もっとランタン・ハント」は、ここから足せます。リンクで共有されているスプレッドシートの URL を入れるか、番号・マップ名・X・Y・備考 の列をコピーして貼り付けてください（何回かに分けて貼ってよい。同じ番号は新しいもので置きかえ）。</div>
     <div class="opts"><input id="lntu" type="text" placeholder="スプレッドシートの URL（https://docs.google.com/spreadsheets/d/…）" value="${esc(store.get("md_lnturl") || "")}" style="min-width:340px"><button class="ghost" id="lntgo">URL から取り込む</button></div>
     <textarea id="lntt" rows="4" style="width:100%;margin-top:6px" placeholder="ここに貼り付け（例: 3, プロンテラ, 155, 290, 握手像裏 ／ スプレッドシートからコピーした列そのままでも可）"></textarea>
-    <div class="opts"><button class="ghost" id="lntpaste">貼り付けた分を取り込む</button><label class="ghost" style="cursor:pointer">ファイルから <input type="file" id="lntf" accept=".csv,.tsv,.txt" hidden></label>${items.length ? `<button class="ghost" id="lntcopy" title="この一覧を、貼り付けで取り込める形でコピーします。身内にチャットなどで送ると、受け取った人は貼り付けるだけで取り込めます">この一覧をコピー（人に渡す用）</button><button class="ghost" id="lntclr">この一覧を消す</button>` : ""}${LNT.set === "lantern" && S && S.src !== "同梱" ? `<button class="ghost" id="lntreseed" title="取り込んだ一覧を捨てて、最初から入っている座標に戻します">同梱の座標に戻す</button>` : ""}<span class="muted">${esc(LNT.msg)}</span></div></details>`;
+    <div class="opts"><button class="ghost" id="lntpaste">貼り付けた分を取り込む</button><label class="ghost" style="cursor:pointer">ファイルから <input type="file" id="lntf" accept=".csv,.tsv,.txt" hidden></label>${items.length ? `<button class="ghost" id="lntcopy" title="この一覧を、貼り付けで取り込める形でコピーします。身内にチャットなどで送ると、受け取った人は貼り付けるだけで取り込めます">この一覧をコピー（人に渡す用）</button><button class="ghost" id="lntclr">この一覧を消す</button>` : ""}${S && S.src !== "同梱" ? `<button class="ghost" id="lntreseed" title="取り込んだ一覧を捨てて、最初から入っている座標に戻します">同梱の座標に戻す</button>` : ""}<span class="muted">${esc(LNT.msg)}</span></div></details>`;
   if (!items.length) return setTabs + imp;
   const checks = new Set(((((SETTINGS.lanternChecks || {})[LNT.who]) || {})[LNT.set]) || []);
   const inArea = (it) => LNT.set !== "lantern" || LNT.area === "all" || (LNT.area === "town" ? it.n <= 301 : LNT.area === "field" ? it.n >= 302 && it.n <= 600 : it.n >= 601);
@@ -4837,7 +4837,7 @@ function lntBind(chars) {
     const S = ((LNT.data || {}).sets || {})[LNT.set], txt = ((S && S.items) || []).map((it) => [it.n, it.map, it.x, it.y, it.memo].join("\t")).join("\n");
     try { await navigator.clipboard.writeText(txt); LNT.msg = `${S.items.length} か所をコピーしました（チャットなどに貼り付けて送れます）`; } catch (e) { LNT.msg = "コピーできませんでした"; } render();
   };
-  const rs = $("#lntreseed"); if (rs) rs.onclick = () => lntPost({ action: "reseed", set: "lantern" });
+  const rs = $("#lntreseed"); if (rs) rs.onclick = () => lntPost({ action: "reseed", set: LNT.set });
   const cl = $("#lntclr"); if (cl) cl.onclick = () => { if (confirm("この一覧(座標のデータ)を消します。見つけたもののチェックは残ります。")) lntPost({ action: "clear", set: LNT.set }); };
 }
 // ---------- 装備セット ----------
