@@ -785,7 +785,13 @@ def start_live_server(core, lock, cfg):
                             st["src"] = "貼り付け" if act == "text" else "スプレッドシート"
                         elif act == "clear":
                             d["sets"].pop(sk, None)
+                            if sk == "lantern":
+                                d["noseed"] = True                                                # 消したあとは、同梱の座標を出さない(「同梱に戻す」で戻る)
                             msg = "消しました"
+                        elif act == "reseed":
+                            d.pop("noseed", None)
+                            d["sets"].pop("lantern", None)
+                            msg = "同梱の座標に戻しました"
                         elif act == "mapid":
                             nm, mid = str(b.get("name") or "").strip(), str(b.get("id") or "").strip()
                             if not nm or len(mid) > 40:
@@ -797,7 +803,7 @@ def start_live_server(core, lock, cfg):
                         else:
                             raise ValueError
                         _write_json(LANTERN_FILE, d)
-                        out = dict(lantern_payload(d), ok=True, msg=msg)
+                        out = dict(lantern_payload(load_lantern()), ok=True, msg=msg)       # 保存したものを読み直して返す(同梱の初期値・「消した」の扱いも、読み込みと同じ)
                 except Exception as e:
                     print("[ランタン] 取り込みに失敗:", e)
                     return self._send(400, "bad data", "text/plain")
@@ -1240,18 +1246,37 @@ def load_skill_fix():
     return names, attrs
 
 
+def _lantern_seed():
+    """同梱の座標(lantern_seed.bin = zlib で圧縮した JSON)。無い・読めなければ []。"""
+    try:
+        import zlib
+        p = resource("lantern_seed.bin")
+        if p:
+            with open(p, "rb") as f:
+                return json.loads(zlib.decompress(f.read()).decode("utf-8")).get("items") or []
+    except Exception as e:
+        print("[ランタン] 同梱の座標を読めませんでした:", e)
+    return []
+
+
 def load_lantern():
-    """ランタンハント.json → {"sets": {"lantern": {items, t, src}, "more": {…}}, "manual": {マップ名: ID}}"""
+    """ランタンハント.json → {"sets": {"lantern": {items, t, src}, "more": {…}}, "manual": {マップ名: ID}}。
+    利用者の一覧(ランタン・ハント)が無いときは、同梱の座標を初期値にする(「消す」を押したあとは出さない: noseed)。"""
+    d = {"sets": {}, "manual": {}}
     try:
         with open(LANTERN_FILE, "r", encoding="utf-8") as f:
-            d = json.load(f)
-        if isinstance(d, dict):
+            x = json.load(f)
+        if isinstance(x, dict):
+            d = x
             d.setdefault("sets", {})
             d.setdefault("manual", {})
-            return d
     except (OSError, ValueError):
         pass
-    return {"sets": {}, "manual": {}}
+    if not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed"):
+        seed = _lantern_seed()
+        if seed:
+            d["sets"]["lantern"] = {"items": seed, "t": 0, "src": "同梱"}
+    return d
 
 
 def lantern_payload(d=None):
