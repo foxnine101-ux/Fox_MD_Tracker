@@ -97,6 +97,10 @@ def guess_id(name):
     return None
 
 
+# ゲームに入って確かめたマップ ID(動作ログの「マップ=…」)。名前 → ID。2026-10-20 のログイン: ハロウィン会場 = hal_opera
+MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera"}
+
+
 def resolve_ids(names, maplist, manual=None):
     """マップ名のリスト → {名前: {"id": ID か None, "how": "手"/"公式"/"推定"/""}}。
     maplist = [[ファイル名, 名前], …](公式サイトのマップ一覧。空でもよい)・manual = {名前: ID}(利用者が決めたもの。いちばん優先)。"""
@@ -109,6 +113,9 @@ def resolve_ids(names, maplist, manual=None):
         k = norm(name)
         if k in manual:
             out[name] = {"id": manual[k], "how": "手"}
+            continue
+        if k in MEASURED:
+            out[name] = {"id": MEASURED[k], "how": "実測"}
             continue
         c = [f for f in by.get(k, []) if not _BAD.search(f)]
         if len(c) == 1:
