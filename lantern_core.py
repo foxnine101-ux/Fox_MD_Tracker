@@ -236,14 +236,48 @@ def load(path, seed_blob, data_key):
     return d
 
 
+# メモに座標がある座標は、たいてい「その室内の入口がある親マップの座標」(利用者の説明 2026-10-21)。ナビは親マップ + メモの座標にする。
+_ENT_COORD = re.compile(r"(?<!\d)(\d{1,3})[.．](\d{1,3})(?![\d])(?!M)")
+_ENT_PREFIX = (("ポートマラヤ", "ポートマラヤ"), ("コモド07", "コモドフィールド07"), ("アインベフ", "アインベフ"), ("弓手村", "フェイヨン弓手村"), ("旧フェイ", "旧フェイヨン"),
+               ("コンロン", "コンロン"), ("リヒ", "リヒタルゼン"), ("ジュノ", "ジュノー"), ("モロク", "モロク"), ("伊豆", "イズルード"))     # メモの頭の略称 → 親マップ
+_ENT_ALIAS = {"氷の城": "イスガルド氷の城", "バルムント邸": "バルムント邸庭園"}                                               # 室内の名前の頭 → 親マップ(そのままでは名前が違うもの)
+_ENT_INDOOR = re.compile(r"^(.+?)(室内|内部)\d*$")
+
+
+def entrance(map_name, memo):
+    """(親マップ名, x, y) か None。メモに「220.117」のような座標があるときだけ。親が決められなければ None(= 自分のマップ・座標のまま)。"""
+    m = _ENT_COORD.search(str(memo or ""))
+    if not m:
+        return None
+    x, y = int(m.group(1)), int(m.group(2))
+    pre = str(memo)[:m.start()].split()
+    pre = pre[-1] if pre else ""
+    for key, parent in _ENT_PREFIX:
+        if pre.startswith(key):
+            return (parent, x, y)
+    b = _ENT_INDOOR.match(str(map_name or ""))
+    if b:
+        return (_ENT_ALIAS.get(b.group(1), b.group(1)), x, y)
+    return None
+
+
 def payload(d, maplist, official_on, has_key):
     """画面に渡す形: 一覧 + マップ名ごとのマップ ID(公式のマップ一覧 → 名前の決まり → 手で決めたもの)。has_key = 鍵をもう持っているか"""
     names = []
-    for st in d["sets"].values():
+    sets = {}
+    for sk, st in d["sets"].items():
+        items = []
         for it in st.get("items") or []:
             if it["map"] not in names:
                 names.append(it["map"])
-    return {"sets": d["sets"], "manual": d["manual"], "ids": resolve_ids(names, maplist, d["manual"]), "mapn": len(maplist), "official": official_on,
+            e = entrance(it["map"], it.get("memo"))
+            if e:
+                if e[0] not in names:
+                    names.append(e[0])
+                it = dict(it, e=list(e))                     # 画面に渡すときだけ足す(保存はしない)
+            items.append(it)
+        sets[sk] = dict(st, items=items)
+    return {"sets": sets, "manual": d["manual"], "ids": resolve_ids(names, maplist, d["manual"]), "mapn": len(maplist), "official": official_on,
             "needkey": not (d["sets"].get("lantern") or {}).get("items") and not d.get("noseed") and not has_key}
 
 

@@ -75,7 +75,7 @@ code{background:var(--line);padding:1px 5px;border-radius:4px}
 "use strict";
 const RAW = __DATA__;
 const IDS = {}; RAW.m.forEach((nm, i) => { if (RAW.i[i]) IDS[nm] = RAW.i[i]; });
-const DATA = { ids: IDS, lantern: RAW.L.map(([n, m, x, y, memo]) => ({ n, map: RAW.m[m], x, y, memo })), more: RAW.M.map(([n, m, x, y, memo]) => ({ n, map: RAW.m[m], x, y, memo })) };
+const DATA = { ids: IDS, lantern: RAW.L.map(([n, m, x, y, memo, e]) => ({ n, map: RAW.m[m], x, y, memo, e })), more: RAW.M.map(([n, m, x, y, memo, e]) => ({ n, map: RAW.m[m], x, y, memo, e })) };
 const AREAS = [["all", "すべて"], ["town", "街・室内(1〜301)"], ["field", "フィールド(302〜600)"], ["sp", "特殊(601〜650)"]];
 const SETS = [["lantern", "ランタン・ハント"], ["more", "もっとランタン・ハント"]];
 const $ = (s) => document.querySelector(s);
@@ -94,7 +94,7 @@ async function copy(t) {
   catch { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand("copy"); } catch {} a.remove(); }
   toast("コピーしました: " + t);
 }
-function navi(it) { const id = (DATA.ids[it.map] || [])[0]; return id ? `/navi2 ${id} ${it.x}/${it.y} 1/1/1` : `${it.map} ${it.x}/${it.y}`; }
+function navi(it) { const nm = it.e ? RAW.m[it.e[0]] : it.map, x = it.e ? it.e[1] : it.x, y = it.e ? it.e[2] : it.y, id = (DATA.ids[nm] || [])[0]; return id ? `/navi2 ${id} ${x}/${y} 1/1/1` : `${nm} ${x}/${y}`; }
 function visible() {
   const items = DATA[ST.set], chk = CHK[ST.set], q = norm(ST.q);
   return items.filter((it) => (ST.set !== "lantern" || ST.area === "all" || (ST.area === "town" ? it.n <= 301 : ST.area === "field" ? it.n >= 302 && it.n <= 600 : it.n >= 601))
@@ -108,7 +108,7 @@ function draw() {
     <input id="q" type="search" placeholder="マップ名・メモで絞る" value="${esc(ST.q)}"><label><input type="checkbox" id="todo" ${ST.todo ? "checked" : ""}> 未発見だけ</label>
     ${nextIt ? `<button class="pri" data-cp="${esc(navi(nextIt))}">次の未発見をコピー(${nextIt.n}番)</button>` : ""}<span class="mid">${list.length} 件を表示</span></div>`;
   $("#rows").innerHTML = list.map((it) => { const m = { id: (DATA.ids[it.map] || [])[0], how: (DATA.ids[it.map] || [])[1] }, on = chk.has(it.n);
-    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td><td><button data-cp="${esc(navi(it))}">${m.id ? "/navi2" : "コピー"}</button></td>
+    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td><td><button data-cp="${esc(navi(it))}" title="${esc(it.e ? "入口: " + RAW.m[it.e[0]] + " " + it.e[1] + "/" + it.e[2] : "")}">${m.id ? "/navi2" : "コピー"}</button></td>
       <td>${esc(it.map)}${m.id ? ` <span class="mid">${esc(m.id)}${m.how === "推" ? "?" : ""}</span>` : ""}</td><td class="x">${it.x}</td><td class="y">${it.y}</td><td class="memo">${esc(it.memo)}</td></tr>`; }).join("");
   $("#tools").innerHTML = `<button id="exp">チェックを書き出す</button><button id="imp">チェックを読み込む</button><span class="mid">別の端末に移すとき用(文字をコピー・貼り付け)</span>`;
 }
@@ -147,9 +147,23 @@ def main(args):
     for it in items + more:
         if it["map"] not in names:
             names.append(it["map"])
+    for it in items + more:                                  # メモに座標がある室内は、親マップの入口へナビする(lantern_core.entrance)
+        e = lantern_core.entrance(it["map"], it["memo"])
+        if e:
+            if e[0] not in names:
+                names.append(e[0])
     ids = {k: {"id": v["id"], "how": v.get("how", "")} for k, v in lantern_core.resolve_ids(names, maplist, {}).items() if v.get("id")}
     mi = {nm: i for i, nm in enumerate(names)}
-    pack = lambda L: [[it["n"], mi[it["map"]], it["x"], it["y"], it["memo"]] for it in L]
+
+    def pack(L):
+        out = []
+        for it in L:
+            row = [it["n"], mi[it["map"]], it["x"], it["y"], it["memo"]]
+            e = lantern_core.entrance(it["map"], it["memo"])
+            if e:
+                row.append([mi[e[0]], e[1], e[2]])
+            out.append(row)
+        return out
     data = {"m": names, "L": pack(items), "M": pack(more), "i": [([ids[nm]["id"], "推" if ids[nm]["how"] == "推定" else ""] if nm in ids else 0) for nm in names]}
     html = PAGE.replace("__DATA__", json.dumps(data, ensure_ascii=False, separators=(",", ":")))
     os.makedirs(outdir, exist_ok=True)

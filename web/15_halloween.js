@@ -154,9 +154,9 @@ async function lntPost(body) {
   render();
 }
 const lntChecks = () => { SETTINGS.lanternChecks = SETTINGS.lanternChecks || {}; const w = SETTINGS.lanternChecks[LNT.who] = SETTINGS.lanternChecks[LNT.who] || {}; return (w[LNT.set] = w[LNT.set] || []); };
-function lntNavi(it) {              // コピーする文字: マップ ID が分かれば /navi2、分からなければ 名前 X/Y
-  const m = (LNT.data.ids || {})[it.map] || {}, id = m.id;
-  return id ? { cmd: `/navi2 ${id} ${it.x}/${it.y} 1/1/1`, kind: m.how } : { cmd: `${it.map} ${it.x}/${it.y}`, kind: "" };
+function lntNavi(it) {              // コピーする文字: マップ ID が分かれば /navi2、分からなければ 名前 X/Y。メモに座標がある室内(it.e = [親マップ, x, y])は、親マップの入口へ
+  const nm = it.e ? it.e[0] : it.map, x = it.e ? it.e[1] : it.x, y = it.e ? it.e[2] : it.y, m = (LNT.data.ids || {})[nm] || {}, id = m.id;
+  return id ? { cmd: `/navi2 ${id} ${x}/${y} 1/1/1`, kind: m.how } : { cmd: `${nm} ${x}/${y}`, kind: "" };
 }
 function lntHtml(chars) {
   if (!LOCAL) return `<div class="panel empty">ランタンハントは、パソコンで動かしている Fox_MD_Tracker の画面で使えます。</div>`;
