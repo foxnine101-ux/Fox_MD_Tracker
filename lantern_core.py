@@ -74,6 +74,11 @@ FIELDS = {
 }
 
 
+# 町の室内(推定。prt_in・izlude_in は利用者が確かめた)
+INDOOR_TOWN = {"プロンテラ": "prt_in", "イズルード": "izlude_in", "ゲフェン": "geffen_in", "アルベルタ": "alberta_in", "アルデバラン": "aldeba_in"}
+INDOOR_NUM = {"フェイヨン": "payon_in", "ジュノー": "yuno_in"}
+
+
 def guess_id(name):
     """名前の決まりから ID を推定する。決められなければ None。"""
     n = norm(name)
@@ -94,11 +99,18 @@ def guess_id(name):
     m = re.fullmatch(r"(フェイヨン迷いの森)(\d{1,2})", n)
     if m:
         return "pay_fild{:02d}".format(int(m.group(2)))
+    m = re.fullmatch(r"(.+?)室内(\d{1,2})?", n)                      # 町の室内は「町の略称_in」(利用者が確認: prt_in・izlude_in。番号つきの町は _in01 の形)
+    if m:
+        base = m.group(1)
+        if base in {norm(k) for k in INDOOR_TOWN}:
+            return next(v for k, v in INDOOR_TOWN.items() if norm(k) == base)
+        if base in {norm(k) for k in INDOOR_NUM} and m.group(2):
+            return "{}{:02d}".format(next(v for k, v in INDOOR_NUM.items() if norm(k) == base), int(m.group(2)))
     return None
 
 
 # ゲームに入って確かめたマップ ID(動作ログの「マップ=…」)。名前 → ID。2026-10-20 のログイン: ハロウィン会場 = hal_opera
-MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in"}      # prt_in = 利用者が確認(2026-10-22)
+MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in"}      # prt_in = 利用者が確認(2026-10-22)
 
 
 def resolve_ids(names, maplist, manual=None):
