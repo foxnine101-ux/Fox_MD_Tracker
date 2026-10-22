@@ -74,6 +74,15 @@ FIELDS = {
 }
 
 
+# 元のシートの座標が違っていたもの(利用者がゲームで確かめた)。ランタン・ハントの番号 → (x, y)。表示するとき・同梱の座標を読むときに上書きする
+CORRECTIONS = {16: (60, 209), 17: (130, 173)}          # イズルードの16番(北西兵士像前)はシートが 61,178、17番(テント裏)は 128,138 だった(2026-10-22)
+
+
+def fix_items(items):
+    """CORRECTIONS を当てた新しい一覧(元は書きかえない)"""
+    return [dict(it, x=CORRECTIONS[it["n"]][0], y=CORRECTIONS[it["n"]][1]) if it.get("n") in CORRECTIONS else it for it in items]
+
+
 # 町の室内(推定。prt_in・izlude_in は利用者が確かめた)
 INDOOR_TOWN = {"プロンテラ": "prt_in", "イズルード": "izlude_in", "ゲフェン": "geffen_in", "アルベルタ": "alberta_in", "アルデバラン": "aldeba_in"}
 INDOOR_NUM = {"フェイヨン": "payon_in", "ジュノー": "yuno_in"}
@@ -279,7 +288,7 @@ def payload(d, maplist, official_on, has_key):
     sets = {}
     for sk, st in d["sets"].items():
         items = []
-        for it in st.get("items") or []:
+        for it in (fix_items(st.get("items") or []) if sk == "lantern" else (st.get("items") or [])):
             if it["map"] not in names:
                 names.append(it["map"])
             e = entrance(it["map"], it.get("memo"))

@@ -142,6 +142,7 @@ def main(args):
     main_f = [f for f in files if f not in more_f]
     items = lantern_core.parse_text("\n".join(open(f, encoding="utf-8").read() for f in main_f))
     more = lantern_core.parse_text("\n".join(open(f, encoding="utf-8").read() for f in more_f))
+    items = lantern_core.fix_items(items)                       # 利用者が確かめて直した座標
     maplist = json.load(open(offp, encoding="utf-8")).get("maplist") or []
     names = []
     for it in items + more:
