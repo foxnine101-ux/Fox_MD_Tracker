@@ -119,7 +119,7 @@ def guess_id(name):
 
 
 # ゲームに入って確かめたマップ ID(動作ログの「マップ=…」)。名前 → ID。2026-10-20 のログイン: ハロウィン会場 = hal_opera
-MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in", norm("フェイヨン室内01"): "payon_in01", norm("旧フェイヨン室内"): "payon_01_q"}      # prt_in = 利用者が確認(2026-10-22)
+MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in", norm("フェイヨン室内01"): "payon_in01", norm("旧フェイヨン室内"): "payon_01_q", norm("モロク室内"): "morocc_in"}      # prt_in = 利用者が確認(2026-10-22)
 
 
 def resolve_ids(names, maplist, manual=None):
