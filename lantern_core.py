@@ -122,6 +122,17 @@ def guess_id(name):
 MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in", norm("フェイヨン室内01"): "payon_in01", norm("旧フェイヨン室内"): "payon_01_q", norm("モロク室内"): "morocc_in", norm("ピラミッド周辺"): "moc_ruins", norm("ウンバラ室内"): "um_in"}      # prt_in = 利用者が確認(2026-10-22)
 
 
+# 他の人のまとめ(るにゃんこ「めもしろにゃ!」のランタンハント2026の表)と突き合わせて、こちらのIDと全部一致したうえで、こちらに無かった分だけ足したマップID(2026-10-23)。
+# マップ名 → ID。同じ名前に別のIDが複数ある室内(ベインス室内・エクラージュ内部・ファッションセンターコスミ)は決められないので入れない。座標・文章は写していない。
+REFERENCE_IDS = {norm(k): v for k, v in {
+    "スプレンディッド": "splendide", "ラザーニャ": "lasagna", "連合軍駐屯地": "mid_camp", "連合軍駐屯地内部": "mid_campin", "マヌク": "manuk", "エルディカスティス": "dicastes01", "エクラージュ": "eclage", "モーラ": "mora",
+    "フレイヤ大神殿": "ra_temple", "フィゲル室内": "hu_in01", "アマツ室内02": "ama_in02", "聖カピトリーナ修道院": "prt_monk", "沈没船付近の島": "alb2trea", "フベルゲルミルの泉": "yggdrasil01",
+    "ブラジリスフィールド": "bra_fild01", "デワタフィールド": "dew_fild01", "バリオ・マワヒガ": "ma_fild01", "スプレンディットフィールド01": "spl_fild01", "スプレンディットフィールド02": "spl_fild02", "スプレンディットフィールド03": "spl_fild03",
+    "カミダル山脈01": "dic_fild01", "カミダル山脈02": "dic_fild02", "ラビオル森": "lasa_fild02", "プロンテラ離宮": "prt_cas_q", "フレイムケイヴ": "moro_cav", "ジュノーの捨てられた家内部": "que_dan02", "ミスティーアイランド": "e_tower",
+    "ジプニー内部08": "ma_zif08", "格闘場（観覧席）": "gon_test", "シュバルツバルト政府庁舎": "yuno_pre", "秘密居酒屋": "que_job01", "図書室（アカデミー）": "ac_library", "飛行船（国内線）": "airplane", "飛行船（国外線）": "airplane_01",
+    "過去の王家の記憶の間": "prt_lib_q", "侵攻されたプロンテラ避難地": "prt_q", "ハートハンター軍事基地": "que_swat", "時の通路01": "dali", "ローグギルド": "in_rogue", "イベントホール": "paramk_"}.items()}
+
+
 def resolve_ids(names, maplist, manual=None):
     """マップ名のリスト → {名前: {"id": ID か None, "how": "手"/"公式"/"推定"/""}}。
     maplist = [[ファイル名, 名前], …](公式サイトのマップ一覧。空でもよい)・manual = {名前: ID}(利用者が決めたもの。いちばん優先)。"""
@@ -141,6 +152,9 @@ def resolve_ids(names, maplist, manual=None):
         c = [f for f in by.get(k, []) if not _BAD.search(f)]
         if len(c) == 1:
             out[name] = {"id": c[0], "how": "公式"}
+            continue
+        if k in REFERENCE_IDS:
+            out[name] = {"id": REFERENCE_IDS[k], "how": "参考"}
             continue
         g = guess_id(name)
         if g:
