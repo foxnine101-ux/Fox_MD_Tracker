@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import re
+import struct
 import sys
 import threading
 import time
@@ -41,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.39"
+VERSION = "2.58.40"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1006,10 +1007,30 @@ def upload(cfg, payload):
 # ---------------------------------------------------------------
 #  通信を読む
 # ---------------------------------------------------------------
+OP_07FA = bytes((0xFA, 0x07))      # 07FA(持ち物から消えた)の先頭2バイト
+
+
 class _Scanner(gp.StreamScanner):
     def __init__(self, core, key, lock):
         gp.StreamScanner.__init__(self, lambda e: None)
         self.core, self.key, self.lock = core, key, lock
+
+    def _scan_lost(self, region):
+        """見失った区間から、倉庫に入れた通信(07FA 理由4・1個)だけは形を確かめて拾う(RO Storage Manager と同じ考え方。通信のつなぎ目の途中に埋もれていることがある)。"""
+        gp.StreamScanner._scan_lost(self, region)
+        if CHARS is None:
+            return
+        i = region.find(OP_07FA)
+        while i != -1:
+            if i + 8 <= len(region):
+                reason, idx, amt = struct.unpack_from("<HHH", region, i + 2)
+                if reason == 4 and amt == 1 and 2 <= idx <= 4000:
+                    with self.lock:
+                        try:
+                            CHARS.feed(self.key, bytes(region[i:i + 8]))
+                        except Exception:
+                            pass
+            i = region.find(OP_07FA, i + 1)
 
     def _handle(self, pkt):
         with self.lock:
@@ -1021,7 +1042,7 @@ class _Scanner(gp.StreamScanner):
             if op in md_core.WANT_OPS or op in (0x08C8, 0x01DE, 0x09FD, 0x09FE, 0x09FF, 0x0095, 0x0A30, 0x0ADF, 0x0983, 0x0229, 0x09CB, 0x0B39, 0x0999, 0x099A, 0x07FA, 0x00F4, 0x01C4, 0x0A0A, 0x0B41, 0x00F6, 0x00F2):   # 被ダメ・装備・倉庫関係も数える
                 STATS["ops"][op] = STATS["ops"].get(op, 0) + 1
             _OP_TOTAL[op] = _OP_TOTAL.get(op, 0) + 1
-            if op == 0x00F6:                                 # 倉庫から取り出した: 直後 2.5 秒は、ふだん見ない通信を記録する(確認用。取り出した装備の通信が、0B41 以外で届いていないかを調べる)
+            if op in (0x00F6, 0x099A):                       # 倉庫から取り出した・装備を外した: 直後 2.5 秒は、ふだん見ない通信を記録する(確認用。取り出した装備の通信が、0B41 以外で届いていないかを調べる)
                 _TAKE_WIN[0] = time.time() + 2.5
             elif time.time() < _TAKE_WIN[0] and _OP_TOTAL[op] < 40 and (op, len(pkt)) not in _TAKE_SEEN and _TAKE_LOGS[0] < 80:
                 _TAKE_SEEN.add((op, len(pkt)))
