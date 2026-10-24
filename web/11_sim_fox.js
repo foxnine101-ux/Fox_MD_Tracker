@@ -196,8 +196,7 @@ function renderSimChara() {
       ${simcFold("eq", "装備", simcEquipHtml(m, false), ` <span class="muted">（名前を押すと、検索つきの一覧から選べます）</span><span class="settabs right">${simcSetTabs(m, false)}</span>`)}
       ${simcFold("sh", "シャドウ装備", simcEquipHtml(m, true), `<span class="settabs right">${simcSetTabs(m, true)}</span>`)}
       ${simcFold("buff", "支援・アイテム・スキル", simcBuffHtml(m), ` <span class="muted foldsum" id="sccbsum">${esc(simcBuffSum(m))}</span>`)}
-      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}
-      ${simcFold("sb", "サンドバックマン", simcSbHtml(m), ` <span class="muted foldsum">${esc(sbDesc(simcSbCfg(m)))}</span>${simcCmpChips(m)}`, false)}</div>
+      ${simcFold("x", "補助情報", simcExtraHtml(r) + `<div id="sccxcmp" class="cmpbox"></div>`, ` <span class="muted">（ラトリオの「拡張情報」と同じ表）</span>${simcCmpChips(m)}`)}</div>
       <p class="hint">計算とデータは ROラトリオHub（${esc(RAT.date)} 版）をそのまま使っています。値や装備を変えると、すぐ計算し直します。キャラはこの PC に自動で保存されます（計算機のキャラ.json）。</p>`;
   }
   $("#view").innerHTML = h;
@@ -304,14 +303,6 @@ function renderSimChara() {
     // 装備の編集。替えたら全部描き直す(計算は 0.1秒ほど)
     const m = ch.model, V = $("#view");
     const changed = () => { SIMC.res = null; simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
-    // サンドバックマン
-    {
-      const cfg = simcSbCfg(m), S = SIMC.sb, again = () => { simcSave(); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); render(); };
-      V.querySelectorAll("[data-sbc]").forEach((el) => el.onchange = () => { const k = el.dataset.sbc; if (k === "full") { cfg.full = el.value; cfg.vals = []; } else cfg[k] = +el.value; again(); });
-      V.querySelectorAll("[data-sbo]").forEach((el) => el.onchange = () => { const i = +el.dataset.sbo; cfg.vals = (S.chain || []).map((c) => c.v).slice(0, i); cfg.vals[i] = el.tagName === "SELECT" && !Number.isNaN(+el.value) ? +el.value : +el.value; again(); });
-      if (g("sbrec")) g("sbrec").onclick = () => simcSbRecord(m);
-      V.querySelectorAll("[data-sbgo]").forEach((el) => el.onclick = () => sbxGo(el.dataset.sbgo));
-    }
     // 装備セットを並べて比べる
     V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else if (SIMC.cmp.length >= 5) SIMC.msg = "並べられるのは 5 つまでです。"; else SIMC.cmp.push(sid); render(); });      // 並べるのは「いまの装備」+ 選んだ装備スロット(最大5つ)
     simcCmpFill(m); simcCmpKick(m);

@@ -243,7 +243,7 @@ function simcBuffHtml(m) {
   if (!sc) { simcSchemaKick(m); return `<div class="muted" style="padding:6px">${SIMC.bfErr ? esc(SIMC.bfErr) : "支援・アイテム・スキルの一覧を読み込んでいます…"}</div>`; }
   const B = SIMC.bf, nOn = sc.filter((it) => it.g !== "learn" && simcBuffOn(m, it)).length;
   const chip = (attr, v, t, on) => `<button class="settab${on ? " on" : ""}" ${attr}="${v}">${t}</button>`;
-  return `<div class="bfbar"><div class="settabs">${SIMC_BGROUPS.map(([k, t]) => chip("data-bft", k, t + (k === "on" ? `（${nOn}）` : ""), !B.q && B.tab === k)).join("")}</div>
+  return `${typeof sereHtml === "function" ? sereHtml(m) : ""}<div class="bfbar"><div class="settabs">${SIMC_BGROUPS.map(([k, t]) => chip("data-bft", k, t + (k === "on" ? `（${nOn}）` : ""), !B.q && B.tab === k)).join("")}</div>
       <input type="text" id="sccbq" placeholder="名前で探す（全部の分類から）" value="${esc(B.q)}"></div>
     <div class="bfbar"><div class="settabs"><span class="muted">目的</span>${SIMC_BPURPOSE.map(([k, t]) => chip("data-bfp", k, t, B.purpose === k)).join("")}</div>
       ${B.tab === "other" && !B.q ? `<div class="settabs"><span class="muted">職</span>${[["", "すべて"], ["一次職", "一次"], ["二次職", "二次"], ["三次職", "三次"], ["四次職", "四次"]].map(([k, t]) => chip("data-bfs", k, t, B.sub === k)).join("")}</div>` : ""}

@@ -69,7 +69,7 @@ function stpSbKind(mm, cfg, mt) {              // このスキルが物理か魔
   return ENG.cache[key] = ph && !ma ? "p" : ma && !ph ? "m" : "b";
 }
 function stpSbMt(m) {                           // サンドバックマンの設定(スキル・Lv・追加設定)から、計算に渡す形
-  const cfg = simcSbCfg(m), methods = engAttackMethods(m), item = methods.find((x) => x.full === cfg.full) || methods.find((x) => x.skill !== 0) || methods[0];
+  const cfg = simcSbCfg(m), methods = engAttackMethods(m), item = sbPickItem(methods, cfg);
   if (!item) return null;
   const chain = sbChain(item.tree, cfg.vals); cfg.full = item.full; cfg.vals = chain.map((c) => c.v);
   return { cfg, methods, item, chain, mt: { skill: item.skill, src: item.src, lv: chain[0] ? +chain[0].v : 1, opts: chain.slice(1).map((c) => +c.v), name: item.name } };
