@@ -539,6 +539,7 @@ class MDCore(object):
             return
         if op == OP_MD_INFO:
             c["md"] = cstr(pkt[2:63])
+            c["md_t"] = self.now()
             return
         if op in (OP_MAPMOVE, OP_SERVERMOVE, OP_SERVERMOVE2):
             m = cstr(pkt[2:18])
@@ -547,6 +548,8 @@ class MDCore(object):
             if not MAP_NAME_OK.fullmatch(m):        # 通信の読みずれで、マップ名ではない文字が来ることがある(「フィールド �」の原因)。捨てる
                 return
             prev = c["map"]
+            if "@" in m and m != prev and now - c.get("md_t", 0) > 3:
+                c["md"] = ""            # 新しい MD に入ったのに、前の MD の名前が残る(02CD は入ったあとに届く)のを防ぐ。入る直前(3秒以内)に届いた名前は残す
             c["map"] = m
             c["map_t"] = now
             if ("@" in m) != ("@" in prev):
