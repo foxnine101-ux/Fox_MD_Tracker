@@ -422,9 +422,17 @@ function infoPop(ev, title, htmlPromise) {
   const el = document.createElement("div"); el.className = "infopop";
   el.innerHTML = `<div class="infoh"><b>${esc(title)}</b><a class="infox" title="閉じる">×</a></div><div class="infob"><span class="spin">読み込み中…</span></div>`;
   document.body.appendChild(el);
-  const x = Math.min(ev.clientX + 8, window.innerWidth - 440), y = Math.min(ev.clientY + 8, window.innerHeight - 200); el.style.left = Math.max(8, x) + "px"; el.style.top = Math.max(8, y) + "px";
+  infoPlace(el, ev);
   el.querySelector(".infox").onclick = () => el.remove();
-  Promise.resolve(htmlPromise).then((h) => { el.querySelector(".infob").innerHTML = h || `<span class="muted">説明がありません（ラトリオに効果の記述がないものです）</span>`; }).catch((e) => { el.querySelector(".infob").innerHTML = `<span class="warn">読み込めませんでした: ${esc(e.message)}</span>`; });
+  Promise.resolve(htmlPromise).then((h) => { el.querySelector(".infob").innerHTML = h || `<span class="muted">説明がありません（ラトリオに効果の記述がないものです）</span>`; infoPlace(el, ev); }).catch((e) => { el.querySelector(".infob").innerHTML = `<span class="warn">読み込めませんでした: ${esc(e.message)}</span>`; infoPlace(el, ev); });
+}
+// 詳細の窓を、押した位置の近くで、画面の中(下・右にはみ出さない)に置く。高さが足りなければ上へずらし、それでも入らなければ窓の中をスクロールする(.infopop は overflow:auto)
+function infoPlace(el, ev) {
+  const W = window.innerWidth, H = window.innerHeight, M = 8;
+  el.style.maxHeight = (H - 2 * M) + "px";
+  const w = el.offsetWidth || 430, h = el.offsetHeight || 120;
+  el.style.left = Math.max(M, Math.min(ev.clientX + 8, W - w - M)) + "px";
+  el.style.top = Math.max(M, Math.min(ev.clientY + 8, H - h - M)) + "px";
 }
 document.addEventListener("contextmenu", (e) => {          // ASPD の目安の潜在解放のチップ: どの装備の何枠目につくか + 効果の文章
   const sc = e.target.closest && e.target.closest("[data-stpasc]"); const ch0 = sc && simcCur(), S0 = sc && SIMC.stp;

@@ -195,14 +195,16 @@ function simcSbHtml(m, always) {
   }
   if (S.res) {
     const known = (SBX.recs || []).find((x) => x.key === S.key);
-    h += `<div class="sbres">${simcSbNums(S.res)}</div>`
+    let d = `<div class="sbres">${simcSbNums(S.res)}</div>`
       + (S.resF ? `<div class="sbres" style="margin-top:8px"><div class="muted" style="margin-bottom:2px"><b>時限効果込み</b>（${(atkFxSet().mode || "exp") === "exp" ? "発動率と持続時間から出した期待値" : "オンの効果が全部かかっているとき"}）</div>${simcSbNums(S.resF)}</div>` : "")
       + (S.res.per.avg === 0 && !S.res.noDmg ? (S.zero === "elem"
         ? `<div class="warn">ダメージが 0 になりました。このスキルの属性は、いまのサンドバッグマンの属性（${esc(sbDesc(cfg))}）には効きません（属性の相性）。別の属性を選ぶと出ます。</div>`
         : `<div class="warn">ダメージが 0 になりました。このスキルは、「支援・アイテム・スキル」の「自分のスキル」の設定（エレメンタルマスターなら精霊の召喚など）が要る場合があります。</div>`) : "")
       + `<div class="opts"><button id="sbrec">${known ? "もう一度記録する（日時を更新）" : "この結果を記録する"}</button>${known ? `<button class="ghost" data-sbgo="${esc(known.id)}">記録を見る →</button>` : ""}<span class="muted">記録は「サンドバックマン」のタブで見られます。</span></div>`;
-    h += `<div id="sccsbcmp" class="cmpbox">${simcSbCmpHtml(m)}</div>`;
+    d += `<div id="sccsbcmp" class="cmpbox">${simcSbCmpHtml(m)}</div>`;
     simcSbCmpKick(m);
+    const sum = ` <span class="muted foldsum">1回 ${simcNum(S.res.per.avg)}（DPS ${simcNum(S.res.perSec)}）${S.resF ? ` ／ 時限効果込み ${simcNum(S.resF.per.avg)}` : ""}</span>`;
+    h += always ? simcFold("sbdmg", "ダメージ", d, sum, true) : d;
   }
   return h;
 }
@@ -265,6 +267,27 @@ function simcSbBind(m) {
   V.querySelectorAll("[data-cmp]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const sid = el.dataset.cmp, i = SIMC.cmp.indexOf(sid); if (i >= 0) SIMC.cmp.splice(i, 1); else if (SIMC.cmp.length >= 5) SIMC.msg = "並べられるのは 5 つまでです。"; else SIMC.cmp.push(sid); render(); });
   simcSbCmpFill(m); simcSbCmpKick(m);
 }
+// いま開いているスロットの装備(メインとシャドウ)を、読むだけの一覧で。名前・カード・エンチャントを右クリックすると、効果の詳細が出る(document の contextmenu。キャラシミュレーターの装備欄と同じ)
+function sbEquipHtml(m) {
+  const row = ([i, label]) => {
+    const id = simcItemAt(m, i); if (!id || simcIsNone(i, id)) return "";
+    const sh = i >= 14, rf = SIMC_REFINE[i], tr = SIMC_TRANS[i];
+    const ref = sh ? ((m.shadowEquip || {}).refined || [])[i] : rf ? (m[rf[0]] || {})[rf[1]] : 0, tra = !sh && tr ? (m[tr[0]] || {})[tr[1]] : 0;
+    let cards = "";
+    if (!sh) {
+      const opts = simcCardOpts(i, id), cs = SIMC_CARD[i];
+      cards = opts.map((o, k) => { const v = m.card[cs[k]] || 0; if (o.length < 2 || !v) return ""; const hit = o.find((x) => x.v === v); return `<button class="pk sm" data-card="${i}:${k}">${esc(hit ? hit.t : simcCardName(v))}</button>`; }).join("");
+    } else {
+      const en = SIMC_SHCARD[i].map((cr) => simcCardName(m.card[cr])).filter(Boolean);
+      if (en.length) cards = `<span class="muted">${en.map(esc).join(" ／ ")}</span>`;
+    }
+    return `<tr><td class="muted">${label}</td><td><span class="eqrf${sh ? " sh" : ""}">${ref ? "+" + ref : ""}${tra ? "★" + tra : ""}</span> <button class="pk" data-item="${i}">${esc(simcItemName(id))}</button> ${cards}</td></tr>`;
+  };
+  const main = SIMC_REGIONS.map(row).join(""), shadow = SIMC_SHADOW.map(row).join("");
+  return `<table class="eqt"><tbody>${main || `<tr><td class="muted">装備がありません</td></tr>`}</tbody></table>${shadow ? `<div class="muted" style="margin:6px 0 2px">シャドウ装備</div><table class="eqt"><tbody>${shadow}</tbody></table>` : ""}
+    <p class="hint">読むだけの一覧です（変えるときは「キャラシミュレーター」で）。名前・カード・エンチャントを右クリックすると、効果の詳細が出ます。</p>`;
+}
+const sbEquipSum = (m) => { const w = simcItemAt(m, 0); return ` <span class="muted foldsum">${esc(simcJobName(m))} ／ BaseLv ${m.status.baseLv}${w && !simcIsNone(0, w) ? ` ／ 武器 ${esc(simcItemName(w))}` : ""}</span>`; };
 function renderSandbagTab() {
   const NAV = (t) => { $("#view").innerHTML = simNav() + t; bindSimNav(); };
   if (!(typeof LOCAL !== "undefined" && LOCAL)) return NAV(`<div class="panel empty">サンドバックマンは、Fox_MD_Tracker を動かしている PC の画面でだけ使えます。</div>`);
@@ -285,7 +308,7 @@ function renderSandbagTab() {
     ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}`;
   if (!ch) calc += `<p class="hint">計算するキャラのスロットがありません。「＋ 現在のキャラで新しいスロットを作成」を押すか、「キャラシミュレーター」で作ってください。</p></div>`;
   else if (!ENG.ready) calc += `</div>`;
-  else calc += `<div class="opts" style="margin-top:6px"><span class="muted">比べる装備スロット:</span>${simcCmpChips(ch.model)}</div><div id="sbcbody" style="margin-top:6px">${simcSbHtml(ch.model, true)}</div></div>`;
+  else calc += `</div>${simcFold("sbeq", "現在の装備", sbEquipHtml(ch.model), sbEquipSum(ch.model), false)}<div class="panel simbox" id="sbcbody"><div class="opts"><span class="muted">比べる装備スロット:</span>${simcCmpChips(ch.model)}</div><div style="margin-top:6px">${simcSbHtml(ch.model, true)}</div></div>`;
   const R = SBX.recs, f = (v, d = 0) => simcNum(v, d);
   let h = simNav() + calc + `<div class="panel simbox"><div class="opts"><b>記録</b><span class="muted">計算結果を「この結果を記録する」で残したものです（新しい順・最大200件）。「この設定をいまのスロットに反映」で、そのときのキャラ・装備・設定に戻せます。</span></div></div>`;
   if (!R.length) h += `<div class="panel empty">まだ記録がありません。上の計算で、メインスキルを選んで「この結果を記録する」を押してください。</div>`;
@@ -309,7 +332,7 @@ function renderSandbagTab() {
     const c = lastChar(); if (!c) return;
     if (await askOnce("nowchar", `スロット「${ch.name}」に、${charWho()}「${cn(c)}」の職業・Lv・ステータスと、いま着ている装備を入れます。\nスロットの作業中の内容は置きかわります（「キャラシミュレーター」の「ロード」で、保存したときの内容に戻せます）。`, "反映する")) simcFromFox(false, { char: c, set: "", shadow: "", full: true });
   };
-  if (ch && ENG.ready) simcSbBind(ch.model);
+  if (ch && ENG.ready) { simcSbBind(ch.model); foldBind(V); }
   V.querySelectorAll("[data-sbapply]").forEach((el) => el.onclick = () => sbxApply(el.dataset.sbapply));
   V.querySelectorAll("[data-sbdetail]").forEach((el) => el.onclick = () => { SBX.open[el.dataset.sbdetail] = !SBX.open[el.dataset.sbdetail]; render(); });
   V.querySelectorAll("[data-sbdel]").forEach((el) => el.onclick = async () => { if (await askOnce("sbdel", "この記録を削除します。", "削除")) { await sbPost({ delete: el.dataset.sbdel }); await sbxLoad(); render(); } });
