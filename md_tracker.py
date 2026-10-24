@@ -41,7 +41,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.37"
+VERSION = "2.58.38"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -745,6 +745,8 @@ def start_live_server(core, lock, cfg):
                     if b.get("run"):
                         with lock:
                             w = DMG.wanted()
+                            if CHARS is not None:
+                                w["items"] = [u["id"] for u in CHARS.unknown_items()]
                         started = OFFICIAL.kick(w)
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
@@ -1654,9 +1656,18 @@ def main():
     lock = threading.Lock()
     start_live_server(core, lock, cfg)   # 画面は先に出す(Npcapが無くても見られるように)
     if OFFICIAL is not None and DMG is not None:
+        def _apply_item_names(names):                    # 公式から集めたアイテムの名前を、装備の名前の表に足す(表にある名前・手で付けた名前は変えない)
+            with lock:
+                if CHARS is not None and CHARS.add_official_names(names):
+                    print("[公式] アイテムの名前を {} 件、反映しました".format(len(names)))
+        OFFICIAL.on_items = _apply_item_names
+        _apply_item_names(OFFICIAL.item_names())         # 前に集めた分
         def _wanted():
             with lock:
-                return DMG.wanted()
+                w = DMG.wanted()
+                if CHARS is not None:
+                    w["items"] = [u["id"] for u in CHARS.unknown_items()]      # 名前の分からないアイテム(新しい装備など)も、公式のアイテムのページから
+                return w
         OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
     try:

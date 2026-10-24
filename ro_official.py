@@ -92,6 +92,35 @@ def parse_detail(html_text):
             "skills": skills, "maps": maps}
 
 
+def parse_item(html_text):
+    """アイテムのページ(/item/<番号>) → {name, desc, kind, pos, ele, slots, def, mdef, refine, wt, lv, equip}。読めなければ None。
+    desc = 説明文(効果。改行つき)。系列・位置・属性・スロット・Def・Mdef・精錬・重量・要求レベル・装備は、説明文の最後の「系列 : …」の並び。"""
+    t = html_text
+    m = re.search(r'<h1[^>]*class="conent-ttl"[^>]*>\s*(.*?)\s*</h1>', t, flags=re.S)
+    if not m:
+        return None
+    name = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(1))).strip()
+    d = re.search(r'<div class="description">\s*<p class="note">(.*?)</p>', t, flags=re.S)
+    if not name or not d:
+        return None
+    body = re.sub(r"<br\s*/?>", "\n", d.group(1))
+    body = re.sub(r"<[^>]+>", "", body)
+    body = re.sub(r"[ \u3000]+\n", "\n", body).strip()
+
+    def field(label):
+        mm = re.search(label + r"\s*:\s*([^\n]*?)(?=\s+[^\s:]+\s*:|\n|$)", body)
+        return mm.group(1).strip() if mm else ""
+    head, sep, tail = body.rpartition("系列 :")
+    desc = head.strip(" \n―") if sep else body
+    spec = "系列 :" + tail if sep else ""
+
+    def sf(label):
+        mm = re.search(label + r"\s*:\s*(.*?)(?=\s+\S+\s*:|\n|$)", spec)
+        return mm.group(1).strip() if mm else ""
+    return {"name": name, "desc": desc, "kind": sf("系列"), "pos": sf("位置"), "ele": sf("属性"), "slots": _int(sf("スロット")), "def": _int(sf("Def")),
+            "mdef": _int(sf("Mdef")), "refine": sf("精錬"), "wt": _int(sf("重量")), "lv": _int(sf("要求レベル")), "equip": sf("装備")}
+
+
 def parse_map(html_text):
     """マップのページ → その出現モンスターの一覧 [[ID名, 日本語名], …]"""
     out, seen = [], set()
@@ -187,6 +216,8 @@ class Official(object):
         self.maps = {}        # マップのファイル名 -> {"name": 名前, "mons": [[ID名, 名前], …], "t": 時刻}
         self.mdmaps = {}      # MD の名前 -> {"files": [[ファイル名, マップ名], …], "t": 時刻}
         self.misses = {}      # 見つからなかった名前 -> 時刻
+        self.items = {}       # アイテムの番号(文字) -> {name, desc, kind, slots, def, mdef, lv, equip, t}。名前の分からないアイテム用(この PC だけ)
+        self.item_misses = {}  # 見つからなかった番号 -> 時刻
         self.pause_until = 0
         self.SMALL_MAP = SMALL_MAP
         self._run_lock = threading.Lock()     # 取りにいく作業は同時に1つだけ(裏の作業と「今すぐ調べる」が重ならないように)
@@ -206,6 +237,7 @@ class Official(object):
         self._by_name = None
         self._thread = None
         self.changed = False
+        self.on_items = None      # 公式から集めたアイテムの名前が増えたとき呼ぶ関数: on_items({番号: 名前})
         self.load()
 
     # ---------- 保存 ----------
@@ -222,6 +254,8 @@ class Official(object):
         self.maps = d.get("maps") or {}
         self.mdmaps = d.get("mdmaps") or {}
         self.misses = d.get("misses") or {}
+        self.items = d.get("items") or {}
+        self.item_misses = d.get("item_misses") or {}
         self.maplist = d.get("maplist") or []
         self.maplist_t = d.get("maplist_t") or 0
         self.pause_until = d.get("pause_until") or 0
@@ -230,7 +264,7 @@ class Official(object):
     def save(self):
         with self.lock:                                   # 書き足している最中のものを読まない(JSON はここで作りきる)
             d = {"v": STATE_V, "note": "RO公式ツールから集めたこの PC だけのデータ。配布しないでください。", "enabled": self.enabled,
-                 "mobs": self.mobs, "maps": self.maps, "mdmaps": self.mdmaps, "misses": self.misses, "maplist": self.maplist, "maplist_t": self.maplist_t,
+                 "mobs": self.mobs, "maps": self.maps, "mdmaps": self.mdmaps, "misses": self.misses, "items": self.items, "item_misses": self.item_misses, "maplist": self.maplist, "maplist_t": self.maplist_t,
                  "pause_until": self.pause_until}
             try:
                 text = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
@@ -386,6 +420,29 @@ class Official(object):
             self.changed = True
         return r
 
+    def fetch_item(self, iid):
+        """アイテムのページを1件取る。名前などを self.items に覚える。見つからなければ item_misses に。"""
+        iid = str(iid)
+        html = self._text("/item/{}/".format(iid))
+        if html is None:
+            self.item_misses[iid] = self._clock()
+            self.changed = True
+            return None
+        r = parse_item(html)
+        with self.lock:
+            if r is None:
+                self.item_misses[iid] = self._clock()
+            else:
+                r["t"] = int(self._clock())
+                self.items[iid] = r
+            self.changed = True
+        return r
+
+    def item_names(self):
+        """{アイテムの番号(文字): 名前}。集めてあるもの"""
+        with self.lock:
+            return {k: v.get("name") for k, v in self.items.items() if v.get("name")}
+
     def ensure_name(self, name):
         """名前から集める: 公式の一覧に載っていればそこから、無ければ検索して、詳細まで。"""
         n = norm(name)
@@ -462,10 +519,15 @@ class Official(object):
         t = self.misses.get(name)
         return t is not None and self._clock() - t < MISS_KEEP
 
+    def _recent_item_miss(self, iid):
+        t = self.item_misses.get(str(iid))
+        return t is not None and self._clock() - t < MISS_KEEP
+
     def pending(self, wanted):
         """これから取りにいく名前の数(目安)。"""
         n = 0
         with self.lock:
+            n += sum(1 for i in wanted.get("items") or [] if str(i) not in self.items and not self._recent_item_miss(i))
             for ae, _ in wanted.get("aegis") or []:
                 if (self.mobs.get(ae) or {}).get("d") is None:
                     n += 1
@@ -491,6 +553,10 @@ class Official(object):
         self.budget = RUN_MAX
         self.last_error = ""
         try:
+            for iid in wanted.get("items") or []:           # 名前の分からないアイテム(新しい装備など。ラトリオ・名前の表にまだ無いもの)。公式のアイテムのページから
+                iid = str(iid)
+                if iid not in self.items and not self._recent_item_miss(iid):
+                    self.fetch_item(iid)
             for ae, nm in wanted.get("aegis") or []:        # ゲームの番号から分かった ID名は、名前で探さずに直接取る(1件で済む・同じ名前の別物と混ざらない)
                 if (self.mobs.get(ae) or {}).get("d") is None:
                     self.fetch_detail(ae, {"jname": nm})
@@ -514,6 +580,11 @@ class Official(object):
                 self.last_run = self._clock()
                 if self.changed:
                     self.save()
+                if self.on_items is not None:
+                    try:
+                        self.on_items(self.item_names())
+                    except Exception as e:
+                        self.log("[公式] アイテムの名前を反映できませんでした: {}".format(e))
             finally:
                 self.state = "paused" if self._clock() < self.pause_until else "idle"
                 self._run_lock.release()

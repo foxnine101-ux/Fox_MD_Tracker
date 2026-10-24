@@ -570,6 +570,27 @@ class CharCore(object):
         self.changed = True
         return True
 
+    def add_official_names(self, names):
+        """公式サイトから集めた名前({番号: 名前})を、名前の表に足す(手で付けた名前・表にある名前は変えない)。足した件数を返す。"""
+        n = 0
+        for iid, nm in (names or {}).items():
+            iid = str(iid)
+            if nm and iid.isdigit() and iid not in self.id2name:
+                self.id2name[iid] = nm
+                n += 1
+        if n:
+            self._name_idx = None
+            for table in (self.sets, self.shadows):                     # 覚えてある装備セットの中身の名前も直す
+                for s in table.values():
+                    for it in s.get("items") or []:
+                        if str(it.get("itemId")) in names and not it.get("name"):
+                            it["name"] = names[str(it.get("itemId"))]
+                        for c in it.get("cards") or []:
+                            if str(c.get("id")) in names and not c.get("name"):
+                                c["name"] = names[str(c.get("id"))]
+            self.changed = True
+        return n
+
     def unknown_items(self):
         """名前がわからないアイテム(いま着ている装備と、覚えてある装備セットの中): [{id, slot}]"""
         seen = {}
