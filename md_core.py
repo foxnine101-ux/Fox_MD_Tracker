@@ -18,6 +18,7 @@ ROの通信(サーバー → 自分)から、キャラごとの「MDのクール
 「〇〇入場時間制限」クエストの期限 = そのMDにまた入れるようになる時刻。
 サーバーが毎回ぜんぶ送ってくるので、手でチェックしなくてもCTがわかる。
 """
+import re
 import struct
 import time
 
@@ -118,6 +119,9 @@ WANT_OPS = {
 
 CHAR_ENTRY = 175
 HISTORY_MAX = 300
+
+
+MAP_NAME_OK = re.compile(r"[A-Za-z0-9_@.\-]{2,24}")      # マップ名として正しい形(英数字・_・@)
 
 
 def cstr(b):
@@ -540,6 +544,8 @@ class MDCore(object):
             m = cstr(pkt[2:18])
             if m.endswith(".gat"):
                 m = m[:-4]
+            if not MAP_NAME_OK.fullmatch(m):        # 通信の読みずれで、マップ名ではない文字が来ることがある(「フィールド �」の原因)。捨てる
+                return
             prev = c["map"]
             c["map"] = m
             c["map_t"] = now

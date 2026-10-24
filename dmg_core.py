@@ -564,8 +564,9 @@ class DmgCore(object):
         """「この場所の対策」: 受けた状態異常(実測)・警戒する状態異常(この場所の敵が使う技から)・ダメージの種類と属性の内訳(実測)。"""
         got = {}                                           # 状態異常 -> {"n": 回数, "src": {(相手, 技): 回数}}
         known = self._known_mobs()
+        raws = self._raw_wheres(where)                     # 整えた名前になる元の名前すべて(「MD ct2」と「星座の塔」など)
         for per_char in self.ails.values():
-            for k, v in (per_char.get(where) or {}).items():
+            for k, v in [kv for w in raws for kv in (per_char.get(w) or {}).items()]:
                 a, who, sk = (k.split("|") + ["", ""])[:3]
                 if who and (who == "ID0" or not self._act_ok(who, known)):      # 仲間のプレイヤーの支援などを、原因にしない(前の記録にあるもの)
                     who = sk = ""
@@ -584,7 +585,7 @@ class DmgCore(object):
         by_kind, by_ele, near, far, total = {}, {}, 0, 0, 0
         top = {}
         for per_char in self.stats.values():
-            for k, v in (per_char.get(where) or {}).items():
+            for k, v in [kv for w in raws for kv in (per_char.get(w) or {}).items()]:
                 who, sk = k.split("|", 1)
                 kind, ele = self.classify(0) if sk == "通常攻撃" else self.classify(ids[sk]) if sk in ids else ("", "")      # 名前から番号が分からない技は「不明」
                 if isinstance(ele, list):
@@ -1290,15 +1291,91 @@ class DmgCore(object):
                 out.append([ae, nm])
         return out
 
+    # ---- 場所の名前を整える(モンスタータブ): 実データ(MD の履歴: マップの後ろの部分 ↔ MD の名前)と、公式のマップ一覧で ----
+    _CJK = re.compile(r"[぀-ヿ一-鿿]")
+
+    def _place_maps(self):
+        """(learned, eng, offn): learned = マップの後ろの部分 -> 日本語の MD の名前(履歴でいちばん多いもの)・eng = 日本語でない MD の名前 -> {後ろの部分: 回数}・
+        offn = マップの後ろの部分 -> 公式のマップ名の頭(「幻影の迷宮 塔の地下」なら「幻影の迷宮」)。履歴・一覧の数が変わったときだけ作り直す。"""
+        from collections import Counter
+        hist = getattr(self.md, "history", []) or []
+        off = self.official
+        key = (len(hist), len(off.maplist) if off is not None else 0)
+        if getattr(self, "_pm_key", None) == key:
+            return self._pm
+        jp, eng = {}, {}
+        for h in hist:
+            md, m = h.get("md") or "", h.get("map") or ""
+            if "@" not in m or not md:
+                continue
+            s = m.split("@", 1)[1]
+            if self._CJK.search(md):
+                jp.setdefault(s, Counter())[md] += 1
+            else:
+                eng.setdefault(md, Counter())[s] += 1
+        offn = {}
+        if off is not None:
+            for f, n in off.maplist:
+                if "@" in f:
+                    offn.setdefault(f.split("@", 1)[1], Counter())[re.split(r"[ 　]", str(n), 1)[0]] += 1
+        self._pm = ({s: c.most_common(1)[0][0] for s, c in jp.items()}, eng, {s: c.most_common(1)[0][0] for s, c in offn.items()})
+        self._pm_key = key
+        self._canon_cache = {}
+        return self._pm
+
+    def canon_where(self, where):
+        """場所の名前を整えた名前。壊れた名前・分からない名前は「不明」。「MD ct2」や英語の MD 名は、履歴か公式の一覧から日本語の名前に。"""
+        learned, eng, offn = self._place_maps()
+        cc = getattr(self, "_canon_cache", None)
+        if cc is None:
+            cc = self._canon_cache = {}
+        if where in cc:
+            return cc[where]
+        w = where or ""
+
+        def jp_of(suf):
+            return learned.get(suf) or offn.get(suf)
+        if not w or w == "不明":
+            r = "不明"
+        elif w.startswith("フィールド "):
+            r = w if re.fullmatch(r"[A-Za-z0-9_.\-]{2,24}", w[len("フィールド "):]) else "不明"     # 通信の読みずれで壊れた名前は「不明」へ
+        elif w.startswith("MD "):
+            r = jp_of(w[3:]) or ("不明" if not w[3:].strip() else w)
+        elif self._CJK.search(w):
+            r = w
+        else:                                           # 英語の MD 名: 同じ名前で入ったマップの後ろの部分から、日本語の名前が1つに決まれば
+            votes = {}                                  # 日本語の名前ごとの回数。いちばん多いものが 2/3 以上を占めるときだけ採用(同点・拮抗は決めない)
+            for s, n in eng.get(w, {}).items():
+                j = jp_of(s)
+                if j:
+                    votes[j] = votes.get(j, 0) + n
+            top = max(votes.items(), key=lambda kv: kv[1]) if votes else None
+            r = top[0] if top and top[1] * 3 >= sum(votes.values()) * 2 else w
+        cc[where] = r
+        return r
+
+    def _raw_wheres(self, canon):
+        """整えた名前 canon になる、記録の中の場所の名前すべて"""
+        ks = {canon}
+        for d in (self.stats, self.ails):
+            for per in d.values():
+                ks.update(per)
+        ks.update(self.mob_seen)
+        return [k for k in ks if self.canon_where(k) == canon]
+
     def place_view(self):
         """「モンスター情報」タブ用: 被ダメを受けた場所・見かけた場所ごとの、出てくるモンスター。
         {場所: [{name, lv, hp, ele, race, size, boss, skills, src: ["被ダメ"/"見かけた"/"公式"], official: 公式の情報があるか}]}"""
         places = {}
 
+        raws = {}                                   # 整えた名前 -> 記録の中の元の名前
+
         def add(where, name, src):
             if not name or name.startswith("#") or (name.startswith("ID") and name[2:].isdigit()):
                 return
-            places.setdefault(where, {}).setdefault(name, set()).add(src)
+            cw = self.canon_where(where)
+            raws.setdefault(cw, set()).add(where)
+            places.setdefault(cw, {}).setdefault(name, set()).add(src)
         for per_char in self.stats.values():
             for where, rows in per_char.items():
                 for k in rows:
@@ -1309,7 +1386,9 @@ class DmgCore(object):
         off = self.official
         if off is not None:
             for where in list(places):
-                sufs = self._suffixes(where)
+                sufs = []
+                for raw in raws.get(where, {where}) | {where}:
+                    sufs += [s for s in self._suffixes(raw) if s not in sufs]
                 if not sufs:
                     continue
                 mo = off.monsters_on(where, sufs)

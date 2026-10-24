@@ -64,6 +64,7 @@ if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))
 mt.DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(mt.resource("skill_names.json")), info=dmg_core.load_skill_info(mt.resource("skill_info.json")),
                           mobs=dmg_core.load_mob_info(mt.resource("mob_info.json")))
+mt.DMG.official = getattr(mt, "OFFICIAL", None)          # 本物の起動と同じに(場所の名前を公式の一覧で整える)
 mt.DMG.hits_info = dmg_core.load_json(mt.resource("skill_hits.json") or "", lambda d: {int(k): v for k, v in d.items()})
 mt.DMG.counter = dmg_core.load_json(mt.resource("skill_counter.json") or "")
 mt.DMG.ail_counter = dmg_core.load_json(mt.resource("ail_counter.json") or "")
