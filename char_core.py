@@ -251,7 +251,7 @@ class CharCore(object):
 
     def known_zeny(self):
         """覚えているゼニーの値([(キャラ, 値)]。確認用: ログイン時にどの通信に入っているか探す)"""
-        return [(n, c["zeny"]) for n, c in self.chars.items() if (c.get("zeny") or 0) >= 100000] + [("確認用", 11000972)]      # 確認用の値(利用者に教えてもらった Thirteen の実際のゼニー。見つかったら外す)
+        return []
 
     def snapshot(self):
         self.flush_pending()
@@ -431,7 +431,7 @@ class CharCore(object):
             info = self.md.char_info.get(name) or {}
         d = dict(ch.get("derived") or {})
         job = info.get("job")
-        return {"zeny": ch.get("zeny"), "lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv") or info.get("jobLv"), "job": job, "jobName": job_name(job),
+        return {"zeny": info.get("zeny", ch.get("zeny")), "lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv") or info.get("jobLv"), "job": job, "jobName": job_name(job),
                 "stats": {k: dict(v) for k, v in (ch.get("stats") or {}).items()}, "derived": d}
 
     def _update_set(self, name, ch):
@@ -881,6 +881,8 @@ class CharCore(object):
                 if ch.get("zeny") != val:
                     ch["zeny"] = val
                     self.changed = True
+                if self.md is not None and hasattr(self.md, "char_info") and self._name() != UNKNOWN:      # キャラ選択の一覧(md_core)と同じ置き場にも入れる(新しいほうを使う)
+                    self.md.char_info.setdefault(self._name(), {})["zeny"] = val
                 self._diagzeny = getattr(self, "_diagzeny", 0) + 1
                 if self._diagzeny <= 5:
                     self.log("[キャラ] 所持ゼニー {:04X}: {}".format(op, val))

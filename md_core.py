@@ -431,6 +431,8 @@ class MDCore(object):
                     info.update({"gid": gid, "job": job})
                     if 1 <= lv <= 300:
                         info["lv"] = lv
+                    (zeny,) = struct.unpack_from("<I", e, 12)       # 所持ゼニー(キャラ選択の一覧に入っている。ログイン時に取れる。jROの実データで確認: 11000972)
+                    info["zeny"] = zeny
                     (jlv,) = struct.unpack_from("<I", e, 24)      # JobLv(ふだんの通信では流れてこない。上がったときだけ 00B0 の 55)
                     if 1 <= jlv <= 100:
                         info["jobLv"] = jlv
