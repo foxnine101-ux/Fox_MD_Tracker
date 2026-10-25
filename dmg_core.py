@@ -23,6 +23,7 @@ MDごと・キャラごとに「相手|技」でまとめて、回数・最大�
     罠・射程3以下の技など技だけで決まるものはそれで、ほかは位置の通信から距離を出して決める(推定)
   - 「武器」属性の技は、モンスターが使うと無属性
 """
+import map_ledger
 import json
 import re
 import unicodedata
@@ -1334,7 +1335,7 @@ class DmgCore(object):
         w = where or ""
 
         def jp_of(suf):
-            return learned.get(suf) or offn.get(suf)
+            return learned.get(suf) or offn.get(suf) or map_ledger.name_of(suf)        # 履歴 → 公式のマップ一覧 → 台帳(実測・参考で確かめた名前)
         if not w or w == "不明":
             r = "不明"
         elif w.startswith("フィールド "):

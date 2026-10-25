@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.45"
+VERSION = "2.58.46"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -162,8 +162,43 @@ def load_config():
     return cfg
 
 
+def _ro_dirs_from_registry():
+    """インストーラーが残した情報(アンインストール一覧)から、ラグナロクオンラインの場所を探す。"""
+    out = []
+    try:
+        import winreg
+        for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for sub in (r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"):
+                try:
+                    k = winreg.OpenKey(root, sub)
+                except OSError:
+                    continue
+                for i in range(winreg.QueryInfoKey(k)[0]):
+                    try:
+                        s = winreg.OpenKey(k, winreg.EnumKey(k, i))
+                        nm = str(winreg.QueryValueEx(s, "DisplayName")[0])
+                        if "Ragnarok" in nm or "ラグナロク" in nm:
+                            for v in ("InstallLocation", "InstallDir"):
+                                try:
+                                    out.append(str(winreg.QueryValueEx(s, v)[0]).strip('"'))
+                                except OSError:
+                                    pass
+                    except OSError:
+                        continue
+    except Exception:
+        pass
+    return out
+
+
 def find_ro_dir(cfg):
-    cands = [cfg.get("ROフォルダ")] + RO_DIRS
+    """ROのフォルダ(中に System があるもの)。設定.json → よくある場所 → インストール情報 → ほかのドライブの Gravity/Ragnarok の順に探す。"""
+    cands = [cfg.get("ROフォルダ")] + RO_DIRS + _ro_dirs_from_registry()
+    for d in list(cands):
+        if d:
+            cands += [os.path.join(d, "Ragnarok"), os.path.join(d, "Gravity", "Ragnarok")]      # 1つ上のフォルダを指定していても見つける
+    for letter in "CDEFGHIJKLMNOPQRSTUVWXYZ":
+        for sub in (r"Gravity\Ragnarok", r"Games\Gravity\Ragnarok", r"Program Files (x86)\Gravity\Ragnarok", r"Program Files\Gravity\Ragnarok"):
+            cands.append(letter + ":" + chr(92) + sub)
     for d in cands:
         if d and os.path.isdir(os.path.join(d, "System")):
             return d
@@ -1564,6 +1599,13 @@ def main():
         print("クエスト名: {}件 ({})".format(len(names), ro))
     else:
         print("ROのフォルダが見つかりません。設定.json の「ROフォルダ」に書いてください(例 C:\\\\Gravity\\\\Ragnarok)")
+        try:                                                  # 前に読めたときの控えがあれば、クエストの名前だけは控えから使う(イベントクエスト・段階は出ない)
+            with open(NAMES_CACHE, "r", encoding="utf-8") as f:
+                names = {int(k): v for k, v in json.load(f).get("names", {}).items()}
+            if names:
+                print("クエスト名: 前回の控えから {}件".format(len(names)))
+        except Exception:
+            pass
     core = md_core.MDCore(names, log=print)
     if ro:
         core.stages = quest_names.nlwd_stages(os.path.join(ro, "System"))
