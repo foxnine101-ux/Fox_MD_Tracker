@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.41"
+VERSION = "2.58.42"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1048,6 +1048,16 @@ class _Scanner(gp.StreamScanner):
                 _TAKE_SEEN.add((op, len(pkt)))
                 _TAKE_LOGS[0] += 1
                 print("[倉庫] 取り出しの前後の、ふだん見ない通信 {:04X} {}バイト: {}".format(op, len(pkt), pkt[:48].hex()))
+        if CHARS is not None and _ZENY_LOGS[0] < 30 and len(pkt) >= 6:      # 確認用: 覚えているゼニーの値が、ログイン時にどの通信で届くか探す(すべての通信を見る)
+            try:
+                for nm, v in CHARS.known_zeny():
+                    j = pkt.find(struct.pack("<I", v))
+                    if j >= 0:
+                        _ZENY_LOGS[0] += 1
+                        print("[キャラ] ゼニー {} を含む通信 {:04X} {}バイト 位置{}: {}".format(v, pkt[0] | (pkt[1] << 8), len(pkt), j, pkt[:40].hex()))
+                        break
+            except Exception:
+                pass
         with self.lock:
             try:
                 self.core.feed(self.key, pkt)
@@ -1072,6 +1082,7 @@ class _Scanner(gp.StreamScanner):
 
 
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
+_ZENY_LOGS = [0]
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)

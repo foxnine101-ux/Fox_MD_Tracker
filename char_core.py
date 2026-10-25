@@ -249,6 +249,10 @@ class CharCore(object):
             pass
         self.changed = self.changed or was
 
+    def known_zeny(self):
+        """覚えているゼニーの値([(キャラ, 値)]。確認用: ログイン時にどの通信に入っているか探す)"""
+        return [(n, c["zeny"]) for n, c in self.chars.items() if (c.get("zeny") or 0) >= 100000]
+
     def snapshot(self):
         self.flush_pending()
         return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "sim_links": self.sim_links, "updated": int(time.time())}
