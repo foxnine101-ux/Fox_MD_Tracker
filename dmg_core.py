@@ -1320,6 +1320,7 @@ class DmgCore(object):
                 if "@" in f:
                     offn.setdefault(f.split("@", 1)[1], Counter())[re.split(r"[ 　]", str(n), 1)[0]] += 1
         self._pm = ({s: c.most_common(1)[0][0] for s, c in jp.items()}, eng, {s: c.most_common(1)[0][0] for s, c in offn.items()})
+        map_ledger.learn(self._pm[0], self._pm[2], off.maplist if off is not None else [])      # 台帳に渡す(場所の名前の整理も、ほかの機能も、同じ台帳を引く)
         self._pm_key = key
         self._canon_cache = {}
         return self._pm
@@ -1335,7 +1336,7 @@ class DmgCore(object):
         w = where or ""
 
         def jp_of(suf):
-            return learned.get(suf) or offn.get(suf) or map_ledger.name_of(suf)        # 履歴 → 公式のマップ一覧 → 台帳(実測・参考で確かめた名前)
+            return map_ledger.name_of(suf)        # 台帳(人が確かめた名前 → 履歴で学んだ名前 → 公式のマップ一覧)
         if not w or w == "不明":
             r = "不明"
         elif w.startswith("フィールド "):
