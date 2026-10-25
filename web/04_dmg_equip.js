@@ -70,7 +70,8 @@ function carryChip(c, always) {         // MD の表のキャラの横。いま�
   // 着ている装備が記号つきの装備セット(A・B…)なら、その記号(色つき)。そうでなければ服のアイコン(個数はマウスを置くと出る)
   const EQ = DATA.equip || {}, st = k.set && (EQ.sets || {})[k.set], sh = k.shadow && (EQ.shadows || {})[k.shadow];
   const tags = [st && st.tag ? st : null, sh && sh.tag ? sh : null].filter(Boolean);
-  const label = tags.length ? tags.map((x) => `<span class="ctag" style="background:${tagColor(x)}">${esc(x.tag)}</span>`).join("") : "👕";
+  const plain = ((k.set && !(st && st.tag)) || (k.shadow && !(sh && sh.tag))) && tags.length;      // 片方だけ記号つき(例: シャドウだけ S1)のとき、記号のない側を着ていることも服のアイコンで示す
+  const label = tags.length ? (plain ? "👕" : "") + tags.map((x) => `<span class="ctag" style="background:${tagColor(x)}">${esc(x.tag)}</span>`).join("") : "👕";
   return `<span class="carry${tags.length ? " set" : ""}${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）${tags.length ? "。着ているのは装備スロット " + tags.map((x) => x.tag).join("・") : ""}: ${names}${k.stale ? "。このログインでは装備の一覧が読めていないので、古い記録です" : ""}。クリックでキャラ詳細`)}">${label}</span>`;
 }
 function carryHtml(c) {                 // キャラ詳細: 倉庫に入れていない(持ったままの)装備

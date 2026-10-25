@@ -28,7 +28,7 @@ import os
 import struct
 import time
 
-WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA, 0x0B41}
+WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA, 0x0B41, 0x00B1, 0x0ACB}
 INV_PAGE = 100      # 一覧は100件で区切って届く
 STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
 WANT_OPS |= set(STORAGE_OPS)
@@ -427,7 +427,7 @@ class CharCore(object):
             info = self.md.char_info.get(name) or {}
         d = dict(ch.get("derived") or {})
         job = info.get("job")
-        return {"lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv") or info.get("jobLv"), "job": job, "jobName": job_name(job),
+        return {"zeny": ch.get("zeny"), "lv": d.get("BaseLv") or info.get("lv"), "jobLv": d.get("JobLv") or info.get("jobLv"), "job": job, "jobName": job_name(job),
                 "stats": {k: dict(v) for k, v in (ch.get("stats") or {}).items()}, "derived": d}
 
     def _update_set(self, name, ch):
@@ -869,6 +869,17 @@ class CharCore(object):
                 ch["stats"][key] = {"base": base, "plus": plus}
                 ch["updated"] = int(time.time())
                 self.changed = True
+
+        elif (op == 0x00B1 and len(pkt) >= 8) or (op == 0x0ACB and len(pkt) >= 12):      # 数値が変わった(大きい値)。変数 20 = 所持ゼニー
+            var, val = struct.unpack_from("<HI", pkt, 2) if op == 0x00B1 else struct.unpack_from("<Hq", pkt, 2)
+            if var == 20 and val >= 0:
+                ch = self._ch()
+                if ch.get("zeny") != val:
+                    ch["zeny"] = val
+                    self.changed = True
+                self._diagzeny = getattr(self, "_diagzeny", 0) + 1
+                if self._diagzeny <= 5:
+                    self.log("[キャラ] 所持ゼニー {:04X}: {}".format(op, val))
 
         elif op == 0x00B0:
             vid, val = struct.unpack_from("<Hi", pkt, 2)

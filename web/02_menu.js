@@ -106,6 +106,21 @@ function charLvText(c) {        // 「230/65」(Base/Job)。わからない方�
   const lv = st.lv ?? info.lv, jlv = st.jobLv ?? info.jobLv;
   return lv || jlv ? `${lv ?? "-"}/${jlv ?? "-"}` : "";
 }
+function zenyShort(v) {          // 3けた + 単位(K/M/B)。それより下は切り捨て(1234567 → 1.23M)
+  if (v == null || v < 0) return "";
+  if (v < 1000) return String(v);
+  const U = ["K", "M", "B", "T"]; let i = -1, x = v;
+  while (x >= 1000 && i < U.length - 1) { x /= 1000; i++; }
+  const f = x >= 100 ? 1 : x >= 10 ? 10 : 100;
+  return (Math.floor(x * f) / f).toString() + U[i];
+}
+const charZeny = (c) => { const z = ((((DATA.equip || {}).chars || {})[c]) || {}).status; return z && z.zeny != null ? z.zeny : null; };
+function zenyHtml(c) { const z = charZeny(c); return z == null ? "" : `<span class="zeny" title="所持ゼニー ${z.toLocaleString()} z">${zenyShort(z)}</span>`; }
+function zenySum(chars) {         // 表に出ているキャラの所持ゼニーの合計(左上)
+  const zs = chars.map(charZeny).filter((z) => z != null); if (!zs.length) return "";
+  const t = zs.reduce((a, b) => a + b, 0);
+  return ` <span class="zeny" title="所持ゼニーの合計 ${t.toLocaleString()} z（${zs.length}キャラぶん）">計 ${zenyShort(t)}</span>`;
+}
 function renderGrid(groups, chars, now) {
   const hidden = buildGroups().filter((G) => G.kind === "hide").sort((a, b) => a.label.localeCompare(b.label, "ja"));
   const hcs = Object.keys(DATA.chars || {}).filter((k) => inServer(k) && isHiddenChar(k, new Set(SETTINGS.hiddenChars || [])));
@@ -128,7 +143,7 @@ function renderGrid(groups, chars, now) {
   if (ONLY_OK) cols = groups.filter((G) => chars.some((c) => { const e = endOf(c, G); return e !== null && e <= now; }));
   let h = `<div class="opts"><label><input type="checkbox" id="onlyok" ${ONLY_OK ? "checked" : ""}> 行けるMDがある列だけ</label>${hiddenBtn}
     <span>● 行ける ／ 数字 = あと何時間でまた行けるか ／ ー = 記録なし</span></div>`;
-  h += `<div class="panel tablewrap"><table><thead><tr><th class="char">キャラ</th>`;
+  h += `<div class="panel tablewrap"><table><thead><tr><th class="char">キャラ${zenySum(chars)}</th>`;
   loadResistSheet();
   const canGo = new Map(cols.map((G) => [G.name, G.role === "md" || !!resistFind(RZ.entries, G.name)]));
   if (MX_FOCUS && !cols.some((G) => G.name === MX_FOCUS)) cols = groups;   // 戻ってきた列が隠れていたら全部出す
@@ -136,7 +151,7 @@ function renderGrid(groups, chars, now) {
   cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}（クリック・なぞって選択。右クリックでメニュー）"><span class="grip mx-ico" title="つかんで左右に動かすと並び替え。クリックで選択">${iconImg(G.name)}</span><span class="mx-name">${esc(G.label)}</span></th>`);
   h += `</tr></thead><tbody>`;
   for (const c of chars) {
-    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}${carryChip(c)}<span class="ch-sub">${esc(charLvText(c))}${jobChip(charJob(c))}</span></td>`;
+    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}${carryChip(c)}<span class="ch-sub">${esc(charLvText(c))}${zenyHtml(c)}${jobChip(charJob(c))}</span></td>`;
     cols.forEach((G, i) => {
       const e = endOf(c, G), ci = `data-ci="${i}"`;
       if (e === null) h += `<td class="cell none" ${ci}>ー</td>`;

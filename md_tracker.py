@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.40"
+VERSION = "2.58.41"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
