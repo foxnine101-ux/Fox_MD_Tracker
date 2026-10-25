@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.48"
+VERSION = "2.58.49"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1042,6 +1042,7 @@ def upload(cfg, payload):
 # ---------------------------------------------------------------
 #  通信を読む
 # ---------------------------------------------------------------
+OP_0B39 = bytes((0x39, 0x0B))      # 0B39(装備の一覧)の先頭2バイト
 OP_07FA = bytes((0xFA, 0x07))      # 07FA(持ち物から消えた)の先頭2バイト
 
 
@@ -1055,6 +1056,7 @@ class _Scanner(gp.StreamScanner):
         gp.StreamScanner._scan_lost(self, region)
         if CHARS is None:
             return
+        self._scan_equip_list(region)
         i = region.find(OP_07FA)
         while i != -1:
             if i + 8 <= len(region):
@@ -1066,6 +1068,25 @@ class _Scanner(gp.StreamScanner):
                         except Exception:
                             pass
             i = region.find(OP_07FA, i + 1)
+
+    def _scan_equip_list(self, region):
+        """見失った区間に埋もれた装備の一覧(0B39: 種類 + 68バイト×N)を、長さと中身の形を確かめて拾う(ログイン時の一覧を取りこぼす対策)。"""
+        i = region.find(OP_0B39)
+        while i != -1:
+            ok = False
+            if i + 5 <= len(region):
+                ln, kind = struct.unpack_from("<HB", region, i + 2)
+                n = (ln - 5) // 68
+                if kind <= 4 and ln == 5 + 68 * n and 0 <= n <= 100 and i + ln <= len(region):
+                    ok = all(0 < struct.unpack_from("<H", region, i + 5 + 68 * k)[0] < 4000 and struct.unpack_from("<I", region, i + 7 + 68 * k)[0] > 0 for k in range(n))
+                    if ok:
+                        print("[装備] 見失った区間から、装備の一覧(0B39 種類={}・{}件)を拾いました".format(kind, n))
+                        with self.lock:
+                            try:
+                                CHARS.feed(self.key, bytes(region[i:i + ln]))
+                            except Exception:
+                                pass
+            i = region.find(OP_0B39, i + (ln if ok else 1))
 
     def _handle(self, pkt):
         with self.lock:
@@ -1966,6 +1987,10 @@ def run_loop(core, lock, cfg, stop):
                     if k not in _EQ_LOGGED and time.time() - t0 > 12:
                         _EQ_LOGGED.add(k)
                         if key not in CHARS._synced:
+                            ch_ = CHARS.chars.get(n)
+                            if ch_ is not None and not ch_.get("eq_stale"):
+                                ch_["eq_stale"] = True       # 一覧が届かないまま遊んでいる間は、前の記録を「古い記録」として扱う(持ったまま判定を当てにしない)
+                                CHARS.changed = True
                             print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} (この接続でそれまでに読んだ通信: {}件)".format(n, c.get("map") or "不明", c.get("n", "?")))
                         else:
                             print("[装備] 装備の一覧を受け取っています: {} マップ={}".format(n, c.get("map") or "不明"))
