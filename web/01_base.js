@@ -190,14 +190,22 @@ function charMenu(c) {
   const keys = many ? [...SEL.chars] : [c];
   const items = [{ cap: many ? `選んだ${keys.length}人（${keys.map(cn).join("、")}）` : cn(c) }];
   items.push({ label: many ? `選んだ${keys.length}人を隠す` : "このキャラを隠す", act: () => hideChars(keys) });
+  const hcs = Object.keys(DATA.chars || {}).filter((k) => inServer(k) && isHiddenChar(k, new Set(SETTINGS.hiddenChars || [])));
+  if (hcs.length) {         // 隠したキャラは、ここからもどせる(別の画面の「隠したキャラ」ボタンと同じ)
+    items.push("-", { cap: "隠したキャラを表示に戻す" }, ...hcs.map((k) => ({ label: "↩ " + cn(k), act: () => showChars([k]) })));
+    if (hcs.length > 1) items.push({ label: "↩ 全部表示に戻す", act: () => showChars(hcs) });
+  }
   items.push("-", { label: ((SETTINGS.charColor || {})[c] ? "■ " : "") + "色をつける…（行の左端）", act: () => pickCharColor(keys, LAST_PT.x, LAST_PT.y) });
   if (keys.some((k) => (SETTINGS.charColor || {})[k])) items.push({ label: "色をはずす", act: () => setCharColor(keys, "") });
   const accs = accKnown();
-  if (accs.length) {      // アカウントの設定(ニャル様の週の回数などが、アカウントごとに数えられる)
-    items.push("-", { cap: "アカウント" });
-    accs.forEach((a) => items.push({ label: ((SETTINGS.charAcc || {})[c] === a ? "● " : "") + accLabel(a) + " にする", act: () => setCharAcc(keys, a) }));
-    items.push({ label: "手で決めたアカウントを消す(通信で見分けたものにもどす)", act: () => setCharAcc(keys, "") });
-    items.push({ label: "アカウントに名前を付ける…", act: () => { const a = accOfChar(c) || accs[0]; nameAcc(a); } });
+  if (accs.length) {      // アカウントの設定(ニャル様の週の回数などが、アカウントごとに数えられる)。あまり使わないので1つにまとめ、押すと別のメニューを出す
+    items.push("-", { label: "アカウントの設定…", act: () => setTimeout(() => {
+      const sub = [{ cap: "アカウント（" + (many ? `選んだ${keys.length}人` : cn(c)) + "）" }];
+      accs.forEach((a) => sub.push({ label: ((SETTINGS.charAcc || {})[c] === a ? "● " : "") + accLabel(a) + " にする", act: () => setCharAcc(keys, a) }));
+      sub.push({ label: "手で決めたアカウントを消す(通信で見分けたものにもどす)", act: () => setCharAcc(keys, "") });
+      sub.push({ label: "アカウントに名前を付ける…", act: () => { const a = accOfChar(c) || accs[0]; nameAcc(a); } });
+      showCtx(LAST_PT.x, LAST_PT.y, sub);
+    }, 0) });
   }
   if (SEL.chars.size) items.push("-", { label: "選択を解除", act: () => { SEL.chars.clear(); render(); } });
   return items;

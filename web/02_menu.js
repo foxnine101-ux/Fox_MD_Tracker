@@ -119,7 +119,10 @@ function zenyHtml(c) { const z = charZeny(c); return z == null ? "" : `<span cla
 function zenySum(chars) {         // 表に出ているキャラの所持ゼニーの合計(左上)
   const zs = chars.map(charZeny).filter((z) => z != null); if (!zs.length) return "";
   const t = zs.reduce((a, b) => a + b, 0);
-  return ` <span class="zeny" title="所持ゼニーの合計 ${t.toLocaleString()} z（${zs.length}キャラぶん）">計 ${zenyShort(t)}</span>`;
+  const hs = Object.keys(DATA.chars || {}).filter((k) => inServer(k) && isHiddenChar(k, new Set(SETTINGS.hiddenChars || []))).map(charZeny).filter((z) => z != null);
+  const ht = hs.reduce((a, b) => a + b, 0);       // 隠したキャラの分は、合計に入れず別に出す
+  return ` <span class="zeny" title="表に出ているキャラの所持ゼニーの合計 ${t.toLocaleString()} z（${zs.length}キャラぶん）">計 ${zenyShort(t)}</span>`
+    + (hs.length ? `<span class="zeny" style="opacity:.7" title="隠したキャラの所持ゼニーの合計 ${ht.toLocaleString()} z（${hs.length}キャラぶん）。上の合計には入っていません">隠 ${zenyShort(ht)}</span>` : "");
 }
 function renderGrid(groups, chars, now) {
   const hidden = buildGroups().filter((G) => G.kind === "hide").sort((a, b) => a.label.localeCompare(b.label, "ja"));
