@@ -77,7 +77,7 @@ const RAW = __DATA__;
 const GRID = __GRID__;
 const LINKS = __LINKS__;
 const IDS = {}; RAW.m.forEach((nm, i) => { if (RAW.i[i]) IDS[nm] = RAW.i[i]; });
-const DATA = { ids: IDS, lantern: RAW.L.map(([n, m, x, y, memo, e]) => ({ n, map: RAW.m[m], x, y, memo, e })), more: RAW.M.map(([n, m, x, y, memo, e]) => ({ n, map: RAW.m[m], x, y, memo, e })) };
+const DATA = { ids: IDS, lantern: RAW.L.map(([n, m, x, y, memo, e, o]) => ({ n, map: RAW.m[m], x, y, memo, e, o })), more: RAW.M.map(([n, m, x, y, memo, e, o]) => ({ n, map: RAW.m[m], x, y, memo, e, o })) };
 const AREAS = [["all", "すべて"], ["town", "街・室内(1〜301)"], ["field", "フィールド(302〜600)"], ["sp", "特殊(601〜650)"]];
 const SETS = [["lantern", "ランタン・ハント"], ["more", "もっとランタン・ハント"]];
 const $ = (s) => document.querySelector(s);
@@ -203,7 +203,7 @@ async function copy(t) {
   catch { const a = document.createElement("textarea"); a.value = t; document.body.appendChild(a); a.select(); try { document.execCommand("copy"); } catch {} a.remove(); }
   toast("コピーしました: " + t);
 }
-function navi(it) { const nm = it.e ? RAW.m[it.e[0]] : it.map, x = it.e ? it.e[1] : it.x, y = it.e ? it.e[2] : it.y, id = (DATA.ids[nm] || [])[0]; return id ? `/navi2 ${id} ${x}/${y} 1/1/1` : `${nm} ${x}/${y}`; }
+function navi(it) { const en = it.e && !it.o, nm = en ? RAW.m[it.e[0]] : it.map, x = en ? it.e[1] : it.x, y = en ? it.e[2] : it.y, id = (DATA.ids[nm] || [])[0]; return id ? `/navi2 ${id} ${x}/${y} 1/1/1` : `${nm} ${x}/${y}`; }
 function visible() {
   const items = DATA[ST.set], chk = CHK[ST.set], q = norm(ST.q);
   return items.filter((it) => (ST.set !== "lantern" || ST.area === "all" || (ST.area === "town" ? it.n <= 301 : ST.area === "field" ? it.n >= 302 && it.n <= 600 : it.n >= 601))
@@ -217,7 +217,7 @@ function draw() {
     ${orderCtl()}<input id="q" type="search" placeholder="マップ名・メモで絞る" value="${esc(ST.q)}"><label><input type="checkbox" id="todo" ${ST.todo ? "checked" : ""}> 未発見だけ</label>
     ${nextIt ? `<button class="pri" data-cp="${esc(navi(nextIt))}">次の未発見をコピー(${nextIt.n}番)</button>` : ""}<span class="mid">${list.length} 件を表示</span></div>`;
   $("#rows").innerHTML = list.map((it) => { const m = { id: (DATA.ids[it.map] || [])[0], how: (DATA.ids[it.map] || [])[1] }, on = chk.has(it.n);
-    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td><td><button data-cp="${esc(navi(it))}" title="${esc(it.e ? "入口: " + RAW.m[it.e[0]] + " " + it.e[1] + "/" + it.e[2] : "")}">${m.id ? "/navi2" : "コピー"}</button></td>
+    return `<tr class="${on ? "done" : ""}"><td><input type="checkbox" data-ck="${it.n}" ${on ? "checked" : ""}></td><td class="n">${it.n}</td><td><button data-cp="${esc(navi(it))}" title="${esc(it.e && !it.o ? "入口: " + RAW.m[it.e[0]] + " " + it.e[1] + "/" + it.e[2] : "")}">${m.id ? "/navi2" : "コピー"}</button></td>
       <td>${esc(it.map)}${m.id ? ` <span class="mid">${esc(m.id)}${m.how === "推" ? "?" : ""}</span>` : ""}</td><td class="x">${it.x}</td><td class="y">${it.y}</td><td class="memo">${esc(it.memo)}</td></tr>`; }).join("");
   $("#tools").innerHTML = `<button id="exp">チェックを書き出す</button><button id="imp">チェックを読み込む</button><span class="mid">別の端末に移すとき用(文字をコピー・貼り付け)</span>`;
 }
@@ -259,7 +259,7 @@ def main(args):
             names.append(it["map"])
     ids0 = lantern_core.resolve_ids(names, maplist, {})
     for it in items + more:                                  # メモに座標がある室内は、親マップの入口へナビする(室内のIDが確かなら室内のまま: lantern_core.entrance_for)
-        e = lantern_core.entrance_for(it["map"], it["memo"], ids0)
+        e = lantern_core.entrance(it["map"], it["memo"])
         if e:
             if e[0] not in names:
                 names.append(e[0])
@@ -270,9 +270,11 @@ def main(args):
         out = []
         for it in L:
             row = [it["n"], mi[it["map"]], it["x"], it["y"], it["memo"]]
-            e = lantern_core.entrance_for(it["map"], it["memo"], ids0)
+            e = lantern_core.entrance(it["map"], it["memo"])
             if e:
                 row.append([mi[e[0]], e[1], e[2]])
+                if lantern_core.entrance_for(it["map"], it["memo"], ids0) is None:
+                    row.append(1)                      # 室内のIDが確かなので、ナビは室内のまま(並べ替えは入口の位置)
             out.append(row)
         return out
     data = {"m": names, "L": pack(items), "M": pack(more), "i": [([ids[nm]["id"], "推" if ids[nm]["how"] == "推定" else ""] if nm in ids else 0) for nm in names]}

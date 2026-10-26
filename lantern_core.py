@@ -321,11 +321,13 @@ def payload(d, maplist, official_on, has_key):
     for sk, st in d["sets"].items():
         items = []
         for it in src[sk]:
-            e = entrance_for(it["map"], it.get("memo"), ids0)
+            e = entrance(it["map"], it.get("memo"))          # 入口は並べ替えの位置に使う。ナビは、室内のIDが確かなら室内のまま(own=1)
             if e:
                 if e[0] not in names:
                     names.append(e[0])
                 it = dict(it, e=list(e))                     # 画面に渡すときだけ足す(保存はしない)
+                if entrance_for(it["map"], it.get("memo"), ids0) is None:
+                    it["own"] = 1
             items.append(it)
         sets[sk] = dict(st, items=items)
     return {"sets": sets, "manual": d["manual"], "ids": resolve_ids(names, maplist, d["manual"]), "mapn": len(maplist), "official": official_on,
