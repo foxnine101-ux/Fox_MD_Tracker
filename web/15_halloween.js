@@ -138,7 +138,7 @@ function hwExpBind() {
 }
 // ---- ランタンハント: 座標の一覧(利用者が取り込む)。ナビ用のコピーと、見つけたもののチェック ----
 // 一覧は「ランタンハント.json」(この PC だけ。同梱しない)。チェックは SETTINGS.lanternChecks = { キャラ(空 = 共通): { lantern: [番号…], more: […] } }
-const LNT = { data: null, loading: false, msg: "", set: store.get("md_lntset") || "lantern", who: store.get("md_lntwho") || "", area: "all", q: "", todo: false, open: false };
+const LNT = { data: null, loading: false, msg: "", set: store.get("md_lntset") || "lantern", who: store.get("md_lntwho") || "", area: "all", q: "", todo: false, open: false, order: store.get("md_lntorder") || "n", start: store.get("md_lntstart") || "prontera" };
 const LNT_AREAS = [["all", "すべて"], ["town", "街・室内（1〜301）"], ["field", "フィールド（302〜600）"], ["sp", "特殊（601〜650）"]];     // 「301番まで街/室内のローテ、600番までフィールド、601〜650番が特殊配置」(一覧のルール欄)
 async function lntLoad(fetchMaps) {
   if (!LOCAL) return; LNT.loading = true;
@@ -171,13 +171,14 @@ function lntHtml(chars) {
   if (!items.length) return setTabs + imp;
   const checks = new Set(((((SETTINGS.lanternChecks || {})[LNT.who]) || {})[LNT.set]) || []);
   const inArea = (it) => LNT.set !== "lantern" || LNT.area === "all" || (LNT.area === "town" ? it.n <= 301 : LNT.area === "field" ? it.n >= 302 && it.n <= 600 : it.n >= 601);
-  const q = ratNorm(LNT.q), list = items.filter((it) => inArea(it) && (!q || ratNorm(it.map + " " + it.memo).includes(q)) && (!LNT.todo || !checks.has(it.n)));
+  const q = ratNorm(LNT.q), list0 = items.filter((it) => inArea(it) && (!q || ratNorm(it.map + " " + it.memo).includes(q)) && (!LNT.todo || !checks.has(it.n)));
+  const list = LNT.order === "route" ? LNTROUTE.routeSort(list0) : list0;          // 回る順 = 隣のマップへ、往復をへらして(24_lantern_route.js)
   const done = items.filter((it) => checks.has(it.n)).length, nextIt = list.find((it) => !checks.has(it.n));
   const who = `<select id="lntwho"><option value="">共通（みんなで1つ）</option>${chars.map((c) => `<option value="${esc(c)}" ${LNT.who === c ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select>`;
   let h = setTabs + `<div class="panel" style="padding:10px 14px"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>見つけた ${done} / ${items.length}</b>
       <span class="lbar"><i style="width:${items.length ? Math.round(done * 100 / items.length) : 0}%"></i></span> <span class="muted">チェックの対象:</span> ${who}</div>
     <div class="opts" style="margin-top:6px"><select id="lntarea" ${LNT.set === "lantern" ? "" : "hidden"}>${LNT_AREAS.map(([v, l]) => `<option value="${v}" ${LNT.area === v ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <input id="lntq" type="search" placeholder="マップ名・メモで絞る" value="${esc(LNT.q)}"><label><input type="checkbox" id="lnttodo" ${LNT.todo ? "checked" : ""}> 未発見だけ</label>
+      <select id="lntorder" title="回る順 = 公式ワールドマップの図の矢印にそって、隣のマップへ順に進む並べ方(未発見だけと組み合わせると、見つけた所を飛ばして回れます)"><option value="n" ${LNT.order === "n" ? "selected" : ""}>番号順</option><option value="route" ${LNT.order === "route" ? "selected" : ""}>回る順（隣のマップへ）</option></select>${LNT.order === "route" ? `<label>出発: <select id="lntstart">${LNTROUTE.STARTS.map(([v, l]) => `<option value="${v}" ${LNT.start === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>` : ""}<input id="lntq" type="search" placeholder="マップ名・メモで絞る" value="${esc(LNT.q)}"><label><input type="checkbox" id="lnttodo" ${LNT.todo ? "checked" : ""}> 未発見だけ</label>
       ${nextIt ? `<button class="ghost" data-lcp="${esc(lntNavi(nextIt).cmd)}" title="${esc(nextIt.n + "番 " + nextIt.map + " " + nextIt.x + "," + nextIt.y)}">次の未発見をコピー（${nextIt.n}番）</button>` : ""}
       <span class="muted">${list.length} 件を表示</span></div></div>`;
   h += `<div class="panel tablewrap"><table class="lnt"><thead><tr><th>✓</th><th>番号</th><th>ナビ</th><th>マップ</th><th>X</th><th>Y</th><th>メモ</th></tr></thead><tbody>`
@@ -190,6 +191,8 @@ function lntBind(chars) {
   const v = $("#view");
   v.querySelectorAll("input[name=lntset]").forEach((r) => r.onchange = () => { LNT.set = r.value; store.set("md_lntset", LNT.set); render(); });
   const w = $("#lntwho"); if (w) w.onchange = () => { LNT.who = w.value; store.set("md_lntwho", LNT.who); render(); };
+  const od = $("#lntorder"); if (od) od.onchange = () => { LNT.order = od.value; store.set("md_lntorder", LNT.order); render(); };
+  const st = $("#lntstart"); if (st) st.onchange = () => { LNT.start = st.value; store.set("md_lntstart", LNT.start); render(); };
   const a = $("#lntarea"); if (a) a.onchange = () => { LNT.area = a.value; render(); };
   const q = $("#lntq"); if (q) q.oninput = () => { LNT.q = q.value; clearTimeout(LNT.qt); LNT.qt = setTimeout(() => { render(); const e = $("#lntq"); if (e) { e.focus(); e.setSelectionRange(e.value.length, e.value.length); } }, 300); };
   const t = $("#lnttodo"); if (t) t.onchange = () => { LNT.todo = t.checked; render(); };
