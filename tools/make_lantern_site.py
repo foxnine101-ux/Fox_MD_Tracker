@@ -257,8 +257,9 @@ def main(args):
     for it in items + more:
         if it["map"] not in names:
             names.append(it["map"])
-    for it in items + more:                                  # メモに座標がある室内は、親マップの入口へナビする(lantern_core.entrance)
-        e = lantern_core.entrance(it["map"], it["memo"])
+    ids0 = lantern_core.resolve_ids(names, maplist, {})
+    for it in items + more:                                  # メモに座標がある室内は、親マップの入口へナビする(室内のIDが確かなら室内のまま: lantern_core.entrance_for)
+        e = lantern_core.entrance_for(it["map"], it["memo"], ids0)
         if e:
             if e[0] not in names:
                 names.append(e[0])
@@ -269,7 +270,7 @@ def main(args):
         out = []
         for it in L:
             row = [it["n"], mi[it["map"]], it["x"], it["y"], it["memo"]]
-            e = lantern_core.entrance(it["map"], it["memo"])
+            e = lantern_core.entrance_for(it["map"], it["memo"], ids0)
             if e:
                 row.append([mi[e[0]], e[1], e[2]])
             out.append(row)

@@ -119,7 +119,7 @@ def guess_id(name):
 
 
 # ゲームに入って確かめたマップ ID(動作ログの「マップ=…」)。名前 → ID。2026-10-20 のログイン: ハロウィン会場 = hal_opera
-MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in", norm("フェイヨン室内01"): "payon_in01", norm("旧フェイヨン室内"): "payon_01_q", norm("モロク室内"): "morocc_in", norm("ピラミッド周辺"): "moc_ruins", norm("ウンバラ室内"): "um_in", norm("アルデバラン室内"): "aldeba_in", norm("氷の城室内"): "icas_in", norm("崩壊したウェルス"): "hem_dun01j", norm("破壊されたウェルス"): "hem_dun01j"}      # 氷の城室内は icas_in と icas_in2 の2つがある(13番・14番)が、ナビは親マップの入口へ運ぶので、名前には最初のものを割り当てる。情報提供のシート(2026-10-24)      # prt_in = 利用者が確認(2026-10-22)
+MEASURED = {norm("イベント会場"): "hal_opera", norm("狂騒のオペラハウス"): "hal_opera", norm("プロンテラ室内"): "prt_in", norm("イズルード室内"): "izlude_in", norm("フェイヨン室内01"): "payon_in01", norm("旧フェイヨン室内"): "payon_01_q", norm("モロク室内"): "morocc_in", norm("ピラミッド周辺"): "moc_ruins", norm("ウンバラ室内"): "um_in", norm("アルデバラン室内"): "aldeba_in", norm("ジュノー室内03"): "yuno_in03", norm("氷の城室内"): "icas_in", norm("崩壊したウェルス"): "hem_dun01j", norm("破壊されたウェルス"): "hem_dun01j"}      # 氷の城室内は icas_in と icas_in2 の2つがある(13番・14番)が、ナビは親マップの入口へ運ぶので、名前には最初のものを割り当てる。情報提供のシート(2026-10-24)      # prt_in = 利用者が確認(2026-10-22)
 
 
 # 他の人のまとめ(るにゃんこ「めもしろにゃ!」のランタンハント2026の表)と突き合わせて、こちらのIDと全部一致したうえで、こちらに無かった分だけ足したマップID(2026-10-23)。
@@ -296,16 +296,32 @@ def entrance(map_name, memo):
     return None
 
 
+def entrance_for(map_name, memo, ids):
+    """画面・身内ページで使う入口。室内のマップ ID が確かな(推定でない)ときは、その室内のまま(自分の座標へ)ナビするので None。
+    ID が分からない・推定のとき、氷の城室内(ID が2つある)は、メモの座標で親マップの入口へ。ids = resolve_ids の結果"""
+    e = entrance(map_name, memo)
+    if e and _ENT_INDOOR.match(str(map_name or "")) and not str(map_name).startswith("氷の城"):
+        r = ids.get(map_name) or {}
+        if r.get("id") and r.get("how") != "推定":
+            return None
+    return e
+
+
 def payload(d, maplist, official_on, has_key):
     """画面に渡す形: 一覧 + マップ名ごとのマップ ID(公式のマップ一覧 → 名前の決まり → 手で決めたもの)。has_key = 鍵をもう持っているか"""
     names = []
     sets = {}
+    src = {}
     for sk, st in d["sets"].items():
-        items = []
-        for it in (fix_items(st.get("items") or []) if sk == "lantern" else (st.get("items") or [])):
+        src[sk] = fix_items(st.get("items") or []) if sk == "lantern" else (st.get("items") or [])
+        for it in src[sk]:
             if it["map"] not in names:
                 names.append(it["map"])
-            e = entrance(it["map"], it.get("memo"))
+    ids0 = resolve_ids(names, maplist, d["manual"])
+    for sk, st in d["sets"].items():
+        items = []
+        for it in src[sk]:
+            e = entrance_for(it["map"], it.get("memo"), ids0)
             if e:
                 if e[0] not in names:
                     names.append(e[0])
