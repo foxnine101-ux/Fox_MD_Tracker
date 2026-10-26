@@ -2,13 +2,13 @@
 const STARTS = [["prontera", "プロンテラ"], ["izlude", "イズルード"], ["geffen", "ゲフェン"], ["payon", "フェイヨン"], ["morocc", "モロク"], ["alberta", "アルベルタ"], ["aldebaran", "アルデバラン"], ["yuno", "ジュノー"], ["einbroch", "アインブロック"], ["lighthalzen", "リヒタルゼン"], ["hugel", "フィゲル"], ["rachel", "ラヘル"], ["veins", "ベインス"], ["comodo", "コモド"], ["umbala", "ウンバラ"]];
 const CELLS = {}, CELLOF = {}, ALIAS = {};
 for (const id in GRID) { const g = GRID[id]; if (typeof g === "string") ALIAS[id] = g; else { CELLOF[id] = g; CELLS[g.join(":")] = id; } }
-// 行き来の例外(利用者に教わったもの): CUT = マスは隣でも地続きでない(別のマップを経由する)・ADD = マスは隣でなくても行き来できる
-const LINK_CUT = [["um_fild02", "um_fild04"], ["um_fild02", "comodo"]];      // ウンバラ2は、ウンバラ3の先(ウンバラ3 → 2 → 1 → 4 → ウンバラ)にある
-const LINK_ADD = [["um_fild01", "um_fild04"]];
-const CUTSET = new Set(), ADDS = {};
-for (const l of LINK_CUT) { CUTSET.add(l[0] + "|" + l[1]); CUTSET.add(l[1] + "|" + l[0]); }
-for (const l of LINK_ADD) { (ADDS[l[0]] = ADDS[l[0]] || []).push(l[1]); (ADDS[l[1]] = ADDS[l[1]] || []).push(l[0]); }
-function nbrs(id) { const g = CELLOF[id], o = []; for (const d of [[-1, 0], [1, 0], [0, -1], [0, 1]]) { const n = CELLS[g[0] + ":" + (g[1] + d[0]) + ":" + (g[2] + d[1])]; if (n && !CUTSET.has(id + "|" + n)) o.push(n); } return o.concat(ADDS[id] || []); }
+// 行き来できる組(LINKS)は、公式ワールドマップの図の矢印から読み取ったもの(隣のマスでも矢印が無い所は行き来できない)。例外は CUT(切る)・ADD(足す)に書く
+const LINK_CUT = [];
+const LINK_ADD = [];
+const NB = {};
+function addNb(a, b) { (NB[a] = NB[a] || []).push(b); (NB[b] = NB[b] || []).push(a); }
+for (const l of LINKS.concat(LINK_ADD)) if (!LINK_CUT.some((c) => (c[0] === l[0] && c[1] === l[1]) || (c[0] === l[1] && c[1] === l[0]))) addNb(l[0], l[1]);
+function nbrs(id) { return NB[id] || []; }
 function bfs(from) { const d = {}; d[from] = 0; const q = [from]; for (let i = 0; i < q.length; i++) for (const n of nbrs(q[i])) if (!(n in d)) { d[n] = d[q[i]] + 1; q.push(n); } return d; }
 // 町やフィールドの名前でない場所(城内・ギルド・空港など)を、いちばん近い町やマップに結びつける(座標はそのマップのものではないので、その町の最後に回す)
 const NAME_TOWN = { "プロンテラ城内": "prontera", "プロンテラ聖堂内": "prontera", "プロンテラ中央宮": "prontera", "プロンテラ離宮": "prontera", "プロンテラ東図書館": "prontera", "王家の記憶の間": "prontera", "過去の王家の記憶の間": "prontera", "侵攻されたプロンテラ避難地": "prontera", "聖カピトリーナ修道院": "prt_monk",
@@ -51,6 +51,25 @@ function improve(order, D) {   // 往復をへらす: 入れ替え(2-opt)と、1
   }
   return order;
 }
+function pathBetween(a, b) {   // aからbへ、隣をたどる近道の途中のマップ(a, ..., b)。つながっていなければ null
+  const par = { [a]: null }, q = [a];
+  for (let i = 0; i < q.length; i++) { if (q[i] === b) break; for (const n of nbrs(q[i])) if (!(n in par)) { par[n] = q[i]; q.push(n); } }
+  if (!(b in par)) return null;
+  const p = []; for (let x = b; x !== null; x = par[x]) p.push(x);
+  return p.reverse();
+}
+function compact(order, has) {   // 次のマップへの道中に、まだの(アイテムのある)マップがあれば、通るついでに先に回る(あとで戻らない)
+  const done = new Set(), out = [];
+  const visit = (k) => { if (!done.has(k)) { done.add(k); out.push(k); } };
+  visit(order[0]);
+  for (let i = 1; i < order.length; i++) {
+    const b = order[i]; if (done.has(b)) continue;
+    const p = pathBetween(out[out.length - 1], b);
+    if (p) for (const n of p.slice(1, -1)) if (has[n]) visit(n);
+    visit(b);
+  }
+  return out;
+}
 function routeSort(list) {
   const dir = {}, fb = {}, rest = [];
   for (const it of list) {
@@ -69,6 +88,8 @@ function routeSort(list) {
     order.push(best); left.delete(best); cur = best;
   }
   order = improve(order, D);                // そのうえで、往復をへらす
+  const has = {}; for (const k in dir) has[k] = 1; for (const k in fb) has[k] = 1;
+  order = compact(order, has);              // 道中のマップも通るついでに
   let prev = null;
   for (let i = 0; i < order.length; i++) {
     const k = order[i]; if (i === 0 && !dir[k] && !fb[k]) { prev = k; continue; }
