@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.36"
+VERSION = "2.58.50"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1137,6 +1137,7 @@ class _Scanner(gp.StreamScanner):
                 SERVERS.note_char(self.key, c["name"])   # このサーバーで遊んだキャラ(設定で見分ける用)
 
 
+SNIFFER = None      # 通信を聞いているもの(run_loop が、通信が来ないとき聞く回線を広げるのに使う)
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 _ZENY_LOGS = [0]
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
@@ -1471,6 +1472,29 @@ class Sniffer(object):
         self.core, self.lock, self.iface = core, lock, iface
         self.scanners = {}
         self.sniffer = None
+        self.t0 = time.time()
+        self.widened = False
+
+    def widen(self):
+        """経路で選んだ回線に通信が1つも来ないとき、IP を持つ全部の回線で聞く(VPN・ゲーム用の仮想回線(TAP)が経路に選ばれて、実際の通信は別の回線を通る PC 向け)。"""
+        from scapy.all import AsyncSniffer, conf
+        self.widened = True
+        ifs = []
+        for i in conf.ifaces.values():
+            ip = str(getattr(i, "ip", "") or "")
+            if ip and not ip.startswith(("127.", "169.254.", "0.")):
+                ifs.append(i)
+        if len(ifs) < 2:
+            print("[通信] 回線が1つしか見つからないので、聞く回線は変えません")
+            return
+        try:
+            if self.sniffer is not None:
+                self.sniffer.stop()
+        except Exception:
+            pass
+        print("[通信] 通信が1つも来ないので、全部の回線で聞き直します: " + " / ".join("{}({})".format(getattr(i, "name", ""), getattr(i, "ip", "")) for i in ifs))
+        self.sniffer = AsyncSniffer(filter="tcp and src net {}".format(gp.RO_SERVER_NET), prn=self._on, store=False, iface=ifs)
+        self.sniffer.start()
 
     def start(self):
         from scapy.all import AsyncSniffer
@@ -1765,6 +1789,8 @@ def main():
                 return w
         OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
+    global SNIFFER
+    SNIFFER = sn
     try:
         for _try in range(10):                          # Npcap を入れた直後や、インストール中は、すぐには始められないことがある → 少し待って何度か試す
             try:
@@ -1994,6 +2020,12 @@ def run_loop(core, lock, cfg, stop):
                             print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} (この接続でそれまでに読んだ通信: {}件)".format(n, c.get("map") or "不明", c.get("n", "?")))
                         else:
                             print("[装備] 装備の一覧を受け取っています: {} マップ={}".format(n, c.get("map") or "不明"))
+        sn = SNIFFER
+        if sn is not None and not sn.widened and not STATS["segments"] and time.time() - sn.t0 > 75 and not cfg.get("ネットワーク名"):
+            try:
+                sn.widen()
+            except Exception as e:
+                print("[通信] 回線を広げられませんでした:", e)
         if time.time() - last_stat > 60:
             last_stat = time.time()
             ops = ", ".join("{:04X}×{}".format(k, v) for k, v in sorted(STATS["ops"].items()))
