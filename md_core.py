@@ -765,7 +765,13 @@ class MDCore(object):
                                      "since": old.get("since") if old.get("end") == end else int(ref)}
         elif kind == "sync":
             _, batch, now = item
-            for qid in [k for k in ch["quests"] if k not in batch]:
+            gone = [k for k in ch["quests"] if k not in batch]
+            if len(gone) >= 5 and len(gone) == len(ch["quests"]):
+                # 一覧に期限つきのクエストが1つも無いのに、記録には5つ以上ある = 一覧の途中までしか読めていない可能性が高い
+                # (ログイン直後の通信を取りこぼすとこうなる)。ここで全部消すと週次などのCTが消えるので、記録は残す
+                self.log("[MD] {}: 届いた一覧が不自然に少ない(期限つき0件)ので、これまでの記録 {}件 は消さずに残します".format(name, len(gone)))
+                gone = []
+            for qid in gone:
                 del ch["quests"][qid]
             self.log("[MD] {}: クエスト一覧を受信 (CT付き {}件)".format(name, len(ch["quests"])))
         elif kind == "add":
