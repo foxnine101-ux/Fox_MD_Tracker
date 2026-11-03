@@ -4,8 +4,12 @@
 // 相場は公式ツールの露店の取引履歴(market_core。/api/market。この PC に保存)。
 let INV = null, INV_T = -1, INV_LOADING = false, MKB = {}, INV_FILL = null;      // MKB = 覚えている相場の要約 {番号: [取った時刻, 直近の売価, 日時, 中央値]}      // /api/inv の返事・読んだときの inv_t
 // ゲーム内の倉庫と同じ分類。品の種類(通信の type)から。装備は着る場所から(右手=武器、それ以外=防具)
-const INV_CATS = [["all", "全て"], ["use", "消費アイテム"], ["special", "スペシャルアイテム"], ["armor", "防具"], ["weapon", "武器"], ["ammo", "矢など消耗品"], ["card", "カード"], ["etc", "その他"]];
-const invCatOf = (r) => r.eq ? (r.weapon ? "weapon" : "armor") : ({ 0: "use", 2: "use", 11: "use", 18: "special", 4: "armor", 5: "weapon", 10: "ammo", 6: "card" })[r.type] || "etc";
+const INV_CATS = [["all", "全て"], ["use", "消費アイテム"], ["special", "スペシャルアイテム"], ["armor", "防具"], ["weapon", "武器"], ["costume", "衣装"], ["ammo", "矢など消耗品"], ["card", "カード"], ["etc", "その他"]];
+// 衣装 = 見た目だけの装備(着る場所が衣装の枠)。スペシャル = 「〜の箱」「〜チケット」など(ゲームの sp タブの見本から。名前での判定なので、ずれた品は教えてもらって直す)
+const INV_COSTUME = 1024 | 2048 | 4096 | 8192, INV_SPECIAL = /の箱$|チケット|引換券|ボックス|の宝箱/;
+const invCatOf = (r) => r.eq ? (r.costume ? "costume" : r.weapon ? "weapon" : "armor")
+  : r.type === 18 || ((r.type == null || r.type === 2 || r.type === 0) && INV_SPECIAL.test(r.base || r.name)) ? "special"
+  : ({ 0: "use", 2: "use", 11: "use", 4: "armor", 5: "weapon", 10: "ammo", 6: "card" })[r.type] || "etc";
 let INV_CAT = store.get("md_invcat") || "all";
 let INVSUB = store.get("md_invsub") || "bag", INV_CHAR = "", INV_Q = "", INV_SORT = "name";
 const MKT = { id: 0, name: "", view: null, timer: 0 };
@@ -107,10 +111,10 @@ function mkCells(id) {      // 覚えている相場(「相場」ボタンで取
 function invRows(items, eq, cat = INV_CAT) {
   const q = INV_Q.trim().toLowerCase();
   const rows = [];
-  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, type: x.type, eq: false, unk: invIsUnk(invName(x.itemId)) });
+  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, type: x.type, eq: false, unk: invIsUnk(invName(x.itemId)), base: invName(x.itemId) });
   for (const e of eq || []) {
     const cards = (e.cards || []).map((c) => c.name).filter(Boolean).join(" / ");
-    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, weapon: e.type === 5 || (e.type == null && !!(((e.loc || 0) | (e.wear || 0)) & 2)), unk: invIsUnk(e.name || invName(e.itemId)), sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
+    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, costume: !!e.loc && !(e.loc & ~INV_COSTUME), weapon: e.type === 5 || (e.type == null && !!(((e.loc || 0) | (e.wear || 0)) & 2)), unk: invIsUnk(e.name || invName(e.itemId)), sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
   }
   const f = rows.filter((r) => (!q || (r.name + (r.sub || "")).toLowerCase().includes(q)) && (cat === "all" || invCatOf(r) === cat));
   f.sort((a, b) => INV_SORT === "count" ? (b.count - a.count) || a.name.localeCompare(b.name, "ja") : a.eq - b.eq || a.name.localeCompare(b.name, "ja", { numeric: true }));
