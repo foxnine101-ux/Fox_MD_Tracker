@@ -337,6 +337,13 @@ function render() {
   try { renderNow(); } catch (e) {
     console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
+    try {      // 選んでいるスロットの職業をラトリオが計算できないとき: ここで別のスロットを選べるようにする(でないと、この画面から抜けられない)
+      if (v && /GetJobBonus/.test(e.message) && typeof SIMC !== "undefined" && SIMC.chars && Object.keys(SIMC.chars).length) {
+        const cur = SIMC.chars[SIMC.cur], jid = cur && cur.model && cur.model.status ? cur.model.status.jobId : "?";
+        v.insertAdjacentHTML("afterbegin", `<div class="panel" style="padding:12px"><b>選んでいるスロット「${esc(cur ? cur.name : "?")}」の職業(番号 ${esc(jid)})を、ラトリオが計算できません。</b><div class="muted" style="margin:6px 0">別のスロットを選ぶか、キャラシミュレーターでこのスロットの職業を選び直してください。</div>${Object.keys(SIMC.chars).map((id) => `<button class="ghost" data-recslot="${esc(id)}" ${id === SIMC.cur ? "disabled" : ""}>${esc(SIMC.chars[id].name)}</button>`).join(" ")}</div>`);
+        v.querySelectorAll("[data-recslot]").forEach((b) => b.onclick = () => { simcSelect(b.dataset.recslot); render(); });
+      }
+    } catch (e2) { /* 回復用の表示なので、失敗しても元のエラー表示は残す */ }
   }
   LAST_RENDER_MS = performance.now() - t0; LAST_RENDER_AT = Date.now();
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
