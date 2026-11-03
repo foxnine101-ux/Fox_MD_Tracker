@@ -664,5 +664,10 @@ async function stpHeavy() {
       }
       S.eff = { base, rows, dmgName: sb0 ? sb0.name : "", fxOn }; S.effSig = stpEffSig(m, S); put("stpeff", stpEffHtml(m, S));
     }
-  } catch (err) { if (err.message !== "changed") console.warn("stp", err); }
+  } catch (err) {
+    if (err.message !== "changed") {
+      console.warn("stp", err); try { reportJsError("stp " + err.message, err.stack); } catch (e2) { /* 記録は飾り */ }
+      const el = $("#stppats"); if (el) el.insertAdjacentHTML("beforeend", `<div class="warn" style="font-size:12px;margin:4px 0">計算の途中でエラーが出ました（${esc(err.message)}）。選んでいる装備スロットのどれかが、ラトリオで計算できない組み合わせかもしれません。ほかのスロットに替えて試してください（エラーログに記録しました）。</div>`);
+    }
+  }
 }

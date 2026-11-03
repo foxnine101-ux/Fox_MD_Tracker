@@ -313,8 +313,8 @@ function renderSimChara() {
       g("soc").onchange = (e) => { O.cast = e.target.checked; rr(); };
       g("sotg").onchange = (e) => { O.target = Math.max(100, Math.min(193, Math.round((+e.target.value || 193) * 10) / 10)); rr(); };
       const tog = (arr, id) => { const i = arr.indexOf(id); if (i >= 0) arr.splice(i, 1); else arr.push(id); rr(); };
-      // 枠に色が付いている(= いま着ている装備スロット)チップは、「いまの装備」を選んでいるあいだ選択済みに見える。押すと、「いまの装備」の代わりにこの記号を選ぶ(同じ中身を2回数えない)
-      const tog2 = (arr, id, shadow) => { if (id !== "now" && id === stpNowSid(m, shadow) && arr.includes("now") && !arr.includes(id)) { arr.splice(arr.indexOf("now"), 1, id); rr(); } else tog(arr, id); };
+      // 枠に色が付いている(= いま着ている装備スロット)チップは、「いまの装備」を選んでいるあいだ選択済みに見える。押すと、「いまの装備」を外す(この記号は「いまの装備」と同じ中身なので、選んだように見えていた)
+      const tog2 = (arr, id, shadow) => { if (id !== "now" && id === stpNowSid(m, shadow) && arr.includes("now") && !arr.includes(id)) { arr.splice(arr.indexOf("now"), 1); rr(); } else tog(arr, id); };
       V.querySelectorAll("[data-optm]").forEach((el) => el.onclick = () => tog2(O.mainSel, el.dataset.optm, false));
       V.querySelectorAll("[data-opts]").forEach((el) => el.onclick = () => tog2(O.shSel, el.dataset.opts, true));
       const S = stpState(), me = () => { stpRefreshMain(m); stpKick(m); };
