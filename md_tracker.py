@@ -44,7 +44,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.63"
+VERSION = "2.58.64"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1019,6 +1019,12 @@ def start_live_server(core, lock, cfg):
         daemon_threads = True
         request_queue_size = 256      # 同時に待てる接続の数。既定の 5 だと、計算係(ラトリオ)が約250ファイルを一気に取りに来たときに一部が断られて、起動に失敗する
         allow_reuse_address = True
+
+        def handle_error(self, request, client_address):
+            # 画面を閉じた・更新した直後に、相手が先に切るのはふつう(エラーログを汚すだけ)。それ以外のエラーだけ残す
+            if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+                return
+            super().handle_error(request, client_address)
 
     try:
         srv = S(("127.0.0.1", LIVE_PORT), H)

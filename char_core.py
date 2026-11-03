@@ -852,12 +852,31 @@ class CharCore(object):
             self.log("[キャラ] {} の記録に、名前が決まる前に届いた分({})を合流させました".format(cur, "装備の一覧あり" if "bag" in rec else "装備の一覧なし"))
         self.changed = True
 
+    def _stale_key(self, key):
+        """名前待ちの接続 key が、自分の名前を持たず(=「その側のいまのキャラ」に頼っていて)、同じ側に、名前を持つ新しい接続がある → 古い接続。"""
+        conn = getattr(self.md, "conn", None)
+        if not isinstance(conn, dict) or (conn.get(key) or {}).get("name"):
+            return False
+        side = self.md._side(key)
+        later = False
+        for k in conn:
+            if later and self.md._side(k) == side and (conn[k] or {}).get("name"):      # 同じ側に、自分の名前を持つ新しい接続がある
+                return True
+            if k == key:
+                later = True
+        return False
+
     def flush_pending(self):
         """名前が決まった接続の名前待ちの記録を、キャラの記録に合流させる(画面や保存の前に呼ぶ。次の通信を待たなくてよい)。"""
         if not self._pending or self.md is None or not hasattr(self.md, "name_for"):
             return
         for key in list(self._pending):
             cur = self.md.name_for(key)
+            if cur and self._stale_key(key):
+                # 古い接続(キャラ選択画面など)の分。name_for は「その側のいまのキャラ」を返すので、そのまま合流させると、別キャラ/古い一覧(5件など)が新しい一覧(28件など)を上書きしてしまう
+                self._pending.pop(key, None)
+                self.log("[キャラ] 古い接続の名前待ちの記録を、{} には合流させず捨てました".format(cur))
+                continue
             if cur:
                 self._merge_pending(cur, self._pending.pop(key))
                 ch = self.chars.get(cur)
