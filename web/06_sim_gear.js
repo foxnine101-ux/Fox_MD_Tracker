@@ -183,6 +183,7 @@ function simcSetTabs(m, shadow) {         // 装備スロット: 記号を押す
   const SL = simcBoxLatest(m, shadow), stale = SL && SL[1] !== L.cur && dirty ? `<span class="warn" title="未保存の変更があるので、自動では入れ替えていません。記号を押すと、最新の中身に切りかわります">「${esc(SL[0])}」の中身が更新されています</span> ` : "";
   return stale + `<span class="muted">${shadow ? "シャドウのスロット" : "装備スロット"}</span>`
     + L.tabs.map(({ sid, st }) => `<button class="settab${sid === L.cur ? " on" : ""}" data-slot="${esc(sid)}" data-sh="${sh}" style="--c:${tagColor(st)}" title="${esc(st.name || st.auto || "")}（押すと、このスロットの装備に切りかえます。右クリックで、上書き・名前の変更など）${sid === L.cur && dirty ? "\n＊ 反映したあとに、手で変えたところがあります" : ""}">${esc(st.tag)}${sid === L.cur && dirty ? "＊" : ""}</button>`).join("")
+    + (L.tabs.some((x) => x.sid === L.cur) ? `<button class="settab more" data-simover="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}で、選んでいるスロット「${esc(L.tabs.find((x) => x.sid === L.cur).st.tag)}」を上書き保存します（前の中身は履歴に戻ります）">「${esc(L.tabs.find((x) => x.sid === L.cur).st.tag)}」に上書き</button>` : "")
     + `<button class="settab more" data-simreg="${sh}" title="いまの計算機の${shadow ? "シャドウ装備" : "装備"}を、新しいスロットに保存します">＋新しいスロットに保存</button>`
     + `<button class="settab more" data-wearnow="${sh}" ${hasNow ? "" : "disabled"} title="${hasNow ? `${esc(charWho())}「${esc(cn(nc))}」が着ている${shadow ? "シャドウ装備" : "装備"}を、計算機に入れます` : "ゲームにログインして装備を読み込むと使えます"}">いま着ている装備を反映</button>`
     + `<button class="settab more" data-wearmore="${sh}" title="これまでに着たことのある組み合わせ（履歴）から選んで、計算機に入れます">保存した装備から ▾</button>`;

@@ -438,6 +438,8 @@ function renderSimChara() {
       };
       el.oncontextmenu = (e) => { e.preventDefault(); menu(e.clientX, e.clientY); };
     });
+    V.querySelectorAll("[data-simover]").forEach((el) => el.onclick = async (e) => { e.preventDefault(); const shadow = el.dataset.simover === "1", L = simcSetList(m, shadow); if (L.cur && await askOnce("over", `スロット「${el.textContent.replace(/[「」]|に上書き/g, "")}」を、いまの計算機の${part(shadow)}で上書きします。
+いまの中身は履歴に戻ります。`, "上書きする")) simcRegister(shadow, L.cur); });
     V.querySelectorAll("[data-simreg]").forEach((el) => el.onclick = (e) => { e.preventDefault(); simcRegister(el.dataset.simreg === "1", ""); });
     V.querySelectorAll("[data-wearnow]").forEach((el) => el.onclick = (e) => { e.preventDefault(); const c = lastChar(); if (c) wearAsk("now:" + c, el.dataset.wearnow === "1", cn(c) + " がいま着ている装備"); });
     V.querySelectorAll("[data-wearmore]").forEach((el) => el.onclick = (e) => {
