@@ -62,6 +62,9 @@
   a.stag { text-decoration: none; cursor: pointer; }
   .eq-h input.eqcolor { width: 28px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; cursor: pointer; }
   td.char { cursor: pointer; }
+  /* いまログイン中のキャラの行: 名前マスに色の帯、行全体にうっすら色 */
+  tr.live td { background-image: linear-gradient(rgba(59,130,246,.10), rgba(59,130,246,.10)); }
+  tr.live td.char { box-shadow: inset 4px 0 0 var(--accent); }
   .carry { display: inline-block; margin-left: 4px; padding: 0 4px; border-radius: 8px; font-size: 11px; font-weight: 700; background: #b45309; color: #fff; cursor: pointer; vertical-align: baseline; }
   .carry.stale { opacity: .55; }
   .hwd { display: inline-block; min-width: 18px; padding: 0 4px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #fff; text-align: center; } .hwd-s { background: #2b6cb0; } .hwd-e { background: #b7791f; }

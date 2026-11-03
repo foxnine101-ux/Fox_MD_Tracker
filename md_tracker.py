@@ -42,7 +42,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.56"
+VERSION = "2.58.57"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -541,6 +541,12 @@ def start_live_server(core, lock, cfg):
             if path == "/api/itemlink" and self._local_only():      # ゲームのアイテム番号 → ラトリオの番号(同梱の item_link.json)
                 try:
                     with open(resource("item_link.json") or "", "rb") as f:
+                        return self._send(200, f.read(), "application/json; charset=utf-8", "max-age=3600")
+                except OSError:
+                    return self._send(200, b"{}", "application/json")
+            if path == "/api/sktree" and self._local_only():       # 公式スキルツリー用の対応表(同梱の skill_tree.json。tools/make_skill_tree.py が公式から1回だけ作る)
+                try:
+                    with open(resource("skill_tree.json") or "", "rb") as f:
                         return self._send(200, f.read(), "application/json; charset=utf-8", "max-age=3600")
                 except OSError:
                     return self._send(200, b"{}", "application/json")

@@ -153,8 +153,9 @@ function renderGrid(groups, chars, now) {
   // 見出し: アイコン(つかんで並び替え・クリックで選択) + MD名。アイコン以外の所は、クリック/なぞって選択
   cols.forEach((G, i) => h += `<th data-ci="${i}" data-g="${esc(G.name)}" class="${SEL.mds.has(G.name) ? "sel" : ""}" title="${esc(G.name)}（クリック・なぞって選択。右クリックでメニュー）"><span class="grip mx-ico" title="つかんで左右に動かすと並び替え。クリックで選択">${iconImg(G.name)}</span><span class="mx-name">${esc(G.label)}</span></th>`);
   h += `</tr></thead><tbody>`;
+  const live = new Set(DATA.now_chars || []);
   for (const c of chars) {
-    h += `<tr data-char="${esc(c)}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}${carryChip(c)}<span class="ch-sub">${esc(charLvText(c))}${zenyHtml(c)}${jobChip(charJob(c))}</span></td>`;
+    h += `<tr data-char="${esc(c)}" class="${live.has(c) ? "live" : ""}"><td class="char ${SEL.chars.has(c) ? "sel" : ""}" title="${esc(cn(c))}${live.has(c) ? "（いまログイン中）" : ""}（クリックでキャラ詳細。⋮⋮ をつかんで上下に動かすと並び替え。右クリックで隠す。Ctrl/Shift+クリックで複数選択）"><span class="grip">⋮⋮</span>${esc(cn(c))}${carryChip(c)}<span class="ch-sub">${esc(charLvText(c))}${zenyHtml(c)}${jobChip(charJob(c))}</span></td>`;
     cols.forEach((G, i) => {
       const e = endOf(c, G), ci = `data-ci="${i}"`;
       if (e === null) h += `<td class="cell none" ${ci}>ー</td>`;
