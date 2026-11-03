@@ -39,23 +39,67 @@ function invChk(st) {      // 自己採点: ゲームが教える「入ってい
     : `　<span class="warn" title="ゲームが教える数 ${k.want} / 読めた数 ${k.got}">⚠数がちがいます(ゲーム ${k.want}・読めた ${k.got})。取りこぼしの可能性</span>`;
 }
 
+function invSlotNo(title) {      // メイン倉庫 = 0・サブ倉庫N = N(それ以外は -1)
+  const t = String(title || "");
+  if (/^メイン/.test(t)) return 0;
+  const m = t.match(/^サブ倉庫\s*([0-9０-９]+)/);
+  return m ? +m[1].replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)) : -1;
+}
 function invStoreSlots(c) {
   const S = invStores(c), list = Object.entries(S).map(([k, v]) => ({ k, ...v })).sort((a, b) => (a.inv - b.inv) || String(a.title).localeCompare(String(b.title), "ja", { numeric: true }));
   const normal = list.filter((x) => x.inv === 2), w = list.filter((x) => x.inv === 4), guild = list.filter((x) => x.inv === 3);
-  const slots = [];
-  for (let i = 0; i < Math.max(4, normal.length); i++) slots.push(normal[i] ? { id: normal[i].k, label: normal[i].title || `倉庫${i + 1}`, st: normal[i] } : { id: "n" + i, label: `倉庫${i + 1}`, st: null });
+  const slots = [], arr = [null, null, null, null], rest = [];
+  for (const x of normal) { const i = invSlotNo(x.title); if (i >= 0 && i < 4 && !arr[i]) arr[i] = x; else rest.push(x); }      // 名前で枠を決める(メイン倉庫=1つ目・サブ倉庫1=2つ目 …)
+  for (const x of rest) { const j = arr.indexOf(null); if (j >= 0) arr[j] = x; else arr.push(x); }
+  const DEF = ["メイン倉庫", "サブ倉庫1", "サブ倉庫2", "サブ倉庫3"];
+  arr.forEach((x, i) => slots.push(x ? { id: x.k, label: x.title || `倉庫${i + 1}（名前不明）`, st: x } : { id: "n" + i, label: DEF[i] || `倉庫${i + 1}`, st: null }));
   slots.push(w[0] ? { id: w[0].k, label: "W倉庫", st: w[0] } : { id: "w", label: "W倉庫", st: null });
   if (guild[0]) slots.push({ id: guild[0].k, label: "ギルド倉庫", st: guild[0] });
   return slots;
 }
 
+const invIsUnk = (n) => /^ID\d+$/.test(String(n || ""));
+function invUnknownIds() {      // 名前がわからない品の番号(持ち物・倉庫すべて)
+  const ids = new Set();
+  const add = (id, nm) => { if (id && invIsUnk(nm)) ids.add(String(id)); };
+  for (const C of Object.values(INV.chars || {})) { (C.items || []).forEach((x) => add(x.itemId, invName(x.itemId))); (C.eq || []).forEach((e) => add(e.itemId, e.name || invName(e.itemId))); }
+  for (const st of Object.values(INV.stores || {})) for (const sl of Object.values(st)) { (sl.items || []).forEach((x) => add(x.itemId, invName(x.itemId))); (sl.eq || []).forEach((e) => add(e.itemId, e.name || invName(e.itemId))); }
+  return [...ids];
+}
+let INV_RES = { run: false, left: 0, total: 0 };
+async function invResolve() {      // 名前不明の番号を、公式ツールの露店の取引から調べる(1件ずつ・3秒あけて。名前は裏で覚える)
+  if (INV_RES.run) return;
+  const ids = invUnknownIds().slice(0, 25);
+  if (!ids.length) return;
+  INV_RES = { run: true, left: ids.length, total: ids.length };
+  render();
+  for (const id of ids) await fetch(`/api/market?id=${id}&ask=1`).catch(() => null);
+  const pend = new Set(ids);
+  const tick = async () => {
+    for (const id of [...pend]) {
+      const r = await fetch(`/api/market?id=${id}`).then((x) => x.json()).catch(() => null);
+      if (!r || !r.busy) pend.delete(id);
+    }
+    INV_RES.left = pend.size;
+    const el = $("#invres"); if (el) el.textContent = `調べています… 残り ${pend.size} / ${INV_RES.total} 件`;
+    if (pend.size) { setTimeout(tick, 4000); return; }
+    INV_RES.run = false; INV_T = -1; if (TAB === "inv") render();
+  };
+  setTimeout(tick, 3000);
+}
+async function invNameSet(id) {
+  const nm = prompt(`番号 ${id} の品の名前を入れてください（この PC に覚えます）`);
+  if (!nm || !nm.trim()) return;
+  await fetch("/api/itemname", { method: "POST", body: JSON.stringify({ id: +id, name: nm.trim() }) }).catch(() => null);
+  INV_T = -1; render();
+}
 function invRows(items, eq) {
   const q = INV_Q.trim().toLowerCase();
   const rows = [];
-  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, eq: false });
+  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, eq: false, unk: invIsUnk(invName(x.itemId)) });
   for (const e of eq || []) {
     const cards = (e.cards || []).map((c) => c.name).filter(Boolean).join(" / ");
-    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
+    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, unk: invIsUnk(e.name || invName(e.itemId)), sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
   }
   const f = q ? rows.filter((r) => (r.name + (r.sub || "")).toLowerCase().includes(q)) : rows;
   f.sort((a, b) => INV_SORT === "count" ? (b.count - a.count) || a.name.localeCompare(b.name, "ja") : a.eq - b.eq || a.name.localeCompare(b.name, "ja", { numeric: true }));
@@ -64,7 +108,30 @@ function invRows(items, eq) {
 function invTable(rows) {
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   return `<div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">個数</th><th></th></tr></thead><tbody>${rows.map((r) =>
-    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td><td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button></td></tr>`).join("")}</tbody></table></div>`;
+    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td><td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${r.unk ? ` <button class="ghost nm" data-nm="${r.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+}
+function invAcct(owner) {      // 倉庫の持ち主(アカウント番号)→ 画面に出す呼び名
+  const n = Object.entries((DATA && DATA.chars) || {}).filter(([k, c]) => String(c.account) === String(owner)).map(([k]) => k)[0];
+  return n ? `${cn(n)}のアカウント` : cn(String(owner));
+}
+function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ品は合計して、どこに何個あるかを並べる)
+  if (!INV_Q.trim()) return `<div class="muted" style="padding:12px">探したい品の名前を入れてください（例: 赤ポーション）。全キャラの持ち物と、すべての倉庫から探します。</div>`;
+  const g = new Map();
+  const add = (r, where) => {
+    const key = r.base || r.name; let e = g.get(key);
+    if (!e) g.set(key, e = { id: r.id, name: key, total: 0, where: new Map(), unk: r.unk });
+    const n = r.eq ? 1 : r.count; e.total += n;
+    const w = e.where.get(where) || { n: 0, tag: [] }; w.n += n;
+    if (r.eq) { const t = r.name.endsWith(key) ? r.name.slice(0, r.name.length - key.length).trim() : ""; if (t) w.tag.push(t); }
+    e.where.set(where, w);
+  };
+  for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq).forEach((r) => add(r, `${cn(c)} の持ち物`));
+  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq).forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}`));
+  const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
+  if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
+  const cap = rows.slice(0, 300);
+  return `<div class="muted" style="margin:4px 0">${rows.length} 種類が見つかりました${rows.length > cap.length ? `（先頭 ${cap.length} 種類を表示）` : ""}。</div><div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">合計</th><th>どこに（個数）</th><th></th></tr></thead><tbody>${cap.map((e) =>
+    `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td><td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderInventory(chars) {
@@ -73,26 +140,32 @@ function renderInventory(chars) {
   const cur = nowChar() || lastChar();
   if (!INV_CHAR || !chars.includes(INV_CHAR)) INV_CHAR = cur && chars.includes(cur) ? cur : (chars.find((c) => INV.chars[c]) || chars[0] || "");
   const slots = invStoreSlots(INV_CHAR);
-  if (INVSUB !== "bag" && !slots.some((s) => s.id === INVSUB)) INVSUB = "bag";
-  const nav = `<div class="simnav" id="invnav"><button data-invsub="bag" class="${INVSUB === "bag" ? "on" : ""}">持ち物</button>${slots.map((s) => `<button data-invsub="${esc(s.id)}" class="${INVSUB === s.id ? "on" : ""}" ${s.st ? "" : `style="opacity:.55"`}>${esc(s.label)}</button>`).join("")}</div>`;
-  let head = "", body = "", rowsFn = null;
-  const bar = (extra) => `<div class="invbar">${extra}<input type="search" class="invq" placeholder="名前で絞り込み" value="${esc(INV_Q)}"><select id="invsort"><option value="name" ${INV_SORT === "name" ? "selected" : ""}>名前順</option><option value="count" ${INV_SORT === "count" ? "selected" : ""}>個数が多い順</option></select></div>`;
-  if (INVSUB === "bag") {
+  if (INVSUB !== "bag" && INVSUB !== "all" && !slots.some((s) => s.id === INVSUB)) INVSUB = "bag";
+  const nav = `<div class="simnav" id="invnav"><button data-invsub="all" class="${INVSUB === "all" ? "on" : ""}" title="全キャラの持ち物とすべての倉庫から探す">全部から探す</button><button data-invsub="bag" class="${INVSUB === "bag" ? "on" : ""}">持ち物</button>${slots.map((s) => `<button data-invsub="${esc(s.id)}" class="${INVSUB === s.id ? "on" : ""}" ${s.st ? "" : `style="opacity:.55"`}>${esc(s.label)}</button>`).join("")}</div>`;
+  let head = "", body = "", tblFn = null;
+  const unk = invUnknownIds();
+  const resBtn = unk.length || INV_RES.run ? `<button class="ghost" id="invres" ${INV_RES.run ? "disabled" : ""} title="公式ツールの露店の取引から、名前を調べます（1件3秒ほど。取引が無い品は分かりません）">${INV_RES.run ? `調べています… 残り ${INV_RES.left} / ${INV_RES.total} 件` : `名前不明 ${unk.length} 件を調べる`}</button>` : "";
+  const bar = (extra) => `<div class="invbar">${extra}<input type="search" class="invq" placeholder="名前で絞り込み" value="${esc(INV_Q)}"><select id="invsort"><option value="name" ${INV_SORT === "name" ? "selected" : ""}>名前順</option><option value="count" ${INV_SORT === "count" ? "selected" : ""}>個数が多い順</option></select>${resBtn}</div>`;
+  if (INVSUB === "all") {
+    head = `<div class="invbar"><input type="search" class="invq" placeholder="品の名前（全部から探す）" value="${esc(INV_Q)}">${resBtn}</div>`;
+    body = `<div id="invtbl"></div>`; tblFn = invAllTable;
+  } else if (INVSUB === "bag") {
     const C = INV.chars[INV_CHAR], isNow = INV_CHAR === nowChar();
     const sel = `<select id="invchar">${chars.map((c) => `<option value="${esc(c)}" ${c === INV_CHAR ? "selected" : ""}>${esc(cn(c))}${c === nowChar() ? "（いまログイン中）" : ""}</option>`).join("")}</select>`;
     head = bar(sel);
     if (!C) body = `<div class="panel empty">このキャラの持ち物は、まだ読めていません。<br>ツールを動かしたままログインすると出ます。</div>`;
-    else body = `<div class="muted" style="margin-bottom:6px">${isNow ? "いまログイン中のキャラの持ち物です。" : "最後に読めた持ち物です。"}${C.has && C.t ? `　最終確認 ${when(C.t)}` : "　（装備ではない品は、まだ一覧を読めていません。ログインし直すと読めます）"}　個数は、ゲームの一覧を読んだあと、拾う・消えるを反映した値です（使った・売った分は次にログインしたときに直ります）。</div>` + `<div id="invtbl"></div>`; if (C) rowsFn = () => invRows(C.has ? C.items : [], C.eq);
+    else body = `<div class="muted" style="margin-bottom:6px">${isNow ? "いまログイン中のキャラの持ち物です。" : "最後に読めた持ち物です。"}${C.has && C.t ? `　最終確認 ${when(C.t)}` : "　（装備ではない品は、まだ一覧を読めていません。ログインし直すと読めます）"}　個数は、ゲームの一覧を読んだあと、拾う・消えるを反映した値です（使った・売った分は次にログインしたときに直ります）。</div>` + `<div id="invtbl"></div>`; if (C) tblFn = () => invTable(invRows(C.has ? C.items : [], C.eq));
   } else {
     const s = slots.find((x) => x.id === INVSUB);
     head = bar(`<span class="muted">${esc(cn(INV_CHAR))} のアカウントの倉庫</span>`);
     if (!s || !s.st) body = `<div class="panel empty">「${esc(s ? s.label : "")}」は、まだ読めていません。<br>ゲームで、その倉庫を開くと記録されます（ツールを動かしたまま）。</div>`;
-    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) rowsFn = () => invRows(s.st.items, s.st.eq);
+    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
   }
   $("#view").innerHTML = `${nav}${head}${body}`;
   $("#view").querySelectorAll("[data-invsub]").forEach((b) => b.onclick = () => { INVSUB = b.dataset.invsub; store.set("md_invsub", INVSUB); render(); });
   const ic = $("#invchar"); if (ic) ic.onchange = () => { INV_CHAR = ic.value; render(); };
-  const fill = () => { const t = $("#invtbl"); if (!t || !rowsFn) return; t.innerHTML = invTable(rowsFn()); t.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn)); };
+  const fill = () => { const t = $("#invtbl"); if (!t || !tblFn) return; t.innerHTML = tblFn(); t.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn)); t.querySelectorAll("[data-nm]").forEach((b) => b.onclick = () => invNameSet(b.dataset.nm)); };
+  const rb = $("#invres"); if (rb) rb.onclick = invResolve;
   fill();
   const sq = $("#view").querySelector("input.invq"); if (sq) sq.oninput = () => { INV_Q = sq.value; fill(); };      // 入力中は全体を描き直さず、表だけ作り直す
   const so = $("#invsort"); if (so) so.onchange = () => { INV_SORT = so.value; render(); };
@@ -105,6 +178,7 @@ async function mktFetch(ask, refresh) {
   const r = await fetch(`/api/market?id=${MKT.id}${ask ? "&ask=1" : ""}${refresh ? "&refresh=1" : ""}`).then((x) => x.json()).catch(() => null);
   if (!MKT.id || (r && String(r.id) !== String(MKT.id))) return;      // 前に開いた品の返事が遅れて届いても使わない
   MKT.view = r; mktDraw();
+  if (r && r.learned) { INV_T = -1; invLoad(); }      // 公式の品名で、この番号の名前がわかった → 表を読み直す
   clearTimeout(MKT.timer);
   if (r && r.busy) MKT.timer = setTimeout(() => mktFetch(false, false), 2500);      // 取りにいっている間は、2.5秒おきに見にいく
 }

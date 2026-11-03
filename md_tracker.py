@@ -10,6 +10,7 @@ ROの通信を「読むだけ」で、キャラごとの MD の再入場でき�
   python md_tracker.py --once     … 今ある記録をウェブに送るだけ
 """
 import argparse
+import collections
 import json
 import os
 import re
@@ -43,7 +44,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.59"
+VERSION = "2.58.60"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -555,7 +556,14 @@ def start_live_server(core, lock, cfg):
                     return self._send(400, b"{}", "application/json")
                 if q.get("ask"):
                     MARKET.ask(iid, force=bool(q.get("refresh")))
-                return self._send(200, json.dumps(MARKET.view(iid), ensure_ascii=False), "application/json; charset=utf-8")
+                view = MARKET.view(iid)
+                nm = ((view.get("rec") or {}).get("name") or "").strip()
+                if nm and CHARS is not None:                # 公式の品名で、名前の表に無い番号の名前がわかる → この PC に覚える
+                    with lock:
+                        if str(iid) not in CHARS.id2name and CHARS.add_official_names({str(iid): nm}):
+                            save_item_name(str(iid), nm)
+                            view["learned"] = nm
+                return self._send(200, json.dumps(view, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/itemlink" and self._local_only():      # ゲームのアイテム番号 → ラトリオの番号(同梱の item_link.json)
                 try:
                     with open(resource("item_link.json") or "", "rb") as f:
@@ -1138,6 +1146,18 @@ class _Scanner(gp.StreamScanner):
                         break
             except Exception:
                 pass
+        if len(pkt) >= 5 and CHARS is not None:
+            try:
+                op2 = pkt[0] | (pkt[1] << 8)
+                if op2 == 0x0B09 and pkt[4] >= 2:           # 倉庫の一覧: 始まり(0B08)を見ていない一覧なら、直前の通信を残す(倉庫の見分け方を調べる確認用)
+                    ls = CHARS._lst.get(self.key)
+                    if (ls is None or time.time() - ls["t"] > 5.0) and _RING_LOGS[0] < 10:
+                        _RING_LOGS[0] += 1
+                        print("[倉庫] 診断 始まり(0B08)なしの一覧。直前の通信: " + " | ".join("{:04X}/{}B/{:.1f}s前:{}".format(o, n, time.time() - t, h) for t, o, n, h in list(_RING)[-14:]))
+                elif _OP_TOTAL.get(op2, 0) < 40 or op2 in (0x0B08, 0x0B0B):
+                    _RING.append((time.time(), op2, len(pkt), pkt[:10].hex()))
+            except Exception:
+                pass
         with self.lock:
             try:
                 self.core.feed(self.key, pkt)
@@ -1164,6 +1184,7 @@ class _Scanner(gp.StreamScanner):
 SNIFFER = None      # 通信を聞いているもの(run_loop が、通信が来ないとき聞く回線を広げるのに使う)
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 _ZENY_LOGS = [0]
+_RING, _RING_LOGS = collections.deque(maxlen=40), [0]      # 直前の通信(めったに来ない種類だけ)・記録の回数(倉庫の見分け方の確認用)
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 MARKET = None  # market_core.Market

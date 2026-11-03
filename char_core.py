@@ -1039,10 +1039,15 @@ class CharCore(object):
             self._lstart_n = getattr(self, "_lstart_n", 0) + 1
             if self._lstart_n <= 8:
                 self.log("[倉庫] 診断 0B08 の中身: {}".format(pkt[:16].hex()))
-            self._lst[key] = {"inv": inv, "title": tt[0] if tt and time.time() - tt[1] < 3.0 and inv >= 2 else "", "items": [], "eq": [], "t": time.time(), "new": True}
+            nm = ""
+            if inv >= 2 and len(pkt) > 5:                # 実機で確認: 倉庫の名前は 0B08 の後ろに付いてくる(cp932。例: メイン倉庫 / サブ倉庫1)
+                nm = pkt[5:].split(b"\0")[0].decode("cp932", "replace").strip()
+            if not nm and inv >= 2 and tt and time.time() - tt[1] < 3.0:
+                nm = tt[0]
+            self._lst[key] = {"inv": inv, "title": nm, "items": [], "eq": [], "t": time.time(), "new": True}
             if inv >= 2:
                 self._nlst = getattr(self, "_nlst", 0) + 1
-                if self._nlst <= 12:
+                if self._nlst <= 40:
                     self.log("[倉庫] 一覧の始まり(0B08 種類={} 名前={!r})".format(inv, self._lst[key]["title"]))
 
         elif op == LIST_ITEMS and len(pkt) >= 5:         # 装備ではない品の一覧
@@ -1080,13 +1085,17 @@ class CharCore(object):
         lst = self._lst.get(key)
         if lst is None or lst["inv"] != inv:             # 始まり(0B08)を見ていない一覧: ここから受け取る
             lst = self._lst[key] = {"inv": inv, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
-        if time.time() - lst["t"] > 5.0:               # 前の一覧から間があいた = 新しい一覧(終わりを取りこぼしたとき、足してしまわない)
-            lst["new"] = True
+        if time.time() - lst["t"] > 5.0 or (not lst["new"] and lst.get("last_n", 0) < INV_PAGE):
+            # 前の一覧から間があいた・前の1本が満杯(100件)ではない = 続きではなく新しい一覧(始まり 0B08 を見ないまま別の倉庫が届くことがある)
+            for kk in ("slot", "slot_title", "made"):
+                lst.pop(kk, None)
+            lst["eq"], lst["title"], lst["new"] = [], "", True
         known = sum(1 for x in items if str(x["itemId"]) in self.id2name)
         if self._lit_n <= 8 and items:
             self.log("[倉庫] 診断 品の番号が名前表にある割合: {}/{}(低いと読み位置が違う)".format(known, len(items)))
         lst["items"] = items if lst["new"] else lst["items"] + items       # 始まりの直後の最初の1本は置きかえ、続きは足す
         lst["new"] = False
+        lst["last_n"] = len(items)
         lst["t"] = time.time()
         self._list_commit(lst)
 
@@ -1098,6 +1107,7 @@ class CharCore(object):
             lst = self._lst[key] = {"inv": kind, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
         have = {x.get("inventoryIndex") for x in lst["eq"]}
         lst["eq"] = lst["eq"] + [e for e in eq if e.get("inventoryIndex") not in have]
+        lst["last_n"] = 0                                # 装備まで来たら、このあとの品の一覧(0B09)は新しい一覧
         lst["t"] = time.time()
         self._list_commit(lst)
 
@@ -1116,12 +1126,26 @@ class CharCore(object):
                 return
             acc = ((getattr(self.md, "char_info", None) or {}).get(name) or {}).get("account")
             owner = str(acc) if acc else name
-            title = lst["title"] or ("" if lst["inv"] != 4 else "W倉庫")
-            k = "{}|{}".format(lst["inv"], title)
-            if title:
-                self.stores.get(owner, {}).pop("{}|".format(lst["inv"]), None)      # 名前が後から届いた: 先に書いた「名前なし」の枠は捨てる
-            self.stores.setdefault(owner, {})[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
-                                                    "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
+            slots = self.stores.setdefault(owner, {})
+            title = lst["title"] or ("W倉庫" if lst["inv"] == 4 else "")
+            k = lst.get("slot")
+            if title and lst.get("slot_title") != title:         # 名前が分かった(最初から・または後から)
+                nk = "{}|{}".format(lst["inv"], title)
+                if k and k != nk and lst.get("made"):
+                    slots.pop(k, None)                          # 先に仮の枠(名前なし)へ書いたぶんは捨てる
+                k, lst["made"], lst["slot_title"] = nk, False, title
+            elif k is None:                                      # 名前が無い: 中身が似ている枠へ。無ければ新しい枠
+                k = self._match_slot(slots, lst)
+                if k is None:
+                    n = 1
+                    while "{}|?{}".format(lst["inv"], n) in slots:
+                        n += 1
+                    k, lst["made"] = "{}|?{}".format(lst["inv"], n), True
+            lst["slot"] = k
+            if not title:
+                title = (slots.get(k) or {}).get("title") or ""
+            slots[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
+                        "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
             self.changed = True
             self._lastslot[getattr(self, "_key", None)] = (owner, k, time.time())
             self._verify_last(getattr(self, "_key", None), final=final)
@@ -1129,11 +1153,31 @@ class CharCore(object):
             if self._ncommit <= 40:
                 self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
 
+    @staticmethod
+    def _match_slot(slots, lst):
+        """名前なしの一覧が、すでに覚えている倉庫のどれと同じか(品の番号+持ち物の位置が重なる割合)。見つからなければ None"""
+        def pairs(items, eq):
+            return {(x.get("index"), x.get("itemId")) for x in items} | {(x.get("inventoryIndex"), x.get("itemId")) for x in eq}
+        a = pairs(lst["items"], lst["eq"])
+        if len(a) < 3:
+            return None
+        best, bk = 0.6, None
+        for k, s in slots.items():
+            if s.get("inv") != lst["inv"]:
+                continue
+            b = pairs(s.get("items") or [], s.get("eq") or [])
+            if not b:
+                continue
+            r = len(a & b) / float(min(len(a), len(b)))
+            if r >= best:
+                best, bk = r, k
+        return bk
+
     def _verify_last(self, key, final=False):
         """自己採点: 倉庫を開いたとき届く「入っている数」(00F2)と、読めた一覧(品+装備)の数を比べる。
         00F2 は普通の倉庫(種類2)だけ。一覧と数がちがえば、画面に「取りこぼしの可能性」と出す。"""
         c, ls = self._cnt.get(key), self._lastslot.get(key)
-        if not c or not ls or abs(c[2] - ls[2]) > 8.0:
+        if not c or not ls or abs(c[2] - ls[2]) > 2.5:
             return
         sl = self.stores.get(ls[0], {}).get(ls[1])
         if not sl or sl.get("inv") != 2:

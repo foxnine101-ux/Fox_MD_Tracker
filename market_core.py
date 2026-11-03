@@ -122,7 +122,8 @@ class Market(object):
             log = self._fetch("/item_trade_log_filtered_search/?" + q)
             summary = self._fetch("/item_trade_log_summary_filtered_search/?" + q)
             trades, summ, total = self.shape(log, summary)
-            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none"}
+            name = next((str(x.get("item_name")).strip() for x in log if isinstance(x, dict) and x.get("item_name")), "") if isinstance(log, list) else ""
+            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name}      # name = 公式の品名(番号から名前を調べるのに使う)
         except Exception as e:                              # つながらない・形が違う など。前の記録は消さない
             err = "{}: {}".format(type(e).__name__, e)
             self.log("[相場] {} が取れませんでした: {}".format(k, err))
