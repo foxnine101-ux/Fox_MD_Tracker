@@ -3,6 +3,10 @@
 // 中身は通信から読んだもの(char_core の 0B09/0B39。ゲームで持ち物・倉庫を開くたびに最新になる)。/api/inv で読む。
 // 相場は公式ツールの露店の取引履歴(market_core。/api/market。この PC に保存)。
 let INV = null, INV_T = -1, INV_LOADING = false, MKB = {}, INV_FILL = null;      // MKB = 覚えている相場の要約 {番号: [取った時刻, 直近の売価, 日時, 中央値]}      // /api/inv の返事・読んだときの inv_t
+// ゲーム内の倉庫と同じ分類。品の種類(通信の type)から。装備は着る場所から(右手=武器、それ以外=防具)
+const INV_CATS = [["all", "全て"], ["use", "消費アイテム"], ["special", "スペシャルアイテム"], ["armor", "防具"], ["weapon", "武器"], ["ammo", "矢など消耗品"], ["card", "カード"], ["etc", "その他"]];
+const invCatOf = (r) => r.eq ? (r.weapon ? "weapon" : "armor") : ({ 0: "use", 2: "use", 11: "use", 18: "special", 4: "armor", 5: "weapon", 10: "ammo", 6: "card" })[r.type] || "etc";
+let INV_CAT = store.get("md_invcat") || "all";
 let INVSUB = store.get("md_invsub") || "bag", INV_CHAR = "", INV_Q = "", INV_SORT = "name";
 const MKT = { id: 0, name: "", view: null, timer: 0 };
 (function () {
@@ -100,15 +104,15 @@ function mkCells(id) {      // 覚えている相場(「相場」ボタンで取
   const ago = b[0] ? `取得 ${when(b[0])}` : "";
   return `<td class="n" title="${esc((b[2] || "") + " の取引 / " + ago)}">${b[1] == null ? "-" : mktYen(b[1])}</td><td class="n" title="${esc(ago)}">${b[3] == null ? "-" : mktYen(b[3])}</td>`;
 }
-function invRows(items, eq) {
+function invRows(items, eq, cat = INV_CAT) {
   const q = INV_Q.trim().toLowerCase();
   const rows = [];
-  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, eq: false, unk: invIsUnk(invName(x.itemId)) });
+  for (const x of items || []) rows.push({ id: x.itemId, name: invName(x.itemId), count: x.count, type: x.type, eq: false, unk: invIsUnk(invName(x.itemId)) });
   for (const e of eq || []) {
     const cards = (e.cards || []).map((c) => c.name).filter(Boolean).join(" / ");
-    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, unk: invIsUnk(e.name || invName(e.itemId)), sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
+    rows.push({ id: e.itemId, name: (e.refine ? `+${e.refine} ` : "") + (e.name || invName(e.itemId)), base: e.name || invName(e.itemId), count: 1, eq: true, weapon: e.type === 5 || (e.type == null && !!(((e.loc || 0) | (e.wear || 0)) & 2)), unk: invIsUnk(e.name || invName(e.itemId)), sub: [cards, e.slot ? `装備中: ${e.slot}` : ""].filter(Boolean).join("　"), opts: (e.options || []).map((o) => o.text).filter(Boolean).join(" / ") });
   }
-  const f = q ? rows.filter((r) => (r.name + (r.sub || "")).toLowerCase().includes(q)) : rows;
+  const f = rows.filter((r) => (!q || (r.name + (r.sub || "")).toLowerCase().includes(q)) && (cat === "all" || invCatOf(r) === cat));
   f.sort((a, b) => INV_SORT === "count" ? (b.count - a.count) || a.name.localeCompare(b.name, "ja") : a.eq - b.eq || a.name.localeCompare(b.name, "ja", { numeric: true }));
   return f;
 }
@@ -132,8 +136,8 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
     if (r.eq) { const t = r.name.endsWith(key) ? r.name.slice(0, r.name.length - key.length).trim() : ""; if (t) w.tag.push(t); }
     e.where.set(where, w);
   };
-  for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq).forEach((r) => add(r, `${cn(c)} の持ち物`));
-  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq).forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}`));
+  for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq, "all").forEach((r) => add(r, `${cn(c)} の持ち物`));
+  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}`));
   const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);
@@ -168,7 +172,9 @@ function renderInventory(chars) {
     if (!s || !s.st) body = `<div class="panel empty">「${esc(s ? s.label : "")}」は、まだ読めていません。<br>ゲームで、その倉庫を開くと記録されます（ツールを動かしたまま）。</div>`;
     else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
   }
-  $("#view").innerHTML = `${nav}${head}${body}`;
+  const catBar = INVSUB === "all" ? "" : `<div class="simnav" id="invcat">${INV_CATS.map(([k, l]) => `<button data-invcat="${k}" class="${INV_CAT === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
+  $("#view").innerHTML = `${nav}${head}${catBar}${body}`;
+  $("#view").querySelectorAll("[data-invcat]").forEach((b) => b.onclick = () => { INV_CAT = b.dataset.invcat; store.set("md_invcat", INV_CAT); render(); });
   $("#view").querySelectorAll("[data-invsub]").forEach((b) => b.onclick = () => { INVSUB = b.dataset.invsub; store.set("md_invsub", INVSUB); render(); });
   const ic = $("#invchar"); if (ic) ic.onchange = () => { INV_CHAR = ic.value; render(); };
   const fill = INV_FILL = () => { const t = $("#invtbl"); if (!t || !tblFn) return; t.innerHTML = tblFn(); t.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn)); t.querySelectorAll("[data-nm]").forEach((b) => b.onclick = () => invNameSet(b.dataset.nm)); };

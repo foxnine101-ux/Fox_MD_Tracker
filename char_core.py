@@ -433,7 +433,7 @@ class CharCore(object):
     def _item_view(self, it):
         bits = it.get("wear", 0) & ~COSTUME_BITS
         slots = [n for b, n in MAIN_SLOTS + SHADOW_SLOTS if bits & b]
-        return {"slot": "・".join(slots), "wear": bits, "itemId": it.get("itemId"),
+        return {"slot": "・".join(slots), "wear": bits, "loc": it.get("loc") or 0, "type": it.get("type"), "itemId": it.get("itemId"),
                 "name": self._item_name(it.get("itemId")), "refine": it.get("refine", 0), "grade": it.get("grade", 0),
                 "cards": [{"id": c.get("id"), "name": self._item_name(c.get("id"))} for c in it.get("cards") or []],
                 "options": [{"index": o.get("index"), "value": o.get("value"),
@@ -1100,7 +1100,7 @@ class CharCore(object):
             idx, itid = struct.unpack_from("<HI", e, 0)
             cnt = struct.unpack_from("<H", e, 7)[0]
             if itid:
-                items.append({"index": idx, "itemId": itid, "count": cnt or 1})
+                items.append({"index": idx, "itemId": itid, "count": cnt or 1, "type": e[6]})        # type = ゲームの種類(0 回復・2 使う・3 その他・4 防具・5 武器・6 カード・7 ペットの卵・8 ペットの装備・10 矢弾・11 遅延消費・18 キャッシュ)
         lst = self._lst.get(key)
         if lst is None or lst["inv"] != inv:             # 始まり(0B08)を見ていない一覧: ここから受け取る
             lst = self._lst[key] = {"inv": inv, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
@@ -1228,7 +1228,7 @@ class CharCore(object):
                 break
         else:
             its[:] = [x for x in its if x.get("index") != idx]
-            its.append({"index": idx, "itemId": itid, "count": cnt})
+            its.append({"index": idx, "itemId": itid, "count": cnt, "type": pkt[10]})
         ch["items_t"] = int(time.time())
         self.changed = True
 
@@ -1320,7 +1320,7 @@ class CharCore(object):
             oi, ov = struct.unpack_from("<HH", pkt, 40 + k * 5)
             if oi or ov:
                 opts.append({"index": oi, "value": ov, "param": pkt[40 + k * 5 + 4]})
-        item = {"slot": "", "wear": 0, "loc": loc, "itemId": itid, "name": self._item_name(itid), "refine": pkt[68], "grade": pkt[69],
+        item = {"slot": "", "wear": 0, "loc": loc, "type": pkt[10], "itemId": itid, "name": self._item_name(itid), "refine": pkt[68], "grade": pkt[69],
                 "cards": cards, "options": opts, "inventoryIndex": idx}
         ch = self._ch()
         eq, bag = ch.get("equips") or [], ch.setdefault("bag", [])
@@ -1416,6 +1416,7 @@ class CharCore(object):
             "slot": LOC_NAMES.get(wear, str(wear)) if wear else "",
             "wear": wear,
             "loc": loc,
+            "type": e[6],
             "itemId": itid,
             "name": self._item_name(itid),
             "refine": e[65],
