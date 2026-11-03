@@ -20,7 +20,7 @@ a = ap.parse_args()
 import md_tracker as mt, md_core, char_core, dmg_core
 T = tempfile.mkdtemp(prefix="fox_ui_")
 for k in ("CONFIG_FILE", "STATE_FILE", "CHAR_STATE_FILE", "DMG_FILE", "SKILL_FIX_FILE", "DMG_RAW_FILE", "LOG_FILE", "ACCOUNTS_FILE",
-          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE"):
+          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE", "MARKET_FILE"):
     if hasattr(mt, k):
         setattr(mt, k, os.path.join(T, os.path.basename(getattr(mt, k))))
 if a.data:      # 計算機のスロットも、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)
@@ -62,6 +62,15 @@ mt.resource = lambda n: os.path.join(T, n) if n == "app.html" or n.startswith("w
 mt.CHARS = char_core.CharCore(md=core, log=print)
 if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))
+import market_core
+mt.MARKET = market_core.Market(mt.MARKET_FILE, log=print)
+if os.environ.get("FOX_SEED_INV"):      # インベントリ画面の確認用: 見本の持ち物と倉庫を入れる
+    _n = next(iter(mt.CHARS.chars), "テスト")
+    mt.CHARS.chars.setdefault(_n, {"stats": {}, "derived": {}, "statusPoint": None, "equips": [], "updated": 1})
+    mt.CHARS.chars[_n]["items"] = [{"index": 5, "itemId": 501, "count": 100}, {"index": 6, "itemId": 503, "count": 20}]; mt.CHARS.chars[_n]["items_t"] = 1793700000
+    _acc = ((core.char_info.get(_n) or {}).get("account")) or _n
+    mt.CHARS.stores[str(_acc)] = {"2|メイン": {"inv": 2, "title": "メイン", "items": [{"index": 1, "itemId": 512, "count": 300}], "eq": [], "t": 1793700000, "by": _n},
+                                  "4|W倉庫": {"inv": 4, "title": "W倉庫", "items": [{"index": 1, "itemId": 607, "count": 5}], "eq": [], "t": 1793700000, "by": _n}}
 mt.DMG = dmg_core.DmgCore(core, dmg_core.load_skill_names(mt.resource("skill_names.json")), info=dmg_core.load_skill_info(mt.resource("skill_info.json")),
                           mobs=dmg_core.load_mob_info(mt.resource("mob_info.json")))
 mt.DMG.official = getattr(mt, "OFFICIAL", None)          # 本物の起動と同じに(場所の名前を公式の一覧で整える)

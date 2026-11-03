@@ -70,3 +70,15 @@ function renderEvents(chars, now) {
     EV_OPEN[d.dataset.ev] = d.open; store.set("md_evopen", JSON.stringify(EV_OPEN));
   };
 }
+
+// ---------- イベントタブ(サブタブ: イベントクエスト / ニャル様 / ハロウィン) ----------
+const EV_SUBS = [["event", "イベントクエスト"], ["nyar", "ニャル様"], ["hw", "ハロウィン"]];
+function renderEventTab(groups, chars, now) {
+  if (!EV_SUBS.some(([k]) => k === EVSUB)) EVSUB = "event";
+  if (EVSUB === "nyar") renderNyar(groups, chars, now);
+  else if (EVSUB === "hw") renderHalloween(chars, now);
+  else renderEvents(chars, now);
+  const v = $("#view");
+  v.insertAdjacentHTML("afterbegin", `<div class="simnav" id="evnav">${EV_SUBS.map(([k, l]) => `<button data-evsub="${k}" class="${EVSUB === k ? "on" : ""}">${l}</button>`).join("")}</div>`);
+  v.querySelectorAll("#evnav [data-evsub]").forEach((b) => b.onclick = () => { EVSUB = b.dataset.evsub; store.set("md_evsub", EVSUB); render(); });
+}

@@ -33,6 +33,7 @@ if DATA_HOME != HERE:
     os.makedirs(DATA_HOME, exist_ok=True)
 
 import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと共通)
+import market_core          # 相場(公式ツールの露店の取引履歴。この PC だけに覚える)
 import md_core
 import quest_names
 import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
@@ -42,7 +43,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.57"
+VERSION = "2.58.58"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -52,6 +53,7 @@ CONFIG_FILE = os.path.join(DATA_HOME, "設定.json")
 STATE_FILE = os.path.join(DATA_HOME, "md_state.json")
 CHAR_STATE_FILE = os.path.join(DATA_HOME, "char_state.json")
 DMG_FILE = os.path.join(DATA_HOME, "被ダメ記録.json")
+MARKET_FILE = os.path.join(DATA_HOME, "相場.json")      # 相場(露店の取引履歴。この PC だけ。配らない)
 OFFICIAL_FILE = os.path.join(DATA_HOME, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
 LANTERN_FILE = os.path.join(DATA_HOME, "ランタンハント.json")      # ランタンの座標の一覧(利用者が貼り付けた・取り込んだもの。同梱しない・配らない)
 SANDBAG_FILE = os.path.join(DATA_HOME, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
@@ -505,6 +507,7 @@ def start_live_server(core, lock, cfg):
                     if CHARS is not None:
                         data["equip"] = CHARS.equip_view()
                         data["now_chars"] = [n for n in core.currents.values() if n]      # いまログインしているキャラ(つながっている通信ごと)
+                        data["inv_t"] = max([c.get("items_t") or 0 for c in CHARS.chars.values()] + [s.get("t") or 0 for st in CHARS.stores.values() for s in st.values()] + [0])      # インベントリの更新時刻(画面が読み直す目印)
                     data["calc"] = CALC_DATA                  # 属性の相性表など(計算機の被ダメの検証用)
                     if DMG is not None:
                         data["skill_names"] = {k: DMG.skill_name(int(k)) for ch in (CHARS.chars.values() if CHARS is not None else [])
@@ -538,6 +541,21 @@ def start_live_server(core, lock, cfg):
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
                 return self._send(200, json.dumps(names, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/inv" and self._local_only():          # インベントリ(持ち物と倉庫)。タブを開いたときだけ読む
+                with lock:
+                    out = CHARS.inv_view() if CHARS is not None else {"chars": {}, "stores": {}, "names": {}}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/market" and self._local_only() and MARKET is not None:       # 相場。id=アイテム番号・refresh=1 で取り直し(裏で取る。画面は少し待ってまた読む)
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                try:
+                    iid = int((q.get("id") or ["0"])[0])
+                except ValueError:
+                    iid = 0
+                if iid <= 0:
+                    return self._send(400, b"{}", "application/json")
+                if q.get("ask"):
+                    MARKET.ask(iid, force=bool(q.get("refresh")))
+                return self._send(200, json.dumps(MARKET.view(iid), ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/itemlink" and self._local_only():      # ゲームのアイテム番号 → ラトリオの番号(同梱の item_link.json)
                 try:
                     with open(resource("item_link.json") or "", "rb") as f:
@@ -1148,6 +1166,7 @@ STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 _ZENY_LOGS = [0]
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
+MARKET = None  # market_core.Market
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
 OFFICIAL = None  # ro_official.Official (公式サイトから集めたモンスター情報)
@@ -1542,6 +1561,9 @@ class Sniffer(object):
                         self.core.forget_conn(key)
                         if CHARS is not None:
                             CHARS._synced.discard(key)
+                            CHARS._items_synced.discard(key)
+                            CHARS._lst.pop(key, None)
+                            CHARS._title.pop(key, None)
                         for k in [k for k in _EQ_WATCH if k[0] == key]:
                             _EQ_WATCH.pop(k, None)
                             _EQ_LOGGED.discard(k)
@@ -1686,6 +1708,8 @@ def main():
         except Exception as e:
             print("[キャラ] 記録が読めませんでした(新しく作ります):", e)
 
+    global MARKET
+    MARKET = market_core.Market(MARKET_FILE, log=print)
     global DMG
     try:
         import dmg_core

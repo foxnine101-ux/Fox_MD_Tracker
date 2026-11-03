@@ -32,6 +32,13 @@ WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x01
 INV_PAGE = 100      # 一覧は100件で区切って届く
 STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
 WANT_OPS |= set(STORAGE_OPS)
+# 持ち物・倉庫の「装備ではない品」の一覧(RO Storage Manager の読み方と同じ): 0B08 一覧の始まり [op2][長さ2=5][種類1] → 0B09 品 [op2][長さ2][種類1] + 34バイト×n
+#   (品: 番号2 アイテム4 種類1 個数2 …)→ 0B39 装備(68バイト×n)→ 0B0B 終わり。種類 0=持ち物・1=カート・2=倉庫・3=ギルド倉庫・4=W倉庫。
+#   倉庫の名前(メイン・サブ…)は 0995/0996/0975/0976 の [op2][長さ2][名前24 cp932] で先に届く
+LIST_START, LIST_ITEMS, LIST_END = 0x0B08, 0x0B09, 0x0B0B
+TITLE_OPS = (0x0995, 0x0996, 0x0975, 0x0976)
+WANT_OPS |= {LIST_START, LIST_ITEMS, LIST_END} | set(TITLE_OPS)
+ITEM_SIZES = (34, 31, 27)       # 品1件の大きさ(長さが割り切れるものを使う)
 # スキルの一覧(覚えているスキルと Lv)。jRO のリプレイで確かめた形:
 #   0x0B32 [op2][長さ2] + 15バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 上げられる1 Lv(2)2
 #   0x010F [op2][長さ2] + 37バイト×n: スキル番号2 種類4 Lv2 SP2 射程2 名前24 上げられる1
@@ -226,6 +233,10 @@ class CharCore(object):
         self._inv_chunk = {}   # 接続 -> (最後に持ち物の一覧が届いた時刻, その件数)。100件で区切られた続きかを見分ける
         self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
         self._stor = {}        # 倉庫の装備の一覧(種類 -> 前回・今回の一覧)。増えた品から「倉庫に入れた」を見つける
+        self.stores = {}       # 倉庫の中身(装備ではない品+装備): 持ち主(アカウント。分からなければキャラ名) -> {"種類|名前": {inv, title, items:[{itemId,count}], eq:[装備], t}}
+        self._lst = {}         # 接続 -> いま受け取り中の一覧 {inv, title, items, eq, t, new}
+        self._title = {}       # 接続 -> (倉庫の名前, 時刻)
+        self._items_synced = set()   # 持ち物の一覧(0B09 種類0)を受け取った接続(個数の増減を反映してよい)
         self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
 
     # ---------- 外から呼ぶ ----------
@@ -255,7 +266,7 @@ class CharCore(object):
 
     def snapshot(self):
         self.flush_pending()
-        return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "sim_links": self.sim_links, "updated": int(time.time())}
+        return {"chars": self.chars, "sets": self.sets, "shadows": self.shadows, "sim_links": self.sim_links, "stores": self.stores, "updated": int(time.time())}
 
     def restore(self, data):
         if data:
@@ -263,6 +274,8 @@ class CharCore(object):
             self.sets = data.get("sets") or {}
             self.shadows = data.get("shadows") or {}
             self.sim_links = data.get("sim_links") or {}
+            if "stores" in data:                       # 記録の取り込み(records_sync)は stores を持たない → 持っているものを消さない
+                self.stores = data.get("stores") or {}
             self._migrate_sets()
             self.repair_sets()
             self.resolve_sim_all()
@@ -831,6 +844,8 @@ class CharCore(object):
                         ch[k] = rec[k]
                 if rec.get("gone"):
                     ch["gone"] = ((ch.get("gone") or []) + rec["gone"])[-30:]
+            if "items" in rec:
+                ch["items"], ch["items_t"] = rec["items"], rec.get("items_t") or 0
             ch["updated"] = max(ch.get("updated") or 0, rec.get("updated") or 0)
             self.log("[キャラ] {} の記録に、名前が決まる前に届いた分({})を合流させました".format(cur, "装備の一覧あり" if "bag" in rec else "装備の一覧なし"))
         self.changed = True
@@ -943,6 +958,7 @@ class CharCore(object):
                 is_eq = any(x.get("inventoryIndex") == idx for x in (ch0.get("equips") or []) + (ch0.get("bag") or []))
                 self.log("[倉庫] 持ち物から消えた(07FA) 理由={} 番号={} 個数={} {}{}".format(
                     reason, idx, amt, "装備の一覧にある" if is_eq else "装備の一覧に無い", "" if getattr(self, "_key", None) in self._synced else "・この接続は一覧を受け取っていない"))
+            self._item_sub(idx, amt)
             self._gone(idx, reason)
 
         elif op in STORAGE_OPS:                          # 倉庫まわりの通信(本物の形の確認用。最初の数回だけ中身を記録する)
@@ -971,6 +987,7 @@ class CharCore(object):
                 if self._diag0b39 <= 6:
                     self.log("[装備] 持ち物以外の装備の一覧(0B39 種類={}・全{}件)".format(kind, len(body) // EQUIP_SIZE if len(body) >= EQUIP_SIZE else 0))
                 if kind in (2, 3, 4) and len(body) % EQUIP_SIZE == 0:
+                    self._list_equip(kind, [self._equip(body[i * EQUIP_SIZE:(i + 1) * EQUIP_SIZE]) for i in range(len(body) // EQUIP_SIZE)])
                     self._storage_list(kind, [self._equip(body[i * EQUIP_SIZE:(i + 1) * EQUIP_SIZE]) for i in range(len(body) // EQUIP_SIZE)])
                 return
             if len(body) % EQUIP_SIZE:
@@ -1002,8 +1019,146 @@ class CharCore(object):
             if not more:
                 self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
 
+        elif op in TITLE_OPS and len(pkt) >= 28:         # 倉庫の名前(メイン・サブ…)。直後に一覧が届く
+            t = pkt[4:28].split(b"\0")[0].decode("cp932", "replace").strip()
+            self._title[getattr(self, "_key", None)] = (t, time.time())
+            lst = self._lst.get(getattr(self, "_key", None))
+            if lst is not None and lst["inv"] >= 2 and time.time() - lst["t"] < 3.0:
+                lst["title"] = t
+                self._title.pop(getattr(self, "_key", None), None)
+
+        elif op == LIST_START and len(pkt) >= 5:
+            key, inv = getattr(self, "_key", None), pkt[4]
+            tt = self._title.pop(key, None)                  # 名前は1回使ったら捨てる(次の倉庫に引き継がない)
+            self._lst[key] = {"inv": inv, "title": tt[0] if tt and time.time() - tt[1] < 3.0 and inv >= 2 else "", "items": [], "eq": [], "t": time.time(), "new": True}
+            if inv >= 2:
+                self._nlst = getattr(self, "_nlst", 0) + 1
+                if self._nlst <= 12:
+                    self.log("[倉庫] 一覧の始まり(0B08 種類={} 名前={!r})".format(inv, self._lst[key]["title"]))
+
+        elif op == LIST_ITEMS and len(pkt) >= 5:         # 装備ではない品の一覧
+            self._list_items(pkt)
+
+        elif op == LIST_END:
+            lst = self._lst.pop(getattr(self, "_key", None), None)
+            if lst is not None:
+                self._list_commit(lst)
+
         elif op == 0x0B41 and len(pkt) >= 70:            # 持ち物への追加(拾った・買った・倉庫から取り出した)。装備なら持ち物の装備に足す
             self._inv_add(pkt)
+            self._item_add(pkt)
+
+    # ---------- 装備ではない品(持ち物・倉庫の一覧) ----------
+    def _list_items(self, pkt):
+        key = getattr(self, "_key", None)
+        inv = pkt[4]
+        body = pkt[5:]
+        size = next((z for z in ITEM_SIZES if body and len(body) % z == 0), 0)
+        if not size:
+            self.log("[倉庫] 品の一覧(0B09 種類={})の長さが読めません: 本体={}バイト".format(inv, len(body)))
+            return
+        items = []
+        for i in range(len(body) // size):
+            e = body[i * size:(i + 1) * size]
+            idx, itid = struct.unpack_from("<HI", e, 0)
+            cnt = struct.unpack_from("<H", e, 7)[0]
+            if itid:
+                items.append({"index": idx, "itemId": itid, "count": cnt or 1})
+        lst = self._lst.get(key)
+        if lst is None or lst["inv"] != inv:             # 始まり(0B08)を見ていない一覧: ここから受け取る
+            lst = self._lst[key] = {"inv": inv, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
+        if time.time() - lst["t"] > 5.0:               # 前の一覧から間があいた = 新しい一覧(終わりを取りこぼしたとき、足してしまわない)
+            lst["new"] = True
+        lst["items"] = items if lst["new"] else lst["items"] + items       # 始まりの直後の最初の1本は置きかえ、続きは足す
+        lst["new"] = False
+        lst["t"] = time.time()
+        self._list_commit(lst)
+
+    def _list_equip(self, kind, eq):
+        """倉庫の装備(0B39 種類2〜4)を、いま受け取り中の倉庫の一覧に足す。"""
+        key = getattr(self, "_key", None)
+        lst = self._lst.get(key)
+        if lst is None or lst["inv"] != kind:
+            lst = self._lst[key] = {"inv": kind, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
+        have = {x.get("inventoryIndex") for x in lst["eq"]}
+        lst["eq"] = lst["eq"] + [e for e in eq if e.get("inventoryIndex") not in have]
+        lst["t"] = time.time()
+        self._list_commit(lst)
+
+    def _list_commit(self, lst):
+        """受け取った一覧を記録に書く(届くたびに、そこまでの全部で置きかえる)。持ち物は ch["items"]、倉庫は stores。"""
+        now = int(time.time())
+        if lst["inv"] == 0:
+            ch = self._ch()
+            ch["items"] = [dict(x) for x in lst["items"]]
+            ch["items_t"] = now
+            self._items_synced.add(getattr(self, "_key", None))
+            self.changed = True
+        elif lst["inv"] in (2, 3, 4):
+            name = self._name()
+            if name == UNKNOWN:
+                return
+            acc = ((getattr(self.md, "char_info", None) or {}).get(name) or {}).get("account")
+            owner = str(acc) if acc else name
+            title = lst["title"] or ("" if lst["inv"] != 4 else "W倉庫")
+            k = "{}|{}".format(lst["inv"], title)
+            if title:
+                self.stores.get(owner, {}).pop("{}|".format(lst["inv"]), None)      # 名前が後から届いた: 先に書いた「名前なし」の枠は捨てる
+            self.stores.setdefault(owner, {})[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
+                                                    "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
+            self.changed = True
+            self._ncommit = getattr(self, "_ncommit", 0) + 1
+            if self._ncommit <= 40:
+                self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
+
+    def _item_add(self, pkt):
+        """0B41(持ち物に増えた)のうち、装備ではない品: 同じ番号の品があれば個数を足す、なければ足す。"""
+        key = getattr(self, "_key", None)
+        if key not in self._items_synced:
+            return
+        idx, cnt, itid = struct.unpack_from("<HHI", pkt, 2)
+        if not itid or struct.unpack_from("<I", pkt, 28)[0]:
+            return                                       # 装備は別(bag)で数える
+        ch = self._ch()
+        its = ch.setdefault("items", [])
+        for x in its:
+            if x.get("index") == idx and x.get("itemId") == itid:
+                x["count"] = x.get("count", 0) + cnt
+                break
+        else:
+            its[:] = [x for x in its if x.get("index") != idx]
+            its.append({"index": idx, "itemId": itid, "count": cnt})
+        ch["items_t"] = int(time.time())
+        self.changed = True
+
+    def _item_sub(self, idx, amt):
+        """07FA(持ち物から消えた): 装備ではない品の個数を減らす(0 になったら消す)。"""
+        if getattr(self, "_key", None) not in self._items_synced:
+            return
+        ch = self._ch()
+        for x in ch.get("items") or []:
+            if x.get("index") == idx:
+                x["count"] = x.get("count", 0) - (amt or 1)
+                if x["count"] <= 0:
+                    ch["items"].remove(x)
+                ch["items_t"] = int(time.time())
+                self.changed = True
+                return
+
+    def inv_view(self):
+        """画面用(インベントリ): {"chars": {キャラ: {items, eq, t}}, "stores": 持ち主 -> {キー: {…}}, "names": {番号: 名前}}。装備は着ている物+持ち物の装備"""
+        self.flush_pending()
+        chars = {}
+        for name, ch in self.chars.items():
+            if name == UNKNOWN or ("items" not in ch and "bag" not in ch):
+                continue
+            eq = [self._item_view(it) for it in self._worn(ch)] + [self._item_view(it) for it in (ch.get("bag") or [])]
+            chars[name] = {"items": ch.get("items") or [], "eq": eq, "t": ch.get("items_t") or 0, "has": "items" in ch}
+        ids = {str(x["itemId"]) for c in chars.values() for x in c["items"]}
+        for st in self.stores.values():
+            for sl in st.values():
+                ids |= {str(x["itemId"]) for x in sl["items"]}
+        return {"chars": chars, "stores": self.stores, "names": {i: self.id2name[i] for i in ids if i in self.id2name}}
 
     @staticmethod
     def _ident(e):

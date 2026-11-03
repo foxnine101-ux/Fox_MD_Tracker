@@ -27,6 +27,7 @@
 | `server_core.py` | どのサーバー(ワールド)の通信か。キャラは「名前@サーバーIP」で記録(`qualify`)。画面は `cn()` で @ 以降を外す |
 | `map_ledger.py` | マップ ID ↔ 日本語名の台帳(下) |
 | `ro_official.py` | 公式サイト(rotool.gungho.jp)から、この PC にだけ集める(下) |
+| `market_core.py` | 相場(露店の取引履歴): 公式の `/item_trade_log_filtered_search/`・`…summary…` を、画面の「相場」ボタンを押したときだけ3秒あけて取り、`相場.json`(この PC だけ・.gitignore)に新しい60件+概要を保存。6時間は取り直さない。単価 = price ÷ item_count、Noatun価格 = それ ÷ 1000 |
 | `lantern_core.py` | ランタンハント(座標の取り込み・マップ ID・暗号化した同梱データ) |
 | `quest_names.py` | RO の `System/*.lub`(Lua バイトコード)を自前で読む小さな VM。クエスト名・イベント |
 | `ratorio_core.py` | 計算機(ROラトリオ)をフォーク `foxnine101-ux/ratorio` から取り込み、exe の隣の「ラトリオ」に置く(変わった分だけ)。**本家の更新はフォークに merge するだけ** |
@@ -35,7 +36,7 @@
 データ(同梱): `id2name.json`(アイテム名)・`item_names_fix.json`(手直し)・`item_link.json`(ゲームの番号→ラトリオの番号)・`gear_info.json`(耐性)・`skill_*.json`・`mob_info.json`・`mob_ids.json`(モンスター番号→ID名)・`option_names.json`・`calc_data.json`・`ail_counter.json`・`packet_lengths.json`・`ratorio_cdn/`・`lantern_seed.bin`(暗号化)。データファイルを増やしたら `build.yml` の `--add-data` 2か所(公開版・開発版)にも足す。作り方は `tools/make_*.py`(コメントに引数)。
 
 ## 画面(`app.html` は枠だけ。中身は `web/NN_名前.js` を番号順に読む。1つの名前空間を共有)
-`01_base`(設定・サーバー・アカウント・複数選択・render 骨組み) / `02_menu`(右クリック・MDの表・ゼニー表示) / `03_resist`(耐性・スタイル) / `04_dmg_equip`(被ダメ・装備・外し忘れの印) / `05_sim_core`(計算機の土台 `ENG`/`SIMC`) / `06_sim_gear`(装備編集・装備スロット・支援) / `07_sim_status`(ステータスシミュレーター) / `08_sim_compare` / `09_sim_sandbag`(サンドバックマン・精霊) / `10_sim_atk`(与ダメ) / `11_sim_fox`(ゲームのキャラ→計算機 `simcFromFox`/`simcWear`) / `12_sim_dmgcheck` / `13_ratorio` / `14_chars` / `15_halloween`(次郎・経験値・ランタン) / `16_equipset` / `17_official` / `18_events` / `19_nyar` / `20_monsters_maps` / `21_license_sync` / `22_update` / `23_boot`(最後。`load()`) / `24_lantern_route`(**`tools/make_app_route.py` が `tools/lantern_route.js` から作る。直接は直さない**)。
+`01_base`(設定・サーバー・アカウント・複数選択・render 骨組み) / `02_menu`(右クリック・MDの表・ゼニー表示) / `03_resist`(耐性・スタイル) / `04_dmg_equip`(被ダメ・装備・外し忘れの印) / `05_sim_core`(計算機の土台 `ENG`/`SIMC`) / `06_sim_gear`(装備編集・装備スロット・支援) / `07_sim_status`(ステータスシミュレーター) / `08_sim_compare` / `09_sim_sandbag`(サンドバックマン・精霊) / `10_sim_atk`(与ダメ) / `11_sim_fox`(ゲームのキャラ→計算機 `simcFromFox`/`simcWear`) / `12_sim_dmgcheck` / `13_ratorio` / `14_chars` / `15_halloween`(次郎・経験値・ランタン) / `16_equipset` / `17_official` / `18_events` / `19_nyar` / `20_monsters_maps` / `21_license_sync` / `22_update` / `25_inventory`(インベントリ・相場。`23_boot` の前に読む)/ `23_boot`(最後。`load()`) / `24_lantern_route`(**`tools/make_app_route.py` が `tools/lantern_route.js` から作る。直接は直さない**)。
 - 注意: 関数宣言の巻き上げは同じファイルの中だけ。**読み込み中(トップレベル)にあとのファイルの関数を呼ばない**。ファイルを足したら `app.html` の `<script src>` に番号順で足す。確認の型: 古い版と新しい版を別ポートで動かし、全タブ・サブタブの描画ハッシュが一致すること
 - 自動の読み直し(5秒)は `load(quiet)`(同じ内容なら描き直さない)。60ms 以上かかる画面は15秒に1回まで。描き直しで横スクロールが戻らないよう `HSCROLL_SEL` を覚える。エラーは `render()` の try/catch で画面に出し `/api/jslog` で `エラーログ.txt` へ
 
@@ -48,6 +49,7 @@
 - BaseLv(00B0 の 11)・JobLv(55)はふだん流れず、上がったときだけ。**キャラ選択の一覧 0B72(1人175バイト・先頭4バイトの後)**: GID@0・**ゼニー u32@12**・JobLv u32@24・職業@84・BaseLv@92・名前@108(24)・最後のマップ@142(16)
 - スキル一覧 0B32(15バイト×n)・010F(37バイト×n)・010E(1つ上がった)。地面に置く技の 01DE は使った人が「設置物ID」→ 09CA の置いた人に付けかえる
 - **装備・持ち物・倉庫**: `0B39` 装備一覧(`pkt[4]` 種類 0=自分の持ち物・1=カート・2〜4=倉庫。68バイト/件・100件で区切って届く。精錬@65・★@66)/ `0B41` 持ち物に増えた(70バイト。+2 番号・+4 個数・+6 アイテム・+12..24 カード・+28 装備部位(0=装備でない)・+40 ランダムOP・+68 精錬)/ `07FA` 持ち物から消えた(理由@2・番号@4・個数@6。**理由4=倉庫へ**・5=カート。失敗した預け入れは先に 0B41 で手元に戻る)/ `00F6` 倉庫から取り出す / `00F2` 倉庫の件数 / `0999`・`099A` 装備した・外した(結果=0が成功)。倉庫に入れる専用の通信は無い(`00F4`/`01C4`/`0A0A` は届かない)。RO Storage Manager(`C:\Users\fuso1\AppData\Local\Programs\ro-storage-manager`)が先達
+- **持ち物・倉庫の「装備ではない品」**(RO Storage Manager と同じ読み方。**実機で未確認 = 動作ログの `[倉庫] 一覧の始まり`/`倉庫「…」を記録` で確かめる**): `0B08`[op2][長さ2=5][種類1](0=持ち物・2=倉庫・3=ギルド・4=W倉庫)→ `0B09`[op2][長さ2][種類1]+34バイト×n(番号u16・アイテムu32・種類1・**個数u16@7**)→ 装備は `0B39` → `0B0B` 終わり。倉庫の名前は `0995/0996/0975/0976`[op2][長さ2][名前24 cp932] が先に届く(`packet_lengths.json` に可変で足した)。`char_core._list_items/_list_equip/_list_commit` が、持ち物は `ch["items"]`、倉庫は `stores[アカウント(分からなければキャラ名)]["種類|名前"]` に書く(届くたびに置きかえ)。個数の増減は `0B41`(`_item_add`)と `07FA`(`_item_sub`)だけ。使った・売った分は次の一覧で直る。`/api/inv`(タブを開いたときだけ読む。`inv_t` が変わったら読み直す)
 - **ゼニー**: ゲーム中は 00B1(変数20・u32)/0ACB(i64)、ログイン時は届かず **0B72 から**取る
 - サーバーごとにキャラ選択サーバーの IP が違う(18.182.57.201 通常・.231 露店・.129 別ワールド)。同じキャラ名が別サーバーにいることがある。文字コードは cp932。名前の「#番号」は `shown_name` で外す
 - リプレイ(`Replay/*.rrf`)は `gp.read_rrf_packets`。2026-10 の新しいものは暗号の鍵が変わって読めない。アイテム名は通信に無い(番号だけ)

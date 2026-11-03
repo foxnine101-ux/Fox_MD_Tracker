@@ -130,10 +130,10 @@ licLoad(true);
 $("#gear").onclick = (e) => {      // 歯車: イベント・入場履歴・設定のメニュー
   const r = e.currentTarget.getBoundingClientRect();
   const go = (k) => { TAB = k; store.set("md_tab", TAB); render(); };
-  showCtx(Math.max(8, r.right - 200), r.bottom + 4, GEAR_TABS.map(([k, l]) => ({ label: (TAB === k ? "● " : "") + l + (k === "event" && GEAR_EVENTS ? `（${GEAR_EVENTS}件）` : ""), act: () => go(k) })).concat((LICST.state !== "off" ? [{ label: "利用キー", act: showLicKey }] : []), [{ label: "ライセンス・クレジット", act: showLicense }, { label: "アプリを終了", act: quitApp }]));
+  showCtx(Math.max(8, r.right - 200), r.bottom + 4, GEAR_TABS.map(([k, l]) => ({ label: (TAB === k ? "● " : "") + l + "", act: () => go(k) })).concat((LICST.state !== "off" ? [{ label: "利用キー", act: showLicKey }] : []), [{ label: "ライセンス・クレジット", act: showLicense }, { label: "アプリを終了", act: quitApp }]));
 };
 $("#tabs").onclick = (e) => { const b = e.target.closest("[data-tab]"); if (!b) return; TAB = b.dataset.tab; store.set("md_tab", TAB); render(); };
-setInterval(() => { if (DATA && ["weekly", "daily", "other", "nyar", "event", "history", "resist"].includes(TAB)) render(); }, 30000);      // 時間で表示が変わるタブだけ(計算機などは描き直さない)
+setInterval(() => { if (DATA && ["weekly", "daily", "other", "event", "history", "resist"].includes(TAB) && !(TAB === "event" && EVSUB === "hw")) render(); }, 30000);      // 時間で表示が変わるタブだけ(計算機などは描き直さない)
 setInterval(() => { if (DATA && !document.hidden && TAB !== "settings") load(true); }, 120000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && DATA) load(true); });
 

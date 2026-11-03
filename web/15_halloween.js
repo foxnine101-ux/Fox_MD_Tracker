@@ -143,7 +143,7 @@ const LNT_AREAS = [["all", "すべて"], ["town", "街・室内（1〜301）"], 
 async function lntLoad(fetchMaps) {
   if (!LOCAL) return; LNT.loading = true;
   try { LNT.data = await fetch("/api/lantern" + (fetchMaps ? "?fetch=1" : "")).then((r) => r.json()); } catch (e) { LNT.msg = "読み込めませんでした: " + e.message; }
-  LNT.loading = false; if (TAB === "hw" && HWV === "lantern") render();
+  LNT.loading = false; if (TAB === "event" && EVSUB === "hw" && HWV === "lantern") render();
   if (fetchMaps && LNT.data && LNT.data.official && !LNT.data.mapn) setTimeout(() => lntLoad(false), 6000);     // 公式のマップ一覧を裏で取っている間は、少し待ってもう一度(マップ ID が引ける)
 }
 async function lntPost(body) {
