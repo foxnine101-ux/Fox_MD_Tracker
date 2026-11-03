@@ -80,7 +80,7 @@ class Market(object):
             r = self.data.get(k)
             if k in self.busy:
                 return
-            if r and r.get("t") and not r.get("err") and "name" in r and self._clock() - r["t"] < FRESH and not force:      # name の無い古い記録は、名前のために取り直す
+            if r and r.get("t") and not r.get("err") and (r.get("name") or r.get("pg")) and self._clock() - r["t"] < FRESH and not force:      # 名前が無く、品のページも見ていない古い記録は、名前のために取り直す
                 return
             if r and r.get("t") and force and self._clock() - r["t"] < 60:       # 連打で何度も取りにいかない
                 return
@@ -164,15 +164,16 @@ class Market(object):
             summary = self._fetch("/item_trade_log_summary_filtered_search/?" + q)
             trades, summ, total = self.shape(log, summary)
             name = next((str(x.get("item_name")).strip() for x in log if isinstance(x, dict) and x.get("item_name")), "") if isinstance(log, list) else ""
+            pg = False
             if not name:                                    # 取引が1件もない品でも、公式の品のページはある → 名前だけ、そこから読む
-                name = self._page_name(k)
+                name, pg = self._page_name(k), True
             with self.lock:
                 old = self.data.get(k) or {}
             trades = self.merge(old.get("trades"), trades)              # 取り直すたびに足していく(あとでグラフにするため、取った取引は捨てない)
             hist = list(old.get("hist") or [])
             if summ:
                 hist.append([int(self._clock()), summ.get("median"), summ.get("min"), summ.get("max")])
-            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name or old.get("name") or "", "hist": hist[-HIST_MAX:]}      # name = 公式の品名(番号から名前を調べるのに使う)
+            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name or old.get("name") or "", "pg": pg or bool(old.get("pg")), "hist": hist[-HIST_MAX:]}      # name = 公式の品名(番号から名前を調べるのに使う)
         except Exception as e:                              # つながらない・形が違う など。前の記録は消さない
             err = "{}: {}".format(type(e).__name__, e)
             self.log("[相場] {} が取れませんでした: {}".format(k, err))
