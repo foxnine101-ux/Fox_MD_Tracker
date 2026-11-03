@@ -221,7 +221,7 @@ function simcSbCmpHtml(m) {
 }
 function simcSbCmpFill(m) { const el = $("#sccsbcmp"); if (el) el.innerHTML = simcSbCmpHtml(m); }
 function simcSbCmpKick(m) {
-  const S = SIMC.sb; if (!simcFoldState().sb || !ENG.sb || !S.res || !S.mt || !simcCmpIds(m).length) return;
+  const S = SIMC.sb; if (!(SIMV === "sb" || simcFoldState().sb) || !ENG.sb || !S.res || !S.mt || !simcCmpIds(m).length) return;
   const sig = simcSbCmpSig(m); if (SIMC.sbCmp && SIMC.sbCmp.sig === sig) return;
   clearTimeout(SIMC.sbCmpT);
   SIMC.sbCmpT = setTimeout(async () => {
