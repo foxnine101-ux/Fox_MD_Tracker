@@ -24,7 +24,9 @@ BASE = "https://rotool.gungho.jp"
 UA = "Fox_MD_Tracker (personal local cache; 1 request / 3+ sec; no redistribution)"
 MIN_GAP = 3.0          # 通信と通信の間(秒)
 FRESH = 6 * 3600       # この間は取り直さない
-KEEP = 60              # 取引の一覧は、新しい順に何件まで覚えるか
+KEEP = 60              # 1回に取る取引は、新しい順に何件まで取り込むか
+TRADES_MAX = 400       # 1つの品について、取り込んだ取引を何件まで覚えておくか(取り直すたびに足していく。重なりは捨てる。グラフ用)
+HIST_MAX = 400         # 取り直すたびの 中央値・最低・最高 の記録を何回ぶん覚えておくか(グラフ用)
 TIMEOUT = 20
 
 
@@ -99,6 +101,34 @@ class Market(object):
             return body if text else json.loads(body)
 
     @staticmethod
+    def _tkey(t):
+        return (t.get("d"), t.get("n"), t.get("p"), t.get("map"), t.get("w"), t.get("r"), t.get("g"), tuple(t.get("c") or ()))
+
+    def merge(self, old, new):
+        """前に覚えた取引に、新しく取れた取引を足す(同じ取引は1つに)。新しい順・TRADES_MAX 件まで。"""
+        seen, out = set(), []
+        for t in list(new) + list(old or []):
+            k = self._tkey(t)
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(t)
+        out.sort(key=lambda t: str(t.get("d") or ""), reverse=True)
+        return out[:TRADES_MAX]
+
+    def brief(self):
+        """画面の一覧用: {アイテム番号: [取った時刻, 直近の売価(単価), その日時, 中央値]}。覚えているものだけ(通信はしない)。"""
+        out = {}
+        with self.lock:
+            for k, r in self.data.items():
+                if not r or not r.get("t"):
+                    continue
+                tr = (r.get("trades") or [None])[0]
+                last = int(tr["p"] / max(1, tr["n"])) if tr else None
+                out[k] = [r["t"], last, tr["d"] if tr else "", (r.get("summary") or {}).get("median")]
+        return out
+
+    @staticmethod
     def shape(log, summary):
         """公式の返事 → 保存する形(取引は新しい順に KEEP 件)。"""
         trades = []
@@ -136,7 +166,13 @@ class Market(object):
             name = next((str(x.get("item_name")).strip() for x in log if isinstance(x, dict) and x.get("item_name")), "") if isinstance(log, list) else ""
             if not name:                                    # 取引が1件もない品でも、公式の品のページはある → 名前だけ、そこから読む
                 name = self._page_name(k)
-            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name}      # name = 公式の品名(番号から名前を調べるのに使う)
+            with self.lock:
+                old = self.data.get(k) or {}
+            trades = self.merge(old.get("trades"), trades)              # 取り直すたびに足していく(あとでグラフにするため、取った取引は捨てない)
+            hist = list(old.get("hist") or [])
+            if summ:
+                hist.append([int(self._clock()), summ.get("median"), summ.get("min"), summ.get("max")])
+            rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name or old.get("name") or "", "hist": hist[-HIST_MAX:]}      # name = 公式の品名(番号から名前を調べるのに使う)
         except Exception as e:                              # つながらない・形が違う など。前の記録は消さない
             err = "{}: {}".format(type(e).__name__, e)
             self.log("[相場] {} が取れませんでした: {}".format(k, err))

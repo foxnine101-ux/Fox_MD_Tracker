@@ -2,7 +2,7 @@
 // ---------- インベントリ(持ち物・倉庫 4つ・W倉庫)と相場 ----------
 // 中身は通信から読んだもの(char_core の 0B09/0B39。ゲームで持ち物・倉庫を開くたびに最新になる)。/api/inv で読む。
 // 相場は公式ツールの露店の取引履歴(market_core。/api/market。この PC に保存)。
-let INV = null, INV_T = -1, INV_LOADING = false;      // /api/inv の返事・読んだときの inv_t
+let INV = null, INV_T = -1, INV_LOADING = false, MKB = {}, INV_FILL = null;      // MKB = 覚えている相場の要約 {番号: [取った時刻, 直近の売価, 日時, 中央値]}      // /api/inv の返事・読んだときの inv_t
 let INVSUB = store.get("md_invsub") || "bag", INV_CHAR = "", INV_Q = "", INV_SORT = "name";
 const MKT = { id: 0, name: "", view: null, timer: 0 };
 (function () {
@@ -19,6 +19,7 @@ const MKT = { id: 0, name: "", view: null, timer: 0 };
 function invLoad() {
   if (INV_LOADING) return;
   INV_LOADING = true; INV_T = (DATA && DATA.inv_t) || 0;
+  fetch("/api/market?brief=1").then((r) => r.json()).then((b) => { MKB = b || {}; }).catch(() => {});
   fetch("/api/inv").then((r) => r.json()).then((d) => { INV = d; }).catch(() => { INV = INV || { chars: {}, stores: {}, names: {} }; })
     .finally(() => { INV_LOADING = false; if (TAB === "inv") render(); });
 }
@@ -93,6 +94,12 @@ async function invNameSet(id) {
   await fetch("/api/itemname", { method: "POST", body: JSON.stringify({ id: +id, name: nm.trim() }) }).catch(() => null);
   INV_T = -1; render();
 }
+function mkCells(id) {      // 覚えている相場(「相場」ボタンで取ったもの)から、直近の売価と中央値。まだ取っていない品は空欄
+  const b = MKB[String(id)];
+  if (!b) return `<td class="n muted"></td><td class="n muted"></td>`;
+  const ago = b[0] ? `取得 ${when(b[0])}` : "";
+  return `<td class="n" title="${esc((b[2] || "") + " の取引 / " + ago)}">${b[1] == null ? "-" : mktYen(b[1])}</td><td class="n" title="${esc(ago)}">${b[3] == null ? "-" : mktYen(b[3])}</td>`;
+}
 function invRows(items, eq) {
   const q = INV_Q.trim().toLowerCase();
   const rows = [];
@@ -107,8 +114,8 @@ function invRows(items, eq) {
 }
 function invTable(rows) {
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
-  return `<div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">個数</th><th></th></tr></thead><tbody>${rows.map((r) =>
-    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td><td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${r.unk ? ` <button class="ghost nm" data-nm="${r.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">個数</th><th class="n" title="覚えている相場のうち、いちばん新しい取引の単価">直近の売価</th><th class="n" title="公式ツールの中央値(全期間)">中央値</th><th></th></tr></thead><tbody>${rows.map((r) =>
+    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td>${mkCells(r.id)}<td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${r.unk ? ` <button class="ghost nm" data-nm="${r.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function invAcct(owner) {      // 倉庫の持ち主(アカウント番号)→ 画面に出す呼び名
   const n = Object.entries((DATA && DATA.chars) || {}).filter(([k, c]) => String(c.account) === String(owner)).map(([k]) => k)[0];
@@ -130,8 +137,8 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
   const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);
-  return `<div class="muted" style="margin:4px 0">${rows.length} 種類が見つかりました${rows.length > cap.length ? `（先頭 ${cap.length} 種類を表示）` : ""}。</div><div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">合計</th><th>どこに（個数）</th><th></th></tr></thead><tbody>${cap.map((e) =>
-    `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td><td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="muted" style="margin:4px 0">${rows.length} 種類が見つかりました${rows.length > cap.length ? `（先頭 ${cap.length} 種類を表示）` : ""}。</div><div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">合計</th><th>どこに（個数）</th><th class="n">直近の売価</th><th class="n">中央値</th><th></th></tr></thead><tbody>${cap.map((e) =>
+    `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td>${mkCells(e.id)}<td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderInventory(chars) {
@@ -164,7 +171,7 @@ function renderInventory(chars) {
   $("#view").innerHTML = `${nav}${head}${body}`;
   $("#view").querySelectorAll("[data-invsub]").forEach((b) => b.onclick = () => { INVSUB = b.dataset.invsub; store.set("md_invsub", INVSUB); render(); });
   const ic = $("#invchar"); if (ic) ic.onchange = () => { INV_CHAR = ic.value; render(); };
-  const fill = () => { const t = $("#invtbl"); if (!t || !tblFn) return; t.innerHTML = tblFn(); t.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn)); t.querySelectorAll("[data-nm]").forEach((b) => b.onclick = () => invNameSet(b.dataset.nm)); };
+  const fill = INV_FILL = () => { const t = $("#invtbl"); if (!t || !tblFn) return; t.innerHTML = tblFn(); t.querySelectorAll("[data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn)); t.querySelectorAll("[data-nm]").forEach((b) => b.onclick = () => invNameSet(b.dataset.nm)); };
   const rb = $("#invres"); if (rb) rb.onclick = invResolve;
   fill();
   const sq = $("#view").querySelector("input.invq"); if (sq) sq.oninput = () => { INV_Q = sq.value; fill(); };      // 入力中は全体を描き直さず、表だけ作り直す
@@ -178,6 +185,11 @@ async function mktFetch(ask, refresh) {
   const r = await fetch(`/api/market?id=${MKT.id}${ask ? "&ask=1" : ""}${refresh ? "&refresh=1" : ""}`).then((x) => x.json()).catch(() => null);
   if (!MKT.id || (r && String(r.id) !== String(MKT.id))) return;      // 前に開いた品の返事が遅れて届いても使わない
   MKT.view = r; mktDraw();
+  if (r && r.rec && r.rec.t && !r.busy) {      // 取れた相場を、一覧の列にも反映する
+    const tr = (r.rec.trades || [])[0];
+    MKB[String(r.id)] = [r.rec.t, tr ? Math.floor(tr.p / Math.max(1, tr.n)) : null, tr ? tr.d : "", r.rec.summary ? r.rec.summary.median : null];
+    if (INV_FILL && TAB === "inv") INV_FILL();
+  }
   if (r && r.learned) { INV_T = -1; invLoad(); }      // 公式の品名で、この番号の名前がわかった → 表を読み直す
   clearTimeout(MKT.timer);
   if (r && r.busy) MKT.timer = setTimeout(() => mktFetch(false, false), 2500);      // 取りにいっている間は、2.5秒おきに見にいく
@@ -203,8 +215,8 @@ function mktDraw() {
     else {
       const noa = (z) => (z != null && z / 1000 > 1 ? mktYen(z / 1000) : "-");
       h += `<div class="mk-sum"><div>中央値<b>${mktYen(S && S.median)}</b><span class="muted">Noatun価格 ${noa(S && S.median)}</span></div><div>最低値<b>${mktYen(S && S.min)}</b><span class="muted">Noatun価格 ${noa(S && S.min)}</span></div><div>最高値<b>${mktYen(S && S.max)}</b><span class="muted">Noatun価格 ${noa(S && S.max)}</span></div></div>
-        <div class="muted" style="font-size:12px">単価 = 取引金額 ÷ 個数。Noatun価格は、その値を 1000 で割ったもの（公式ページと同じ計算）。全 ${fmtN(r.total)} 件のうち新しい ${r.trades.length} 件を保存しています。</div>
-        <div class="tablewrap" style="max-height:340px;overflow:auto"><table class="invt"><thead><tr><th>日時</th><th class="n">単価</th><th class="n">個数</th><th>精錬</th><th>場所</th><th>ワールド</th></tr></thead><tbody>${r.trades.map((t) =>
+        <div class="muted" style="font-size:12px">単価 = 取引金額 ÷ 個数。Noatun価格は、その値を 1000 で割ったもの（公式ページと同じ計算）。公式ツール全体で ${fmtN(r.total)} 件。この PC には取り直すたびに足して ${r.trades.length} 件を保存しています（表は新しい 60 件）。</div>
+        <div class="tablewrap" style="max-height:340px;overflow:auto"><table class="invt"><thead><tr><th>日時</th><th class="n">単価</th><th class="n">個数</th><th>精錬</th><th>場所</th><th>ワールド</th></tr></thead><tbody>${r.trades.slice(0, 60).map((t) =>
           `<tr><td>${esc(t.d)}</td><td class="n">${mktYen(t.p / t.n)}</td><td class="n">${fmtN(t.n)}</td><td>${t.r ? "+" + t.r : ""}${t.g ? " ★" + t.g : ""}</td><td>${esc(t.map)}</td><td>${esc(t.w)}</td></tr>`).join("")}</tbody></table></div>`;
     }
   }

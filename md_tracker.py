@@ -44,7 +44,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.61"
+VERSION = "2.58.62"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -548,6 +548,8 @@ def start_live_server(core, lock, cfg):
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/market" and self._local_only() and MARKET is not None:       # 相場。id=アイテム番号・refresh=1 で取り直し(裏で取る。画面は少し待ってまた読む)
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                if q.get("brief"):                       # 一覧用: 覚えている相場の要約(通信はしない)
+                    return self._send(200, json.dumps(MARKET.brief(), ensure_ascii=False), "application/json; charset=utf-8")
                 try:
                     iid = int((q.get("id") or ["0"])[0])
                 except ValueError:
