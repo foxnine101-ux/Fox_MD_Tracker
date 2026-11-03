@@ -217,7 +217,7 @@ function simcSbCmpHtml(m) {
   const dl = (v, b) => { const d = (v || 0) - (b || 0); return d ? ` <span class="${d > 0 ? "good" : "warn"}">(${d > 0 ? "+" : ""}${simcNum(d)}${b ? "・" + (d > 0 ? "+" : "") + (100 * d / b).toFixed(1) + "%" : ""})</span>` : ""; };
   const rows = [["1回の平均ダメージ", (x) => x.per.avg], ["1回の最大", (x) => x.per.max], ["DPS", (x) => x.perSec]];
   const part = (title, base, key) => `<tr class="cmpk"><td colspan="${2 + R.cols.length}"><b>${title}</b></td></tr>` + rows.map(([l, f]) => `<tr><td>${l}</td><td class="v">${simcNum(f(base))}</td>${R.cols.map((c) => { const r = c[key]; return `<td class="v">${r ? simcNum(f(r)) + dl(f(r), f(base)) : "-"}</td>`; }).join("")}</tr>`).join("");
-  return `<table class="multi cmp">${simcCmpHead(R.cols)}${part("メインスキル1回（時限効果なし）", S.res, "r")}${S.resF ? part("時限効果込み", S.resF, "rf") : ""}</table><div class="muted" style="font-size:12px">いまの設定（スキル・敵・時限効果）のまま、装備スロットだけを入れかえて計算しています。</div>`;
+  return `<table class="multi cmp">${simcCmpHead(R.cols)}${part("メインスキル1回（時限効果なし）", S.res, "r")}${S.resF ? part("時限効果込み", S.resF, "rf") : ""}</table>${R.cols.filter((c) => c.err || !c.r).map((c) => `<div class="warn" style="font-size:12px">「${esc(c.st.tag || "?")}」は計算できませんでした${c.err ? "（" + esc(c.err) + "）" : "（このスキルでは、ラトリオがダメージを出せない装備の組み合わせです）"}</div>`).join("")}<div class="muted" style="font-size:12px">いまの設定（スキル・敵・時限効果）のまま、装備スロットだけを入れかえて計算しています。</div>`;
 }
 function simcSbCmpFill(m) { const el = $("#sccsbcmp"); if (el) el.innerHTML = simcSbCmpHtml(m); }
 function simcSbCmpKick(m) {
@@ -232,7 +232,7 @@ function simcSbCmpKick(m) {
       if (st.sim) simcApplyFrag(mm, st.sim, false); else missRows = simcWear(mm, st.items || [], false);
       await sleep(0);
       const c = simcCur(); if (!c || simcSbCmpSig(c.model) !== sig) return;
-      try { engCalc(mm); cols.push({ sid, st, missRows, r: engSandbag(mm, cfg, mt), rf: withFx ? atkEval(mm, cfg, mt, boss, kind).r : null }); } catch (e) { console.warn("sbcmp", e); }
+      try { engCalc(mm); cols.push({ sid, st, missRows, r: engSandbag(mm, cfg, mt), rf: withFx ? atkEval(mm, cfg, mt, boss, kind).r : null }); } catch (e) { console.warn("sbcmp", e); try { reportJsError("sbcmp " + (st.tag || sid) + ": " + e.message, e.stack); } catch (e2) { /* 記録は飾り */ } cols.push({ sid, st, missRows, r: null, rf: null, err: e.message }); }
     }
     SIMC.sbCmp = { sig, cols }; simcSbCmpFill(m);
   }, 300);
