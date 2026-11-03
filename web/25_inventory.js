@@ -32,6 +32,13 @@ function invStores(c) {
   const all = Object.values(S);
   return !raw && !acc && all.length === 1 ? all[0] : {};      // アカウントが分からず、持ち主が1つしか無ければ、それ
 }
+function invChk(st) {      // 自己採点: ゲームが教える「入っている数」と読めた数の照らし合わせ
+  const k = st && st.chk;
+  if (!k || !k.fin) return "";
+  return k.ok ? `　<span class="ok" title="ゲームが教える数(${k.want})と、読めた数が一致しました">✔数が一致(${k.want})</span>`
+    : `　<span class="warn" title="ゲームが教える数 ${k.want} / 読めた数 ${k.got}">⚠数がちがいます(ゲーム ${k.want}・読めた ${k.got})。取りこぼしの可能性</span>`;
+}
+
 function invStoreSlots(c) {
   const S = invStores(c), list = Object.entries(S).map(([k, v]) => ({ k, ...v })).sort((a, b) => (a.inv - b.inv) || String(a.title).localeCompare(String(b.title), "ja", { numeric: true }));
   const normal = list.filter((x) => x.inv === 2), w = list.filter((x) => x.inv === 4), guild = list.filter((x) => x.inv === 3);
@@ -80,7 +87,7 @@ function renderInventory(chars) {
     const s = slots.find((x) => x.id === INVSUB);
     head = bar(`<span class="muted">${esc(cn(INV_CHAR))} のアカウントの倉庫</span>`);
     if (!s || !s.st) body = `<div class="panel empty">「${esc(s ? s.label : "")}」は、まだ読めていません。<br>ゲームで、その倉庫を開くと記録されます（ツールを動かしたまま）。</div>`;
-    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) rowsFn = () => invRows(s.st.items, s.st.eq);
+    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) rowsFn = () => invRows(s.st.items, s.st.eq);
   }
   $("#view").innerHTML = `${nav}${head}${body}`;
   $("#view").querySelectorAll("[data-invsub]").forEach((b) => b.onclick = () => { INVSUB = b.dataset.invsub; store.set("md_invsub", INVSUB); render(); });

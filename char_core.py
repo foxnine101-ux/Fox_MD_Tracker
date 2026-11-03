@@ -236,6 +236,8 @@ class CharCore(object):
         self.stores = {}       # 倉庫の中身(装備ではない品+装備): 持ち主(アカウント。分からなければキャラ名) -> {"種類|名前": {inv, title, items:[{itemId,count}], eq:[装備], t}}
         self._lst = {}         # 接続 -> いま受け取り中の一覧 {inv, title, items, eq, t, new}
         self._title = {}       # 接続 -> (倉庫の名前, 時刻)
+        self._cnt = {}               # 接続 -> (倉庫に入っている数, 入れられる数, 届いた時刻)(00F2)
+        self._lastslot = {}          # 接続 -> (持ち主, キー, 時刻): 最後に書いた倉庫の枠
         self._items_synced = set()   # 持ち物の一覧(0B09 種類0)を受け取った接続(個数の増減を反映してよい)
         self._synced = set()   # 装備一覧(0B39)を受け取った接続。持ち物の番号はログインのたびに変わるので、一覧を受け取っていない接続の「着た/外した」は使わない
 
@@ -965,6 +967,10 @@ class CharCore(object):
             n = self._diag[op] = self._diag.get(op, 0) + 1
             if n <= 4:
                 self.log("[倉庫] 通信 {:04X} {}バイト({}回目): {}".format(op, len(pkt), n, pkt[:48].hex()))
+            if op == 0x00F2 and len(pkt) >= 6:           # 倉庫を開いたとき: 入っている数・入れられる数。一覧の数と合うか確かめる(自己採点)
+                key = getattr(self, "_key", None)
+                self._cnt[key] = (struct.unpack_from("<H", pkt, 2)[0], struct.unpack_from("<H", pkt, 4)[0], time.time())
+                self._verify_last(key, final=self._lst.get(key) is None)
 
         elif op == 0x0999 and len(pkt) >= 11:            # 装備した(結果 0 = 成功)
             idx, loc = struct.unpack_from("<HI", pkt, 2)
@@ -1030,6 +1036,9 @@ class CharCore(object):
         elif op == LIST_START and len(pkt) >= 5:
             key, inv = getattr(self, "_key", None), pkt[4]
             tt = self._title.pop(key, None)                  # 名前は1回使ったら捨てる(次の倉庫に引き継がない)
+            self._lstart_n = getattr(self, "_lstart_n", 0) + 1
+            if self._lstart_n <= 8:
+                self.log("[倉庫] 診断 0B08 の中身: {}".format(pkt[:16].hex()))
             self._lst[key] = {"inv": inv, "title": tt[0] if tt and time.time() - tt[1] < 3.0 and inv >= 2 else "", "items": [], "eq": [], "t": time.time(), "new": True}
             if inv >= 2:
                 self._nlst = getattr(self, "_nlst", 0) + 1
@@ -1042,7 +1051,7 @@ class CharCore(object):
         elif op == LIST_END:
             lst = self._lst.pop(getattr(self, "_key", None), None)
             if lst is not None:
-                self._list_commit(lst)
+                self._list_commit(lst, final=True)
 
         elif op == 0x0B41 and len(pkt) >= 70:            # 持ち物への追加(拾った・買った・倉庫から取り出した)。装備なら持ち物の装備に足す
             self._inv_add(pkt)
@@ -1058,6 +1067,10 @@ class CharCore(object):
             self.log("[倉庫] 品の一覧(0B09 種類={})の長さが読めません: 本体={}バイト".format(inv, len(body)))
             return
         items = []
+        self._lit_n = getattr(self, "_lit_n", 0) + 1
+        if self._lit_n <= 8:
+            self.log("[倉庫] 診断 0B09 種類={} 全体{}バイト・1件{}バイト×{}件 先頭の2件: {}".format(
+                inv, len(pkt), size, len(body) // size, " / ".join(body[i * size:i * size + 12].hex() for i in range(min(2, len(body) // size)))))
         for i in range(len(body) // size):
             e = body[i * size:(i + 1) * size]
             idx, itid = struct.unpack_from("<HI", e, 0)
@@ -1069,6 +1082,9 @@ class CharCore(object):
             lst = self._lst[key] = {"inv": inv, "title": "", "items": [], "eq": [], "t": time.time(), "new": True}
         if time.time() - lst["t"] > 5.0:               # 前の一覧から間があいた = 新しい一覧(終わりを取りこぼしたとき、足してしまわない)
             lst["new"] = True
+        known = sum(1 for x in items if str(x["itemId"]) in self.id2name)
+        if self._lit_n <= 8 and items:
+            self.log("[倉庫] 診断 品の番号が名前表にある割合: {}/{}(低いと読み位置が違う)".format(known, len(items)))
         lst["items"] = items if lst["new"] else lst["items"] + items       # 始まりの直後の最初の1本は置きかえ、続きは足す
         lst["new"] = False
         lst["t"] = time.time()
@@ -1085,7 +1101,7 @@ class CharCore(object):
         lst["t"] = time.time()
         self._list_commit(lst)
 
-    def _list_commit(self, lst):
+    def _list_commit(self, lst, final=False):
         """受け取った一覧を記録に書く(届くたびに、そこまでの全部で置きかえる)。持ち物は ch["items"]、倉庫は stores。"""
         now = int(time.time())
         if lst["inv"] == 0:
@@ -1107,9 +1123,31 @@ class CharCore(object):
             self.stores.setdefault(owner, {})[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
                                                     "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
             self.changed = True
+            self._lastslot[getattr(self, "_key", None)] = (owner, k, time.time())
+            self._verify_last(getattr(self, "_key", None), final=final)
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 40:
                 self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
+
+    def _verify_last(self, key, final=False):
+        """自己採点: 倉庫を開いたとき届く「入っている数」(00F2)と、読めた一覧(品+装備)の数を比べる。
+        00F2 は普通の倉庫(種類2)だけ。一覧と数がちがえば、画面に「取りこぼしの可能性」と出す。"""
+        c, ls = self._cnt.get(key), self._lastslot.get(key)
+        if not c or not ls or abs(c[2] - ls[2]) > 8.0:
+            return
+        sl = self.stores.get(ls[0], {}).get(ls[1])
+        if not sl or sl.get("inv") != 2:
+            return
+        got = len(sl["items"]) + len(sl["eq"])
+        chk = {"want": c[0], "max": c[1], "got": got, "ok": got == c[0], "fin": bool(final)}
+        if sl.get("chk") != chk:
+            sl["chk"] = chk
+            self.changed = True
+            if final:
+                self._nchk = getattr(self, "_nchk", 0) + 1
+                if self._nchk <= 30:
+                    self.log("[倉庫] 自己採点「{}」: ゲームの数 {} / 読めた数 {}(品{}・装備{}) → {}".format(
+                        sl.get("title"), c[0], got, len(sl["items"]), len(sl["eq"]), "一致" if chk["ok"] else "ちがう(取りこぼしの可能性)"))
 
     def _item_add(self, pkt):
         """0B41(持ち物に増えた)のうち、装備ではない品: 同じ番号の品があれば個数を足す、なければ足す。"""
