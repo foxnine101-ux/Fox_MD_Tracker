@@ -9,8 +9,10 @@
 サイトに負荷をかけない: 1件ずつ・前の通信から 3秒以上あける・同じ品は 6時間は取り直さない・画面の「相場」ボタンを押したときだけ。
 取った内容は 相場.json(この PC だけ。配布・公開しない)に保存する。
 """
+import html
 import json
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -76,7 +78,7 @@ class Market(object):
             r = self.data.get(k)
             if k in self.busy:
                 return
-            if r and r.get("t") and not r.get("err") and self._clock() - r["t"] < FRESH and not force:
+            if r and r.get("t") and not r.get("err") and "name" in r and self._clock() - r["t"] < FRESH and not force:      # name の無い古い記録は、名前のために取り直す
                 return
             if r and r.get("t") and force and self._clock() - r["t"] < 60:       # 連打で何度も取りにいかない
                 return
@@ -84,16 +86,17 @@ class Market(object):
         threading.Thread(target=self._run, args=(k,), daemon=True).start()
 
     # ---- 取りにいく ----
-    def _fetch(self, path):
+    def _fetch(self, path, text=False):
         with self._pace:                                   # 全体で3秒以上あける
             wait = self._last + MIN_GAP - self._clock()
             if wait > 0:
                 self._sleep(wait)
             self._last = self._clock()
-        req = urllib.request.Request(BASE + path, headers={"User-Agent": UA, "Accept-Language": "ja", "Accept": "application/json"})
+        req = urllib.request.Request(BASE + path, headers={"User-Agent": UA, "Accept-Language": "ja", "Accept": "text/html" if text else "application/json"})
         opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=netutil.CTX))      # クッキーは送らない
         with opener.open(req, timeout=TIMEOUT) as r:
-            return json.loads(r.read().decode("utf-8"))
+            body = r.read().decode("utf-8", "replace")
+            return body if text else json.loads(body)
 
     @staticmethod
     def shape(log, summary):
@@ -115,6 +118,14 @@ class Market(object):
             summ = {k: summary.get(k) for k in ("median", "min", "max", "min_date", "max_date")}
         return trades, summ, (len(log) if isinstance(log, list) else 0)
 
+    def _page_name(self, k):
+        try:
+            h = self._fetch("/item/{}/".format(k), text=True)
+        except Exception:
+            return ""
+        m = re.search(r"<title>\s*(.*?)\s*\|\s*RO公式ツール\s*</title>", h, re.S)
+        return html.unescape(m.group(1)).strip() if m else ""
+
     def _run(self, k):
         err = ""
         try:
@@ -123,6 +134,8 @@ class Market(object):
             summary = self._fetch("/item_trade_log_summary_filtered_search/?" + q)
             trades, summ, total = self.shape(log, summary)
             name = next((str(x.get("item_name")).strip() for x in log if isinstance(x, dict) and x.get("item_name")), "") if isinstance(log, list) else ""
+            if not name:                                    # 取引が1件もない品でも、公式の品のページはある → 名前だけ、そこから読む
+                name = self._page_name(k)
             rec = {"t": int(self._clock()), "summary": summ, "trades": trades, "total": total, "none": log == "none", "name": name}      # name = 公式の品名(番号から名前を調べるのに使う)
         except Exception as e:                              # つながらない・形が違う など。前の記録は消さない
             err = "{}: {}".format(type(e).__name__, e)
