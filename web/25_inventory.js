@@ -55,7 +55,10 @@ function invSlotNo(title) {      // メイン倉庫 = 0・サブ倉庫N = N(そ�
   return m ? +m[1].replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xFEE0)) : -1;
 }
 function invStoreSlots(c) {
-  const S = invStores(c), list = Object.entries(S).map(([k, v]) => ({ k, ...v })).sort((a, b) => (a.inv - b.inv) || String(a.title).localeCompare(String(b.title), "ja", { numeric: true }));
+  const S0 = invStores(c), sv = c ? srvOf(c) : "", multi = new Set(Object.values(S0).map((v) => v.srv ?? srvOf(v.by))).size > 1;
+  const S = !sv || !multi ? S0 : Object.fromEntries(Object.entries(S0).filter(([, v]) => (v.srv ?? srvOf(v.by)) === sv));      // 倉庫はワールドごとに別。見ているキャラのワールドの分だけ
+  const list = Object.entries(S).map(([k, v]) => ({ k, ...v }));
+  list.sort((a, b) => (a.inv - b.inv) || String(a.title).localeCompare(String(b.title), "ja", { numeric: true }));
   const normal = list.filter((x) => x.inv === 2), w = list.filter((x) => x.inv === 4), guild = list.filter((x) => x.inv === 3);
   const slots = [], arr = [null, null, null, null], rest = [];
   for (const x of normal) { const i = invSlotNo(x.title); if (i >= 0 && i < 4 && !arr[i]) arr[i] = x; else rest.push(x); }      // 名前で枠を決める(メイン倉庫=1つ目・サブ倉庫1=2つ目 …)
@@ -141,7 +144,7 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
     e.where.set(where, w);
   };
   for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq, "all").forEach((r) => add(r, `${cn(c)} の持ち物`));
-  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}`));
+  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}${(sl.srv ?? srvOf(sl.by)) ? `（${String(sl.srv ?? srvOf(sl.by)).split(".").slice(-1)[0]}のワールド）` : ""}`));
   const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);

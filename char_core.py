@@ -1151,31 +1151,34 @@ class CharCore(object):
                 acc = ((getattr(self.md, "char_info", None) or {}).get(name) or {}).get("account")
                 owner = str(acc) if acc else name
             slots = self.stores.setdefault(owner, {})
+            srv = self._srv() or (name.split("@", 1)[1] if "@" in name else "")       # 倉庫はワールド(サーバー)ごとに別。アカウントが同じでも混ぜない
+            pre = srv + "#" if srv else ""
+            same = {kk: v for kk, v in slots.items() if self._slot_srv(v) == srv}       # このワールドの枠だけ
             title = lst["title"] or ("W倉庫" if lst["inv"] == 4 else "")
             k = lst.get("slot")
             if title and lst.get("slot_title") != title:         # 名前が分かった(最初から・または後から)
-                nk = "{}|{}".format(lst["inv"], title)
+                nk = "{}{}|{}".format(pre, lst["inv"], title)
                 if k and k != nk and lst.get("made"):
                     slots.pop(k, None)                          # 先に仮の枠(名前なし)へ書いたぶんは捨てる
                 k, lst["made"], lst["slot_title"] = nk, False, title
             elif k is None:                                      # 名前が無い: 中身が似ている枠へ。無ければ新しい枠
-                k = self._match_slot(slots, lst)
+                k = self._match_slot(same, lst)
                 if k is None:
                     n = 1
-                    while "{}|?{}".format(lst["inv"], n) in slots:
+                    while "{}{}|?{}".format(pre, lst["inv"], n) in slots:
                         n += 1
-                    k, lst["made"] = "{}|?{}".format(lst["inv"], n), True
+                    k, lst["made"] = "{}{}|?{}".format(pre, lst["inv"], n), True
             lst["slot"] = k
             if not title:
                 title = (slots.get(k) or {}).get("title") or ""
             slots[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
-                        "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
+                        "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name, "srv": srv}
             if title:                                            # 名前つきの枠ができたら、同じ中身の「名前なし」の仮の枠は片づける(倉庫が増えて見える元)
-                for kk in [kk for kk, v in slots.items() if kk != k and v.get("inv") == lst["inv"] and not v.get("title") and self._same_store(v, slots[k])]:
+                for kk in [kk for kk, v in slots.items() if kk != k and v.get("inv") == lst["inv"] and not v.get("title") and self._slot_srv(v) == srv and self._same_store(v, slots[k])]:
                     slots.pop(kk, None)
-            named2 = [kk for kk, v in slots.items() if v.get("inv") == 2 and v.get("title")]
+            named2 = [kk for kk, v in slots.items() if v.get("inv") == 2 and v.get("title") and self._slot_srv(v) == srv]
             if len(named2) >= 4:                                 # 普通の倉庫(メイン+サブ3つ)が名前つきで全部そろったら、名前なしの仮の枠は要らない(倉庫が増えて見える元)
-                for kk in [kk for kk, v in slots.items() if v.get("inv") == 2 and not v.get("title") and kk != k]:
+                for kk in [kk for kk, v in slots.items() if v.get("inv") == 2 and not v.get("title") and kk != k and self._slot_srv(v) == srv]:
                     slots.pop(kk, None)
             self.changed = True
             self._lastslot[getattr(self, "_key", None)] = (owner, k, time.time())
@@ -1183,6 +1186,23 @@ class CharCore(object):
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 40:
                 self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
+
+    def _srv(self):
+        """いまの接続のワールド(サーバー)。わからなければ空。"""
+        q = getattr(self.md, "qual", None)
+        try:
+            r = q(getattr(self, "_key", None), "x") if q else ""
+        except Exception:
+            r = ""
+        return r.split("@", 1)[1] if "@" in (r or "") else ""
+
+    @staticmethod
+    def _slot_srv(v):
+        """倉庫の記録のワールド。古い記録(srv なし)は、開いたキャラ(by)の「名前@サーバー」から。"""
+        if v.get("srv") is not None:
+            return v["srv"]
+        by = v.get("by") or ""
+        return by.split("@", 1)[1] if "@" in by else ""
 
     @staticmethod
     def _same_store(a, b):
