@@ -1142,9 +1142,14 @@ class CharCore(object):
         elif lst["inv"] in (2, 3, 4):
             name = self._name()
             if name == UNKNOWN:
-                return
-            acc = ((getattr(self.md, "char_info", None) or {}).get(name) or {}).get("account")
-            owner = str(acc) if acc else name
+                # キャラの名前がまだ決まっていない(ログイン時のクエスト一覧が届かなかった等)。アカウントが1つだけなら、倉庫は持ち主(アカウント)で分かるので捨てずに記録する
+                aids = getattr(self.md, "account_aids", None) or set()
+                if len(aids) != 1:
+                    return
+                owner, name = str(next(iter(aids))), ""
+            else:
+                acc = ((getattr(self.md, "char_info", None) or {}).get(name) or {}).get("account")
+                owner = str(acc) if acc else name
             slots = self.stores.setdefault(owner, {})
             title = lst["title"] or ("W倉庫" if lst["inv"] == 4 else "")
             k = lst.get("slot")
@@ -1165,12 +1170,27 @@ class CharCore(object):
                 title = (slots.get(k) or {}).get("title") or ""
             slots[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
                         "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name}
+            if title:                                            # 名前つきの枠ができたら、同じ中身の「名前なし」の仮の枠は片づける(倉庫が増えて見える元)
+                for kk in [kk for kk, v in slots.items() if kk != k and v.get("inv") == lst["inv"] and not v.get("title") and self._same_store(v, slots[k])]:
+                    slots.pop(kk, None)
+            named2 = [kk for kk, v in slots.items() if v.get("inv") == 2 and v.get("title")]
+            if len(named2) >= 4:                                 # 普通の倉庫(メイン+サブ3つ)が名前つきで全部そろったら、名前なしの仮の枠は要らない(倉庫が増えて見える元)
+                for kk in [kk for kk, v in slots.items() if v.get("inv") == 2 and not v.get("title") and kk != k]:
+                    slots.pop(kk, None)
             self.changed = True
             self._lastslot[getattr(self, "_key", None)] = (owner, k, time.time())
             self._verify_last(getattr(self, "_key", None), final=final)
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 40:
                 self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
+
+    @staticmethod
+    def _same_store(a, b):
+        """2つの倉庫の記録の中身が(品の番号+持ち物の位置で)半分以上重なるか。"""
+        def pairs(v):
+            return {(x.get("index"), x.get("itemId")) for x in v.get("items") or []} | {(x.get("inventoryIndex"), x.get("itemId")) for x in v.get("eq") or []}
+        pa, pb = pairs(a), pairs(b)
+        return len(pa) >= 3 and len(pb) >= 3 and len(pa & pb) / float(min(len(pa), len(pb))) >= 0.5
 
     @staticmethod
     def _match_slot(slots, lst):
