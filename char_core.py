@@ -229,6 +229,7 @@ class CharCore(object):
         self._name_idx = None  # 名前 -> ゲームのアイテム番号(id2name の逆引き。使うときに作る)
         self.changed = False
         self._diag = {}        # 倉庫まわりの通信(確認用): op -> 受け取った回数
+        self._snap = {}        # (持ち主, 倉庫の枠) -> 一覧を受け取り始める前の記録(取りこぼしたときに戻す)
         self._pending = {}     # 接続 -> 名前が決まる前に届いた分の記録(装備の一覧など)。名前が決まったら、そのキャラの記録に合流させる
         self._inv_chunk = {}   # 接続 -> (最後に持ち物の一覧が届いた時刻, その件数)。100件で区切られた続きかを見分ける
         self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
@@ -1171,6 +1172,9 @@ class CharCore(object):
             lst["slot"] = k
             if not title:
                 title = (slots.get(k) or {}).get("title") or ""
+            if lst.get("snap_k") != k:                           # この一覧が、この枠に初めて書く: 前の記録を取っておく(取りこぼした一覧で、良かった記録を失わないため)
+                lst["snap_k"] = k
+                self._snap[(owner, k)] = json.loads(json.dumps(slots[k])) if k in slots else None
             slots[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
                         "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name, "srv": srv}
             if title:                                            # 名前つきの枠ができたら、同じ中身の「名前なし」の仮の枠は片づける(倉庫が増えて見える元)
@@ -1242,7 +1246,17 @@ class CharCore(object):
         if not sl or sl.get("inv") != 2:
             return
         got = len(sl["items"]) + len(sl["eq"])
+        if not (0 <= c[0] <= max(c[1], 600)):          # 倉庫の個数ではない通信(別の値)を拾った: 採点しない
+            return
         chk = {"want": c[0], "max": c[1], "got": got, "ok": got == c[0], "fin": bool(final)}
+        if final and not chk["ok"] and got < c[0]:
+            snap = self._snap.get((ls[0], ls[1]))
+            if snap and len(snap.get("items") or []) + len(snap.get("eq") or []) > got:
+                self.stores[ls[0]][ls[1]] = sl = snap          # 取りこぼしの一覧で、前の(多く読めていた)記録を消さない
+                self.log("[倉庫] 「{}」は今回 {} 件しか読めなかった(ゲームは {} 件)ので、前の記録({}件)を残しました".format(
+                    sl.get("title") or ls[1], got, c[0], len(snap.get("items") or []) + len(snap.get("eq") or [])))
+                self.changed = True
+                return
         if sl.get("chk") != chk:
             sl["chk"] = chk
             self.changed = True
