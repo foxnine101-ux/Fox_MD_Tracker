@@ -20,7 +20,7 @@ a = ap.parse_args()
 import md_tracker as mt, md_core, char_core, dmg_core
 T = tempfile.mkdtemp(prefix="fox_ui_")
 for k in ("CONFIG_FILE", "STATE_FILE", "CHAR_STATE_FILE", "DMG_FILE", "SKILL_FIX_FILE", "DMG_RAW_FILE", "LOG_FILE", "ACCOUNTS_FILE",
-          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE"):
+          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "DP_FILE", "DP_KEY_FILE"):
     if hasattr(mt, k):
         setattr(mt, k, os.path.join(T, os.path.basename(getattr(mt, k))))
 if a.data:      # 計算機のスロットも、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)

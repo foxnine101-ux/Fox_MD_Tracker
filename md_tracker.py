@@ -44,6 +44,8 @@ STATE_FILE = os.path.join(HERE, "md_state.json")
 CHAR_STATE_FILE = os.path.join(HERE, "char_state.json")
 DMG_FILE = os.path.join(HERE, "被ダメ記録.json")
 OFFICIAL_FILE = os.path.join(HERE, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
+DP_FILE = os.path.join(HERE, "DP最新情報.json")            # Divine Pride(jRO)の最新の更新(この PC だけ。配らない)
+DP_KEY_FILE = os.path.join(HERE, "DPキー.json")          # {"apiKey": "..."}(この PC だけ。git に入れない)
 SANDBAG_FILE = os.path.join(HERE, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
 SANDBAG_MAX = 200
 SHARED_LINKS_FILE = os.path.join(HERE, "共有の結びつけ.json")      # 配布元が承認した、ゲームのアイテム番号 → ラトリオの名前 {v, links, t}
@@ -503,6 +505,8 @@ def start_live_server(core, lock, cfg):
                 with lock:
                     out = DMG.skill_view((q.get("name") or [""])[0]) if DMG is not None else {}
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/dp" and self._local_only():          # Divine Pride(jRO)の最新の更新
+                return self._send(200, json.dumps(DP.view() if DP is not None else {"off": True}, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/mobplaces":          # 「モンスター情報」タブ: 場所ごとのモンスター
                 with lock:
                     out = {"places": DMG.place_view() if DMG is not None else {}, "official": OFFICIAL.status() if OFFICIAL is not None else None}
@@ -683,6 +687,22 @@ def start_live_server(core, lock, cfg):
                     if OFFICIAL is None:
                         raise ValueError
                     started = OFFICIAL.start_map(str(b.get("file") or ""))
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, json.dumps({"ok": True, "started": started}), "application/json")
+            if self.path.split("?")[0] == "/api/dp" and self._local_only():
+                # Divine Pride: {enabled: bool} で入り切り、{run: 1} で「今すぐ調べる」
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 2000)).decode("utf-8"))
+                    if DP is None:
+                        raise ValueError
+                    started = False
+                    if "enabled" in b:
+                        DP.enabled = bool(b["enabled"])
+                        DP.save()
+                    if b.get("run"):
+                        started = DP.kick()
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
                 return self._send(200, json.dumps({"ok": True, "started": started}), "application/json")
@@ -979,6 +999,7 @@ STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 CHARS = None   # char_core.CharCore (あれば)
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
+DP = None  # dp_core.DivinePride (Divine Pride の jRO の最新の更新)
 OFFICIAL = None  # ro_official.Official (公式サイトから集めたモンスター情報)
 
 
@@ -1558,6 +1579,13 @@ def main():
             with lock:
                 return DMG.wanted()
         OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
+    try:
+        import dp_core
+        global DP
+        DP = dp_core.DivinePride(DP_FILE, DP_KEY_FILE, log=print)
+        DP.start()                         # キー(DPキー.json)があるときだけ、しばらくしてからゆっくり集める(裏の作業)
+    except Exception as e:
+        print("Divine Pride の取得が使えません:", e)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
     try:
         for _try in range(10):                          # Npcap を入れた直後や、インストール中は、すぐには始められないことがある → 少し待って何度か試す
