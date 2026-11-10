@@ -279,6 +279,7 @@ class CharCore(object):
             self.sim_links = data.get("sim_links") or {}
             if "stores" in data:                       # 記録の取り込み(records_sync)は stores を持たない → 持っているものを消さない
                 self.stores = data.get("stores") or {}
+            self._tidy_stores()
             self._migrate_sets()
             self.repair_sets()
             self.resolve_sim_all()
@@ -1162,9 +1163,14 @@ class CharCore(object):
                 if k and k != nk and lst.get("made"):
                     slots.pop(k, None)                          # 先に仮の枠(名前なし)へ書いたぶんは捨てる
                 k, lst["made"], lst["slot_title"] = nk, False, title
-            elif k is None:                                      # 名前が無い: 中身が似ている枠へ。無ければ新しい枠
-                k = self._match_slot(same, lst)
-                if k is None:
+            elif k is None or lst.get("made"):                   # 名前が無い: 中身が同じ枠へ。無ければ新しい枠(仮の枠のあとから、品が増えて本物の倉庫と分かったら寄せる)
+                m = self._match_slot(same, lst, skip=k)
+                if m is not None and k is not None and k != m:
+                    slots.pop(k, None)                          # 仮の枠は要らない
+                    lst["made"] = False
+                if m is not None:
+                    k = m
+                elif k is None:
                     n = 1
                     while "{}{}|?{}".format(pre, lst["inv"], n) in slots:
                         n += 1
@@ -1208,33 +1214,60 @@ class CharCore(object):
         by = v.get("by") or ""
         return by.split("@", 1)[1] if "@" in by else ""
 
-    @staticmethod
-    def _same_store(a, b):
-        """2つの倉庫の記録の中身が(品の番号+持ち物の位置で)半分以上重なるか。"""
-        def pairs(v):
-            return {(x.get("index"), x.get("itemId")) for x in v.get("items") or []} | {(x.get("inventoryIndex"), x.get("itemId")) for x in v.get("eq") or []}
-        pa, pb = pairs(a), pairs(b)
-        return len(pa) >= 3 and len(pb) >= 3 and len(pa & pb) / float(min(len(pa), len(pb))) >= 0.5
+    # 倉庫の中身の照合は「品の番号の集まり」で行う。index(持ち物の位置)は倉庫を開くたびに振り直される
+    # (同じメイン倉庫が 2 番から・769 番から…と届く)ので、位置を含めると同じ倉庫でも一致が 0% になり、倉庫が増えて見えた。
+    SAME_STORE = 0.8
 
     @staticmethod
-    def _match_slot(slots, lst):
-        """名前なしの一覧が、すでに覚えている倉庫のどれと同じか(品の番号+持ち物の位置が重なる割合)。見つからなければ None"""
-        def pairs(items, eq):
-            return {(x.get("index"), x.get("itemId")) for x in items} | {(x.get("inventoryIndex"), x.get("itemId")) for x in eq}
-        a = pairs(lst["items"], lst["eq"])
-        if len(a) < 3:
-            return None
-        best, bk = 0.6, None
+    def _ids(items, eq):
+        return {x.get("itemId") for x in items or [] if x.get("itemId")} | {x.get("itemId") for x in eq or [] if x.get("itemId")}
+
+    @staticmethod
+    def _sim(a, b):
+        """品の番号の集まり a・b の重なり(小さい方に対する割合)。どちらかが4種類より少ないときは 0(決めつけない)。"""
+        if len(a) < 4 or len(b) < 4:
+            return 0.0
+        return len(a & b) / float(min(len(a), len(b)))
+
+    @staticmethod
+    def _same_store(a, b):
+        """2つの倉庫の記録が、同じ倉庫の中身とみなせるか。"""
+        return CharCore._sim(CharCore._ids(a.get("items"), a.get("eq")), CharCore._ids(b.get("items"), b.get("eq"))) >= CharCore.SAME_STORE
+
+    @staticmethod
+    def _match_slot(slots, lst, skip=None):
+        """名前なしの一覧が、すでに覚えている倉庫のどれと同じか。見つからなければ None(skip=調べない枠のキー)"""
+        a = CharCore._ids(lst["items"], lst["eq"])
+        best, bk = CharCore.SAME_STORE, None
         for k, s in slots.items():
-            if s.get("inv") != lst["inv"]:
+            if k == skip or s.get("inv") != lst["inv"]:
                 continue
-            b = pairs(s.get("items") or [], s.get("eq") or [])
-            if not b:
-                continue
-            r = len(a & b) / float(min(len(a), len(b)))
+            r = CharCore._sim(a, CharCore._ids(s.get("items"), s.get("eq")))
             if r >= best:
                 best, bk = r, k
         return bk
+
+    def _tidy_stores(self):
+        """起動時に倉庫の記録を片づける: ①ワールドの印(srv#)が付く前の古いキーを新しいキーに寄せる(同じなら新しい方を残す)
+        ②名前なしの仮の枠のうち、名前つきの枠と同じ中身のものを捨てる。"""
+        for owner, slots in self.stores.items():
+            for k in [k for k in slots if "#" not in k]:
+                v = slots[k]
+                srv = self._slot_srv(v)
+                if not srv:
+                    continue
+                nk = srv + "#" + k
+                old = slots.pop(k)
+                old["srv"] = srv
+                cur = slots.get(nk)
+                if cur is None or (old.get("t") or 0) > (cur.get("t") or 0):
+                    slots[nk] = old
+                self.changed = True
+            for k in [k for k, v in slots.items() if v.get("inv") in (2, 3) and not v.get("title")]:
+                v = slots[k]
+                if any(kk != k and w.get("title") and w.get("inv") == v.get("inv") and self._slot_srv(w) == self._slot_srv(v) and self._same_store(v, w) for kk, w in slots.items()):
+                    slots.pop(k)
+                    self.changed = True
 
     def _verify_last(self, key, final=False):
         """自己採点: 倉庫を開いたとき届く「入っている数」(00F2)と、読めた一覧(品+装備)の数を比べる。
