@@ -403,11 +403,12 @@ function pickOpen(anchor, opts, cur, onPick, q0 = "") {
   if (innerHeight - r.bottom > 360 || r.top < 360) box.style.top = (r.bottom + 2) + "px"; else box.style.bottom = (innerHeight - r.top + 2) + "px";
   const inp = box.querySelector("input"), list = box.querySelector(".pick-list"), desc = box.querySelector(".pick-desc");
   const idx = opts.map((o) => pickNorm(o.t) + "\n" + pickNorm(o.k));
+  if (!opts.some((o) => o.d)) desc.style.display = "none"; else desc.classList.add("fixed");      // 説明のある一覧(カード・エンチャント)は、説明欄の高さを固定する
   let shown = [], at = 0;
   const mark = (scroll) => {
     [...list.querySelectorAll(".pick-o")].forEach((el, i) => el.classList.toggle("at", i === at));
     const el = list.querySelectorAll(".pick-o")[at]; if (scroll && el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
-    const o = shown[at]; desc.textContent = o && o.d ? o.d : ""; desc.style.display = o && o.d ? "" : "none";
+    const o = shown[at]; desc.textContent = o && o.d ? o.d : "";      // 説明欄は出し入れしない(高さが変わって、上に開いたポップアップの項目が動くため)
   };
   const draw = () => {
     const terms = inp.value.split(/[\s\u3000]+/).map(pickNorm).filter(Boolean);

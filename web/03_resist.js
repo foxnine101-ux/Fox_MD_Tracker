@@ -303,6 +303,7 @@ details.slotc{border-color:var(--slotc)}
 .pick-o.at{background:rgba(128,128,128,.25)}
 .pick-more{padding:4px 8px}
 .pick-desc{margin-top:4px;padding:4px 8px;border-top:1px solid var(--line);font-size:12px;white-space:normal;max-height:6em;overflow:auto}
+.pick-desc.fixed{height:6em;max-height:none}
 .scpick{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:2px 12px;margin:8px 0;max-height:260px;overflow:auto}
 .scpick label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .simc table{width:100%;border-collapse:collapse;font-size:13px}
