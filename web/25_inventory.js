@@ -144,7 +144,7 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
     e.where.set(where, w);
   };
   for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq, "all").forEach((r) => add(r, `${cn(c)} の持ち物`));
-  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || "倉庫（名前不明）"}${(sl.srv ?? srvOf(sl.by)) ? `（${String(sl.srv ?? srvOf(sl.by)).split(".").slice(-1)[0]}のワールド）` : ""}`));
+  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || `倉庫（名前不明${sl.by ? "・" + cn(sl.by) + "で開いた" : ""}）`}${(sl.srv ?? srvOf(sl.by)) ? `（${serverLabel(sl.srv ?? srvOf(sl.by))}）` : ""}`));
   const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);
