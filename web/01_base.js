@@ -97,7 +97,8 @@ function curServer() {
 }
 // タブの名前: 自分で付けた名前 → ログインのときに届いたワールド名(この PC で見ているとき) → サーバー1, 2…
 const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).name || "";
-const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
+const KNOWN_WORLD = { "18.182.57.231": "Noatun" };      // ログインで名前が届かなくても分かるワールド(露店専用。利用者が確認)
+const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || KNOWN_WORLD[ip] || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
 const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 // 見出しのアカウントのプルダウン(ワールドの横)。"" = すべて、"?" = アカウント不明、そのほかはアカウントID
 let ACC_SET = store.get("md_acc");          // null = 自分で選んでいない → いまログインしているキャラのアカウント(分からなければ すべて)。"" = すべて、"?" = アカウント不明
