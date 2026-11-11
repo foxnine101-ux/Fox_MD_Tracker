@@ -395,6 +395,7 @@ function render() {
   LAST_RENDER_MS = performance.now() - t0; LAST_RENDER_AT = Date.now();
   if (Math.abs(window.scrollY - y) > 1) window.scrollTo(0, y);      // 描き直しても、見ている位置は動かさない
   try { applyCharColors(); } catch (e) { /* 色は飾りなので、失敗しても画面は出す */ }
+  try { if (typeof sbdSync === "function") sbdSync(); } catch (e) { console.warn("sbdrawer", e); }      // 右端の引き出し(サンドバックマン・簡易)
   if (hs.tab === TAB && hs.v.some((x) => x > 0)) { const now = [...document.querySelectorAll(HSCROLL_SEL)]; if (now.length === hs.v.length) now.forEach((e, i) => { if (hs.v[i] > 0) e.scrollLeft = hs.v[i]; }); }      // 横の位置も戻す(同じタブで、枠の数が同じときだけ)
 }
 function renderNow() {
