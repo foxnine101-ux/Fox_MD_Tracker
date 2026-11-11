@@ -119,22 +119,21 @@ function renderSimChara() {
   store.set("md_simused", "1");
   for (const c of Object.values(SIMC.chars)) if (!c.saved) c.saved = simcClone(c.model);      // 前の版のキャラ: いまの中身を「保存した中身」とみなす
   const dirty = simcDirtySlot(ch);
+  const gl = lastChar(), gdis = gl && !SIMC.busy ? "" : "disabled";
   let h = simNav() + `<div class="panel simbox"><div class="opts">
       <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
         <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
-        <button id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットに保存してある内容を読み込みます（保存していない変更は消えます）">ロード</button>
-        <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
-        <button class="ghost" id="sccdel">消す</button>` : ""}
-      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
-      <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="中身が空のスロットを作ります。そのあと、下の「ゲームのキャラから」「ラトリオ」で中身を入れられます">＋ 空のスロットを作る</button>
-        <span class="muted" title="スロット = 計算機の作業用の枠。ゲームのキャラ = ゲームにログインしてこのツールが覚えた原本(職業・Lv・ステータス・習得スキル・装備)。スロットは原本とは独立したコピーで、入れたあとにスロットを変えても原本は変わりません">${lastChar() ? `ゲームのキャラ「${esc(cn(lastChar()))}」${nowChar() ? "（ログイン中）" : "（最後にログイン）"}から:` : "ゲームのキャラ: ゲームにログインすると使えます"}</span>
-        <button id="sccnewnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてが入った、新しいスロットを作ります（いまのスロットはそのまま。名前は キャラ名_Lv_職業_装備スロット）` : "ゲームにログインして、キャラを読み込むと使えます"}">＋ 新しいスロットに全部入れる</button>
-        ${ch ? `<button id="sccnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてを、いま選んでいるスロットに上書きして入れます` : "ゲームにログインすると使えます"}">⟳ このスロットに全部入れる</button>
-        <button id="sccnowequip" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}が着ている装備（メインとシャドウ）だけを、いま選んでいるスロットに入れます（職業・ステータス・スキルはそのまま）` : "ゲームにログインすると使えます"}">⟳ このスロットに装備だけ入れる</button>` : ""}</div>
+        <button id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットに保存してある内容を読み込みます（保存していない変更は消えます）">ロード</button>` : ""}
+      <button class="ghost" id="sccmk" title="スロットを作る・ゲームのキャラを入れる・複製・消す">スロット操作 ▾</button>
+      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかります）") : dirty ? `<span class="warn">＊ 未保存の変更あり</span>（「保存」で残す・「ロード」で戻す）` : esc(SIMC.msg)}</span></div>
+      <div hidden>
+        <button id="sccnewslot" ${SIMC.busy ? "disabled" : ""}></button>
+        <button id="sccnewnow" ${gdis}></button>
+        ${ch ? `<button id="sccnow" ${gdis}></button><button id="sccnowequip" ${gdis}></button><button id="sccdup"></button><button id="sccdel"></button>` : ""}
+      </div>
       ${SIMC.msg && /できません|取り込めません|作れません/.test(SIMC.msg) ? `<div class="busybar" style="background:#e5484d;color:#fff">${esc(SIMC.msg)}</div>` : ""}
-      ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}
-      ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「ロード」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「ロード」で戻せます。"}</div>` : ""}</div>`;
+      ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}</div>`;
   {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
     let game = `<div class="muted">ゲームにログインすると、このツールがキャラ（職業・Lv・ステータス・習得スキル・装備）を原本として覚えます。覚えたキャラから、新しいスロットを作れます。</div>`;
@@ -146,7 +145,7 @@ function renderSimChara() {
         <label>装備スロット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
         <label>シャドウのスロット <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
         <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>＋ このキャラで新しいスロットを作る</button></div>
-        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションも入ります（ラトリオに無い効果は、入らなかったものとして出ます）。ログイン中のキャラは、上の「このスロットに全部入れる」でも入れられます（そのときは選んだ装備スロットではなく、いま着ている装備が入ります）。</div>`;
+        <div class="muted" style="font-size:12px">職業・Lv・ステータス・習得スキル・装備（ランダムオプション込み）が入ります。</div>`;
     }
     const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
@@ -202,6 +201,14 @@ function renderSimChara() {
   $("#view").innerHTML = h;
   bindSimNav();
   const g = (id) => $("#" + id);
+  if (g("sccmk")) g("sccmk").onclick = (e) => {      // スロット操作のメニュー(中身は、隠してあるボタンを押す)
+    const r = e.currentTarget.getBoundingClientRect(), who = gl ? `ゲームのキャラ「${cn(gl)}」${nowChar() ? "（ログイン中）" : "（最後にログイン）"}から` : "",
+      press = (id) => () => { const b = g(id); if (b && !b.disabled) b.click(); }, items = [{ cap: "スロット" }, { label: "＋ 空のスロットを作る", act: press("sccnewslot") }];
+    if (ch) items.push({ label: "＋ このスロットを複製", act: press("sccdup") }, { label: "このスロットを消す", act: press("sccdel") });
+    if (gl) { items.push("-", { cap: who }, { label: "＋ 新しいスロットに全部入れる", act: press("sccnewnow") }); if (ch) items.push({ label: "⟳ このスロットに全部入れる", act: press("sccnow") }, { label: "⟳ このスロットに装備だけ入れる", act: press("sccnowequip") }); }
+    else items.push("-", { cap: "ゲームにログインすると、ゲームのキャラから入れられます" });
+    showCtx(r.left, r.bottom + 2, items);
+  };
   if (g("sccsel")) g("sccsel").onchange = (e) => { simcSelect(e.target.value); render(); };
   if (g("sccname")) g("sccname").onchange = (e) => { ch.name = e.target.value.trim() || "キャラ"; simcSave(); e.target.blur(); render(); };
   if (g("sccnew")) g("sccnew").onclick = (e) => { const r = e.target.getBoundingClientRect(); showCtx(r.left, r.bottom + 4, [{ cap: "職業を選ぶ" }].concat(ENG.jobs.slice().reverse().slice(0, 40).map(([v, t]) => ({ label: t, act: () => simcNew(v, t) })))); };
