@@ -402,7 +402,7 @@ function pickOpen(anchor, opts, cur, onPick, q0 = "") {
   box.style.width = W + "px"; box.style.left = Math.max(8, Math.min(r.left, innerWidth - W - 8)) + "px";
   if (innerHeight - r.bottom > 360 || r.top < 360) box.style.top = (r.bottom + 2) + "px"; else box.style.bottom = (innerHeight - r.top + 2) + "px";
   const inp = box.querySelector("input"), list = box.querySelector(".pick-list"), desc = box.querySelector(".pick-desc");
-  const idx = opts.map((o) => pickNorm(o.t) + "\n" + pickNorm(o.k));
+  const idx = opts.map((o) => pickNorm(o.t) + "\n" + pickNorm(o.k) + "\n" + pickNorm(o.g));      // g = 見出し(エンチャントの NPC・グループ名)。見出しの名前でも探せる
   if (!opts.some((o) => o.d)) desc.style.display = "none"; else desc.classList.add("fixed");      // 説明のある一覧(カード・エンチャント)は、説明欄の高さを固定する
   let shown = [], at = 0;
   const mark = (scroll) => {
@@ -414,7 +414,8 @@ function pickOpen(anchor, opts, cur, onPick, q0 = "") {
     const terms = inp.value.split(/[\s\u3000]+/).map(pickNorm).filter(Boolean);
     const all = []; for (let i = 0; i < opts.length; i++) if (terms.every((t) => idx[i].includes(t))) all.push(opts[i]);
     shown = all.slice(0, 400); at = terms.length ? 0 : Math.max(0, shown.findIndex((o) => o.v === cur));
-    list.innerHTML = (shown.map((o, i) => `<div class="pick-o${o.v === cur ? " cur" : ""}" data-i="${i}">${esc(o.t)}</div>`).join("") || `<div class="muted pick-more">見つかりません</div>`)
+    let pg = "";
+    list.innerHTML = (shown.map((o, i) => { const gh = o.g && o.g !== pg ? `<div class="pick-g">${esc(o.g)}</div>` : ""; if (o.g) pg = o.g; return `${gh}<div class="pick-o${o.v === cur ? " cur" : ""}" data-i="${i}">${esc(o.t)}</div>`; }).join("") || `<div class="muted pick-more">見つかりません</div>`)
       + (all.length > shown.length ? `<div class="muted pick-more">ほか ${all.length - shown.length} 件（名前を入れて絞ってください）</div>` : "");
     mark(true);
   };

@@ -300,6 +300,7 @@ details.slotc{border-color:var(--slotc)}
 .pick-list{max-height:280px;overflow:auto;margin-top:4px}
 .pick-o{padding:2px 8px;border-radius:4px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pick-o.cur{font-weight:700}
+.pick-g{padding:4px 8px 2px;margin-top:4px;font-size:11px;font-weight:700;color:var(--muted,#888);border-top:1px solid var(--line);white-space:normal}
 .pick-o.at{background:rgba(128,128,128,.25)}
 .pick-more{padding:4px 8px}
 .pick-desc{margin-top:4px;padding:4px 8px;border-top:1px solid var(--line);font-size:12px;white-space:normal;max-height:6em;overflow:auto}

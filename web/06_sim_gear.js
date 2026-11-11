@@ -37,7 +37,7 @@ function simcCardOpts(region, itemId) {   // その装備の4つの枠(カード
   try { ENG.x.card(region, itemId); } catch (e) { console.warn("card opts", region, itemId, e); return [[], [], [], []]; }
   return ENG.cache[key] = [1, 2, 3, 4].map((n) => {
     const sel = d.getElementById(`OBJID_${SIMC_PREFIX[region]}_CARD_${n}`);
-    const o = sel ? [...sel.options].map((x) => { const c = C[+x.value]; return { v: +x.value, t: x.text, k: c ? String(c[3] || "") : "", d: c && +x.value ? String(c[4] || "").replace(/<br\s*\/?>/gi, " ／ ").replace(/<[^>]+>/g, "") : "" }; }) : [];
+    const o = sel ? [...sel.options].map((x) => { const c = C[+x.value]; return { v: +x.value, t: x.text, g: x.parentElement && x.parentElement.tagName === "OPTGROUP" ? String(x.parentElement.label || "") : "", k: c ? String(c[3] || "") : "", d:c && +x.value ? String(c[4] || "").replace(/<br\s*\/?>/gi, " ／ ").replace(/<[^>]+>/g, "") : "" }; }) : [];
     const z = o.findIndex((x) => x.v === 0); if (z > 0) o.unshift(o.splice(z, 1)[0]);
     return o;
   });
