@@ -335,8 +335,15 @@ window.addEventListener("error", (e) => reportJsError(e.message, e.error && e.er
 window.addEventListener("unhandledrejection", (e) => reportJsError((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
 const HSCROLL_SEL = ".tablewrap, .dm-box, #stp, .cmpbox";       // 横にスクロールできる枠(描き直すと左端に戻ってしまうので、位置を覚えて戻す)
 let LAST_RENDER_MS = 0, LAST_RENDER_AT = 0, RENDER_LATER = 0;      // 直前の描き直しにかかった時間・時刻(重い画面は、自動の読み直しで頻繁に描き直さないため)
+let RENDER_HOLD = 0, RENDER_TAB = "";      // 描き直したあと、画面の高さを少しのあいだ保つタイマー・前に描いたタブ
 function render() {
   const t0 = performance.now(), y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
+  // 描き直した直後は、あとから計算で埋まる表(比べる表・ステ振りなど)がまだ空で、ページ全体が一瞬短くなる → 見ていた位置が上に押し戻されて、埋まると戻る。
+  // そこで、描き直す前の高さを最小の高さとして保ち、埋まり終わるころ(2.5秒後)に外す
+  const view = document.getElementById("view"), keepH = view && RENDER_TAB === TAB && view.offsetHeight > 600 ? view.offsetHeight : 0;      // 別のタブに替えたときは保たない(短いタブの下に余白が残るため)
+  if (view && RENDER_TAB !== TAB) { clearTimeout(RENDER_HOLD); view.style.minHeight = ""; }
+  RENDER_TAB = TAB;
+  if (keepH) { view.style.minHeight = keepH + "px"; clearTimeout(RENDER_HOLD); RENDER_HOLD = setTimeout(() => { const v = document.getElementById("view"); if (v) v.style.minHeight = ""; }, 2500); }
   try { renderNow(); } catch (e) {
     console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
