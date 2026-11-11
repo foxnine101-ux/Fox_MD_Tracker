@@ -31,6 +31,30 @@ function simcItemOpts(jobId, region, any) {    // その職業が、その場所
   if (!any && out.length === 1) return ENG.cache[key] = simcItemOpts(jobId, region, true);      // その職業には1つも無い場所(ノービスのシャドウなど)は、制限を外して出す
   return ENG.cache[key] = out;
 }
+// ---- 装備の選択欄: その職業で選んだことのある装備を上に出す(50音順だと、使わない装備が上に来て選びにくいため) ----
+// 覚えるもの: 選んだ装備(localStorage md_itemuse = {職業: {装備番号: {n: 回数, t: 最後に選んだ時刻}}})+ 保存してある同じ職業のスロットで着けている装備(回数 0)
+const simcUseAll = () => { try { return JSON.parse(store.get("md_itemuse") || "{}") || {}; } catch (e) { return {}; } };
+function simcItemUsed(jobId, id) {      // 装備を選んだ(or 着せた)ことを覚える
+  if (!id || !jobId) return;
+  const A = simcUseAll(), J = A[jobId] = A[jobId] || {}, u = J[id] = J[id] || { n: 0, t: 0 };
+  u.n++; u.t = Date.now();
+  const keys = Object.keys(J); if (keys.length > 400) keys.sort((x, y) => (J[x].t || 0) - (J[y].t || 0)).slice(0, keys.length - 400).forEach((k) => delete J[k]);
+  store.set("md_itemuse", JSON.stringify(A));
+}
+function simcItemOptsUsed(m, region) {
+  const base = simcItemOpts(m.status.jobId, region), J = simcUseAll()[m.status.jobId] || {}, seed = {};
+  for (const c of Object.values(SIMC.chars || {})) {      // 保存してある、同じ職業のスロットで着けている装備
+    const mm = c.model; if (!mm || !mm.status || mm.status.jobId !== m.status.jobId) continue;
+    const id = region >= 14 ? (((mm.shadowEquip || {}).itemId || [])[region] || 0) : ((mm.equip || [])[region] || 0);
+    if (id) seed[id] = true;
+  }
+  const rank = (v) => J[v] ? J[v].t || 1 : seed[v] ? 0.5 : 0;
+  const none = base.filter((o) => o.t === "（なし）"), used = [], rest = [];
+  for (const o of base) { if (o.t === "（なし）") continue; (rank(o.v) ? used : rest).push(o); }
+  if (!used.length) return base;
+  used.sort((a, b) => rank(b.v) - rank(a.v) || ((J[b.v] || {}).n || 0) - ((J[a.v] || {}).n || 0));
+  return none.concat(used.map((o) => Object.assign({}, o, { g: "この職業で選んだ装備（新しい順）" })), rest.map((o) => Object.assign({}, o, { g: "ほかの装備（50音順）" })));
+}
 function simcCardOpts(region, itemId) {   // その装備の4つの枠(カード・エンチャント)の候補。ラトリオに枠を作らせて、できた選択肢を読む
   const key = "c" + region + ":" + itemId; if (ENG.cache[key]) return ENG.cache[key];
   const d = ENG.frame.contentDocument, C = ENG.reg.CardObjNew || [];

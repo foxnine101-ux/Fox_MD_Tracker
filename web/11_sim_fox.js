@@ -450,7 +450,7 @@ function renderSimChara() {
       pickOpen(el, hist, null, (sid, o) => wearAsk(sid, shadow, o.label));
     });
     V.querySelectorAll("[data-xk]").forEach((el) => el.onclick = () => { const id = +el.dataset.xk, on = simcXKinds(), i = on.indexOf(id); if (i >= 0) on.splice(i, 1); else on.push(id); store.set("md_simx", JSON.stringify(on)); SIMC.res = null; render(); });
-    V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOpts(m.status.jobId, region), simcItemAt(m, region), (v) => { simcSetItem(m, region, v); touched(region); changed(); }); });
+    V.querySelectorAll("[data-item]").forEach((el) => el.onclick = () => { const region = +el.dataset.item; pickOpen(el, simcItemOptsUsed(m, region), simcItemAt(m, region), (v) => { simcItemUsed(m.status.jobId, simcIsNone(region, v) ? 0 : v); simcSetItem(m, region, v); touched(region); changed(); }); });
     V.querySelectorAll("[data-card]").forEach((el) => el.onclick = () => { const [region, i] = two(el, "card"), cr = SIMC_CARD[region][i]; pickOpen(el, simcCardOpts(region, m.equip[region])[i], m.card[cr] || 0, (v) => { m.card[cr] = v; touched(region); changed(); }); });
     V.querySelectorAll("[data-rf]").forEach((el) => el.onchange = () => { simcSetRefine(m, +el.dataset.rf, +el.value); touched(+el.dataset.rf); changed(); });
     V.querySelectorAll("[data-tr]").forEach((el) => el.onchange = () => { const tr = SIMC_TRANS[+el.dataset.tr]; m[tr[0]][tr[1]] = +el.value; touched(0); changed(); });
