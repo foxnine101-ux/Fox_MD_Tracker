@@ -121,7 +121,7 @@ function renderSimChara() {
   const dirty = simcDirtySlot(ch);
   const gl = lastChar(), gdis = gl && !SIMC.busy ? "" : "disabled";
   let h = simNav() + `<div class="panel simbox"><div class="opts">
-      <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label>
+      <label>スロット <select id="sccsel">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option>（まだありません）</option>`}</select></label><button id="sccplus" ${SIMC.busy ? "disabled" : ""} title="新しい空のスロットを作ります（名前は自動で付きます。あとで「名前」欄で変えられます）" style="padding:2px 9px">＋</button>
       ${ch ? `<label>名前 <input type="text" id="sccname" value="${esc(ch.name)}" style="width:14em"></label>
         <button id="sccsavebtn" ${dirty ? "" : "disabled"} title="いまの内容を、このスロットに保存します">保存</button>
         <button id="sccrevert" ${dirty ? "" : "disabled"} title="このスロットに保存してある内容を読み込みます（保存していない変更は消えます）">ロード</button>` : ""}
@@ -151,7 +151,7 @@ function renderSimChara() {
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
         <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
         ${ch ? `<button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="いまのスロットを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button>` : ""}</div>`;
-    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "ゲームのキャラから作る（原本）", game, ` <span class="muted">（ゲームにログインして、このツールが覚えたキャラ。スロットはそのコピーで、独立しています）</span>`, false)}${simcFold("mkrat", "ラトリオ", rat, ` <span class="muted">（1から作る・保存URL やセーブファイルを読み込む・保存URL を書き出す）</span>`, false)}</div>`;
+    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "ゲームのキャラから作る（原本）", game, ` <span class="muted">（ゲームにログインして、このツールが覚えたキャラ。スロットはそのコピーで、独立しています）</span>`, false)}${simcFold("mkrat", "ラトリオ連携", rat, ` <span class="muted">（1から作る・保存URL やセーブファイルを読み込む・保存URL を書き出す）</span>`, false)}</div>`;
   }
   if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
     h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
@@ -171,7 +171,7 @@ function renderSimChara() {
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
-    h += `<div class="panel empty">上の「空のスロットを作る」を押すか、「ゲームのキャラから作る」「ラトリオ」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">上の「＋」を押すか、「ゲームのキャラから作る」「ラトリオ連携」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
     h += `<div class="panel empty">${ENG.err ? "計算係（ROラトリオHub）を起動できませんでした。上の「もう一度試す」を押してください。" : "計算係（ROラトリオHub）を起動しています…<br>初回は、ラトリオの部品を全部読み込むので1分ほどかかることがあります。2回目からは速くなります。"}</div>`;
   } else {
@@ -201,12 +201,13 @@ function renderSimChara() {
   $("#view").innerHTML = h;
   bindSimNav();
   const g = (id) => $("#" + id);
+  if (g("sccplus")) g("sccplus").onclick = () => { const b = g("sccnewslot"); if (b && !b.disabled) b.click(); };
   if (g("sccmk")) g("sccmk").onclick = (e) => {      // スロット操作のメニュー(中身は、隠してあるボタンを押す)
     const r = e.currentTarget.getBoundingClientRect(), who = gl ? `ゲームのキャラ「${cn(gl)}」${nowChar() ? "（ログイン中）" : "（最後にログイン）"}から` : "",
-      press = (id) => () => { const b = g(id); if (b && !b.disabled) b.click(); }, items = [{ cap: "スロット" }, { label: "＋ 空のスロットを作る", act: press("sccnewslot") }];
-    if (ch) items.push({ label: "＋ このスロットを複製", act: press("sccdup") }, { label: "このスロットを消す", act: press("sccdel") });
-    if (gl) { items.push("-", { cap: who }, { label: "＋ 新しいスロットに全部入れる", act: press("sccnewnow") }); if (ch) items.push({ label: "⟳ このスロットに全部入れる", act: press("sccnow") }, { label: "⟳ このスロットに装備だけ入れる", act: press("sccnowequip") }); }
-    else items.push("-", { cap: "ゲームにログインすると、ゲームのキャラから入れられます" });
+      press = (id) => () => { const b = g(id); if (b && !b.disabled) b.click(); }, items = [];
+    if (ch) items.push({ cap: "スロット" }, { label: "＋ このスロットを複製", act: press("sccdup") }, { label: "このスロットを消す", act: press("sccdel") });
+    if (gl) { if (items.length) items.push("-"); items.push({ cap: who }, { label: "＋ 新しいスロットに全部入れる", act: press("sccnewnow") }); if (ch) items.push({ label: "⟳ このスロットに全部入れる", act: press("sccnow") }, { label: "⟳ このスロットに装備だけ入れる", act: press("sccnowequip") }); }
+    else { if (items.length) items.push("-"); items.push({ cap: "ゲームにログインすると、ゲームのキャラから入れられます" }); }
     showCtx(r.left, r.bottom + 2, items);
   };
   if (g("sccsel")) g("sccsel").onchange = (e) => { simcSelect(e.target.value); render(); };
@@ -238,7 +239,7 @@ function renderSimChara() {
     }
   }
   if (g("sccnewslot")) g("sccnewslot").onclick = async () => {
-    const v = prompt("新しいスロットの名前", "新しいスロット"); if (!v || !v.trim()) return;
+    const v = simcAutoName("スロット");
     SIMC.busy = "新しいスロットを作っています…"; render();
     try {
       await engInit(); if (!ENG.ready) throw new Error(ENG.err || "計算係を起動できませんでした");
@@ -247,7 +248,7 @@ function renderSimChara() {
       const id = "c" + Date.now().toString(36);
       SIMC.chars[id] = { name: v.trim().slice(0, 40), model, saved: simcClone(model) };
       simcSelect(id); await simcPut(id);
-      SIMC.msg = nowChar() ? "空のスロットを作りました。「このスロットに全部入れる」で、ゲームのキャラを入れられます。" : "空のスロットを作りました。";
+      SIMC.msg = `「${v}」を作りました（名前は「名前」欄で変えられます）。${nowChar() ? "「スロット操作」から、ゲームのキャラを入れられます。" : ""}`;
     } catch (e) { SIMC.msg = "作れませんでした: " + e.message; }
     SIMC.busy = ""; render();
   };
@@ -282,10 +283,10 @@ function renderSimChara() {
   if (g("sccexpclose")) g("sccexpclose").onclick = () => { SIMC.exp = null; render(); };
   if (g("sccexpurl")) g("sccexpurl").onfocus = (e) => e.target.select();
   if (g("sccdup")) g("sccdup").onclick = () => {
-    const v = prompt("新しいスロットの名前", ch.name + " (2)"); if (!v || !v.trim()) return;
+    const v = simcAutoName(ch.name.replace(/ \(\d+\)$/, ""), true);
     const id = "c" + Date.now().toString(36);
     SIMC.chars[id] = { name: v.trim().slice(0, 40), model: simcClone(ch.model), saved: simcClone(ch.model) };
-    simcSelect(id); simcSave(); SIMC.msg = "新しいスロットに保存しました。"; render();
+    simcSelect(id); simcSave(); SIMC.msg = `「${v}」として複製しました（名前は「名前」欄で変えられます）。`; render();
   };
   if (g("sccdel")) g("sccdel").onclick = async (e) => {
     if (e.target.dataset.ok !== "1") { e.target.dataset.ok = "1"; e.target.textContent = "本当に消す？"; return; }

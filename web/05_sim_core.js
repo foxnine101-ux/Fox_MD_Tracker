@@ -243,6 +243,12 @@ async function engLoadData(q) {          // ラトリオの保存データ(URL �
 }
 const SIMC = { chars: null, cur: store.get("md_simchar") || "", res: null, busy: "", msg: "", saveT: null, need: null, needT: null, pick: null, sb: { methods: null, res: null, sig: "", err: "", mt: null, item: null, chain: null, recId: "", resF: null, fsig: "", kind: "b", expInfo: null }, dmgBase: null, fox: { char: "", set: "", shadow: "" }, cmp: [], cmpRes: null, cmpT: null, sbCmp: null, sbCmpT: null, cmpAll: false, opt: { aspd: true, cast: true, target: 193, mainSel: ["now"], shSel: ["now"], busy: false, res: null, prog: "", min: { agi: 1, dex: 1, int: 1 } }, multi: null, multiBusy: "", exp: null, bf: { tab: "on", sub: "", purpose: "", q: "", onOnly: false }, bfBusy: false, bfErr: "", tagBusy: false };
 const simcCur = () => (SIMC.chars || {})[SIMC.cur];
+// 新しいスロットの名前を自動で付ける(「スロット 3」など。同じ名前が無いように番号を進める。複製は「名前 (2)」)。名前はあとから「名前」欄で変えられる
+function simcAutoName(base, dup) {
+  const names = new Set(Object.values(SIMC.chars || {}).map((c) => c.name));
+  if (dup) { for (let n = 2; ; n++) { const v = `${base} (${n})`; if (!names.has(v)) return v; } }
+  for (let n = names.size + 1; ; n++) { const v = `${base} ${n}`; if (!names.has(v)) return v; }
+}
 async function simcLoad() {
   SIMC.chars = await fetch("/api/simchars").then((r) => (r.ok ? r.json() : Promise.reject(new Error("read")))).then((j) => { SIMC.loadErr = ""; return j; }).catch(() => { SIMC.loadErr = SIMC.chars ? "" : "計算機のスロットを読めませんでした。"; return SIMC.chars || null; });      // 読めなかったとき、空の一覧に見せない(新しく作って、ほかを消さないように)
   if (SIMC.chars && !SIMC.chars[SIMC.cur]) SIMC.cur = Object.keys(SIMC.chars)[0] || "";
