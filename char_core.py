@@ -1172,8 +1172,11 @@ class CharCore(object):
                     k = m
                 elif k is None:
                     n = 1
-                    while "{}{}|?{}".format(pre, lst["inv"], n) in slots:
-                        n += 1
+                    if lst["inv"] == 2 and not any(v.get("inv") == 2 and v.get("title") for v in same.values()):
+                        pass                                    # このワールドに名前つきの普通の倉庫が1つも無い(例: ノアトゥーンの倉庫は名前が届かない)。名前なしは1つの倉庫として扱い、増やさない
+                    else:
+                        while "{}{}|?{}".format(pre, lst["inv"], n) in slots:
+                            n += 1
                     k, lst["made"] = "{}{}|?{}".format(pre, lst["inv"], n), True
             lst["slot"] = k
             if not title:
@@ -1262,6 +1265,21 @@ class CharCore(object):
                 cur = slots.get(nk)
                 if cur is None or (old.get("t") or 0) > (cur.get("t") or 0):
                     slots[nk] = old
+                self.changed = True
+            for srv in {self._slot_srv(v) for v in slots.values()}:       # 名前つきの普通の倉庫が無いワールドの名前なし断片は、1つの倉庫にまとめる(品は最も多いもの・装備は最も多いもの)
+                if any(v.get("inv") == 2 and v.get("title") for v in slots.values() if self._slot_srv(v) == srv):
+                    continue
+                fr = [(k, v) for k, v in slots.items() if v.get("inv") == 2 and not v.get("title") and self._slot_srv(v) == srv]
+                if len(fr) < 2:
+                    continue
+                best_i = max((v for _, v in fr), key=lambda v: len(v.get("items") or []))
+                best_e = max((v for _, v in fr), key=lambda v: len(v.get("eq") or []))
+                merged = dict(max((v for _, v in fr), key=lambda v: v.get("t") or 0))
+                merged["items"], merged["eq"] = best_i.get("items") or [], best_e.get("eq") or []
+                merged.pop("chk", None)
+                for k, _ in fr:
+                    slots.pop(k)
+                slots[(srv + "#" if srv else "") + "2|?1"] = merged
                 self.changed = True
             for k in [k for k, v in slots.items() if v.get("inv") in (2, 3) and not v.get("title")]:
                 v = slots[k]

@@ -64,6 +64,12 @@ function invStoreSlots(c) {
   for (const x of normal) { const i = invSlotNo(x.title); if (i >= 0 && i < 4 && !arr[i]) arr[i] = x; else rest.push(x); }      // 名前で枠を決める(メイン倉庫=1つ目・サブ倉庫1=2つ目 …)
   for (const x of rest) { const j = arr.indexOf(null); if (j >= 0) arr[j] = x; else arr.push(x); }
   const DEF = ["メイン倉庫", "サブ倉庫1", "サブ倉庫2", "サブ倉庫3"];
+  if (normal.length && !normal.some((x) => x.title)) {      // 名前が1つも届かないワールド(ノアトゥーンなど): 名前なしの倉庫を、そのワールドの倉庫として1つだけ出す
+    const x = normal[0], wn = (typeof worldName === "function" && worldName(x.srv || (sv || ""))) || "";
+    slots.push({ id: x.k, label: `${wn ? wn + "の" : ""}倉庫`, st: x });
+    slots.push(w[0] ? { id: w[0].k, label: "W倉庫", st: w[0] } : { id: "w", label: "W倉庫", st: null });
+    return slots;
+  }
   arr.forEach((x, i) => slots.push(x ? { id: x.k, label: x.title || `倉庫${i + 1}（名前不明）`, st: x } : { id: "n" + i, label: DEF[i] || `倉庫${i + 1}`, st: null }));
   slots.push(w[0] ? { id: w[0].k, label: "W倉庫", st: w[0] } : { id: "w", label: "W倉庫", st: null });
   if (guild[0]) slots.push({ id: guild[0].k, label: "ギルド倉庫", st: guild[0] });
