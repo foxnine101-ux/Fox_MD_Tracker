@@ -79,6 +79,8 @@ function buildGroups() {
 const SRV_RE = /@(\d+\.\d+\.\d+\.\d+)$/;
 const cn = (k) => String(k ?? "").replace(SRV_RE, "");
 const srvOf = (k) => (String(k ?? "").match(SRV_RE) || [])[1] || "";
+// 別のワールドに同じ名前のキャラがいるときだけ、ワールド名を添える(ワールドを絞らずに並べる画面で、どちらか分からなくなるため)
+const cnU = (k) => { const n = cn(k); return Object.keys((DATA && DATA.chars) || {}).some((o) => o !== k && cn(o) === n) && srvOf(k) ? `${n}（${serverLabel(srvOf(k))}）` : n; };
 let SERVER = "";            // プルダウンで選んだワールド(""= いちばん最近ログインしたワールド)。開き直すと最新に戻る
 let LATEST_SEEN = "";       // 前に見た「最新ログインのワールド」(変わったら、選んでいたワールドから最新に切りかえる)
 function serverList() {        // 記録にあるサーバー(IPの順。"" = 未確認は最後)
@@ -107,7 +109,7 @@ function curAcc() {
   const c = nowChar() || lastChar(), a = c ? accOfChar(c) : null; return a ? String(a) : "";
 }
 const inAccount = (k) => { const A = curAcc(); return !A || (A === "?" ? !accOfChar(k) : String(accOfChar(k)) === A); };
-const isHiddenChar = (k, hidden) => hidden.has(k) || hidden.has(cn(k));     // 前の版で隠した「名前」だけの印も効く
+const isHiddenChar = (k, hidden) => hidden.has(k) || (hidden.has(cn(k)) && !Object.keys((DATA && DATA.chars) || {}).some((o) => o !== k && cn(o) === cn(k)));     // 前の版で隠した「名前」だけの印も効く
 function renderWhoChar() {      // 画面上部: いまログインしているキャラ(いなければ、最後にログインしていたキャラ)
   const el = $("#whochar"); if (!el) return;
   const c = lastChar(), live = !!nowChar(), st = c ? ((((DATA.equip || {}).chars || {})[c] || {}).status || {}) : {};

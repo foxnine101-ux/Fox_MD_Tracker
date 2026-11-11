@@ -136,7 +136,7 @@ function invTable(rows) {
 }
 function invAcct(owner) {      // 倉庫の持ち主(アカウント番号)→ 画面に出す呼び名
   const n = Object.entries((DATA && DATA.chars) || {}).filter(([k, c]) => String(c.account) === String(owner)).map(([k]) => k)[0];
-  return n ? `${cn(n)}のアカウント` : cn(String(owner));
+  return n ? `${cnU(n)}のアカウント` : cn(String(owner));
 }
 function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ品は合計して、どこに何個あるかを並べる)
   if (!INV_Q.trim()) return `<div class="muted" style="padding:12px">探したい品の名前を入れてください（例: 赤ポーション）。全キャラの持ち物と、すべての倉庫から探します。</div>`;
@@ -149,8 +149,8 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
     if (r.eq) { const t = r.name.endsWith(key) ? r.name.slice(0, r.name.length - key.length).trim() : ""; if (t) w.tag.push(t); }
     e.where.set(where, w);
   };
-  for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq, "all").forEach((r) => add(r, `${cn(c)} の持ち物`));
-  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || `倉庫（名前不明${sl.by ? "・" + cn(sl.by) + "で開いた" : ""}）`}${(sl.srv ?? srvOf(sl.by)) ? `（${serverLabel(sl.srv ?? srvOf(sl.by))}）` : ""}`));
+  for (const [c, C] of Object.entries(INV.chars || {})) invRows(C.has ? C.items : [], C.eq, "all").forEach((r) => add(r, `${cnU(c)} の持ち物`));
+  for (const [owner, st] of Object.entries(INV.stores || {})) for (const sl of Object.values(st)) invRows(sl.items, sl.eq, "all").forEach((r) => add(r, `${invAcct(owner)}　${sl.title || `倉庫（名前不明${sl.by ? "・" + cnU(sl.by) + "で開いた" : ""}）`}${(sl.srv ?? srvOf(sl.by)) ? `（${serverLabel(sl.srv ?? srvOf(sl.by))}）` : ""}`));
   const rows = [...g.values()].sort((a, b) => a.name.localeCompare(b.name, "ja", { numeric: true }));
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);
@@ -183,7 +183,7 @@ function renderInventory(chars) {
     const s = slots.find((x) => x.id === INVSUB);
     head = bar(`<span class="muted">${esc(cn(INV_CHAR))} のアカウントの倉庫</span>`);
     if (!s || !s.st) body = `<div class="panel empty">「${esc(s ? s.label : "")}」は、まだ読めていません。<br>ゲームで、その倉庫を開くと記録されます（ツールを動かしたまま）。</div>`;
-    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cn(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
+    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cnU(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
   }
   const catBar = INVSUB === "all" ? "" : `<div class="simnav" id="invcat">${INV_CATS.map(([k, l]) => `<button data-invcat="${k}" class="${INV_CAT === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
   $("#view").innerHTML = `${nav}${head}${catBar}${body}`;

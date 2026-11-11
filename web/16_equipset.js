@@ -46,9 +46,9 @@ function renderGSets(chars) {
           <span class="eq-btns">${n && !isShadow ? `<button class="ghost" data-dmg="${esc(sid)}">被ダメを見る</button>` : ""}
           <button class="ghost" data-open="${esc(sid)}">${open ? "とじる" : "中身"}</button>
           <button class="ghost" data-del="${esc(sid)}">消す</button></span></div>
-        <div class="eq-sub muted">使ったキャラ: ${cs.length ? esc(cs.map(([c]) => cn(c)).join("、")) : "-"}</div>
+        <div class="eq-sub muted">使ったキャラ: ${cs.length ? esc(cs.map(([c]) => cnU(c)).join("、")) : "-"}</div>
         ${st.sim && simUnlinked(st).length ? `<div class="eq-sub"><span class="muted">ゲームのアイテムと結びついていないもの（耐性のまとめに入りません）:</span> ${simUnlinked(st).map((nm) => `<button class="ghost simlink" data-simlink="${esc(nm)}" title="ゲームのアイテムの一覧から選んで結びつけます（次からは自動）">${esc(nm)}</button>`).join("")}</div>` : ""}
-        ${open ? itemsTable(st.items || [], !!st.sim) + cs.map(([c, v]) => `<div class="eq-use"><b>${esc(cn(c))}</b><span class="muted">最後に着た ${when(v.last)}</span></div>${statusHtmlEq(v.status)}`).join("") : ""}</div>`;
+        ${open ? itemsTable(st.items || [], !!st.sim) + cs.map(([c, v]) => `<div class="eq-use"><b>${esc(cnU(c))}</b><span class="muted">最後に着た ${when(v.last)}</span></div>${statusHtmlEq(v.status)}`).join("") : ""}</div>`;
     }
     return x;
   };
