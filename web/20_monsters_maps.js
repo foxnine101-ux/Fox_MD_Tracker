@@ -67,7 +67,7 @@ async function monpGuide() {
   const w = MONP.place;
   let g; try { g = await mapvJson("/api/placeguide?where=" + encodeURIComponent(w)); } catch (e) { return; }
   if (w !== MONP.place || !$("#monguide")) return;
-  el.innerHTML = monpGuideHtml(g);
+  setHtmlKeepFolds(el, monpGuideHtml(g));
 }
 function monpGuideHtml(g) {
   const D = g.damage || {}, T = D.total || 0;

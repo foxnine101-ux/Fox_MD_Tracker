@@ -337,6 +337,40 @@ window.addEventListener("error", (e) => reportJsError(e.message, e.error && e.er
 window.addEventListener("unhandledrejection", (e) => reportJsError((e.reason && e.reason.message) || e.reason, e.reason && e.reason.stack));
 const HSCROLL_SEL = ".tablewrap, .dm-box, #stp, .cmpbox";       // 横にスクロールできる枠(描き直すと左端に戻ってしまうので、位置を覚えて戻す)
 let LAST_RENDER_MS = 0, LAST_RENDER_AT = 0, RENDER_LATER = 0;      // 直前の描き直しにかかった時間・時刻(重い画面は、自動の読み直しで頻繁に描き直さないため)
+// 描き直すと、<details>(折りたたみ)は作り直されて閉じてしまう → 開いていたものは、同じ画面(タブ・サブタブ)の描き直しなら開いたままにする。
+// 目印 = data-fold / data-ev / id / 見出しの文字の先頭 + 同じ目印の何番目か。閉じる方向は触らない(コードが決めた開閉・自分で保存している開閉はそのまま)
+let FOLD_SCOPE = "";
+function foldKeys(root, onlyOpen) {
+  const out = new Set(), cnt = {};
+  if (!root) return out;
+  root.querySelectorAll("details").forEach((d) => {
+    const base = d.dataset.fold || d.dataset.ev || d.id || (d.querySelector("summary") ? d.querySelector("summary").textContent.trim().slice(0, 16) : ""), k = base + "#" + (cnt[base] = (cnt[base] || 0) + 1);
+    if (!onlyOpen || d.open) out.add(k);
+  });
+  return out;
+}
+function foldRestore(scope, was) {
+  const same = FOLD_SCOPE === scope; FOLD_SCOPE = scope;
+  if (!same || !was.size) return;
+  const root = document.getElementById("view"), cnt = {};
+  if (!root) return;
+  root.querySelectorAll("details").forEach((d) => {
+    const base = d.dataset.fold || d.dataset.ev || d.id || (d.querySelector("summary") ? d.querySelector("summary").textContent.trim().slice(0, 16) : ""), k = base + "#" + (cnt[base] = (cnt[base] || 0) + 1);
+    if (!d.open && was.has(k)) d.open = true;
+  });
+}
+// 画面の一部だけを後から作り直すとき(モンスタータブの「この場所の対策」など)も、開いていた折りたたみを開いたままにする
+function setHtmlKeepFolds(el, html) {
+  if (!el) return;
+  const was = foldKeys(el, true);
+  el.innerHTML = html;
+  if (!was.size) return;
+  const cnt = {};
+  el.querySelectorAll("details").forEach((d) => {
+    const base = d.dataset.fold || d.dataset.ev || d.id || (d.querySelector("summary") ? d.querySelector("summary").textContent.trim().slice(0, 16) : ""), k = base + "#" + (cnt[base] = (cnt[base] || 0) + 1);
+    if (!d.open && was.has(k)) d.open = true;
+  });
+}
 let RENDER_HOLD = 0, RENDER_TAB = "";      // 描き直したあと、画面の高さを少しのあいだ保つタイマー・前に描いたタブ
 function render() {
   const t0 = performance.now(), y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
@@ -346,7 +380,8 @@ function render() {
   if (view && RENDER_TAB !== TAB) { clearTimeout(RENDER_HOLD); view.style.minHeight = ""; }
   RENDER_TAB = TAB;
   if (keepH) { view.style.minHeight = keepH + "px"; clearTimeout(RENDER_HOLD); RENDER_HOLD = setTimeout(() => { const v = document.getElementById("view"); if (v) v.style.minHeight = ""; }, 2500); }
-  try { renderNow(); } catch (e) {
+  const foldScope = TAB + "/" + (typeof SIMV === "undefined" ? "" : SIMV), foldOpen = foldKeys(view, true);      // 開いていた折りたたみ(<details>)を覚える
+  try { renderNow(); foldRestore(foldScope, foldOpen); } catch (e) {
     console.error(e); reportJsError(e.message, e.stack); LOAD_SIG = "";      // 次の読み直しでもう一度描き直す
     const v = $("#view"); if (v) v.innerHTML = `<div class="panel" style="padding:12px"><b class="warn">この画面の表示でエラーが出ました</b> <span class="muted">（ツールは止まっていません。ほかのタブは使えます。エラーログに記録しました）</span><div style="margin:6px 0">${esc(e.message)}</div><pre style="font-size:11px;white-space:pre-wrap;margin:0">${esc(String(e.stack || "").split("\n").slice(0, 6).join("\n"))}</pre></div>`;
     try {      // 選んでいるスロットの職業をラトリオが計算できないとき: ここで別のスロットを選べるようにする(でないと、この画面から抜けられない)
