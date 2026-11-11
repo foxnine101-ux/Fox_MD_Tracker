@@ -127,17 +127,17 @@ function renderSimChara() {
         <button class="ghost" id="sccdup" title="いまの内容を、新しいスロットに保存します（このスロットはそのまま）">別のスロットに保存</button>
         <button class="ghost" id="sccdel">消す</button>` : ""}
       <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sccretry">もう一度試す</button>` : "計算係を起動中…（初回は1分ほどかかることがあります。2回目からは速くなります）") : esc(SIMC.msg)}</span></div>
-      <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="空のスロットを作ります。そのあと「現在のキャラを反映」や、下の「保存したキャラから作る」「ラトリオ」で中身を入れられます">＋ 新しいスロットを作成</button>
-        <button id="sccnewnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備が入った、新しいスロットを作ります（いまのスロットはそのまま。名前は キャラ名_Lv_職業_装備スロット）` : "ゲームにログインして、キャラを読み込むと使えます"}">＋ 現在のキャラで新しいスロットを作成${lastChar() ? `（${esc(charWho())}）` : ""}</button>
-        ${ch ? `<button id="sccnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">⟳ 現在のキャラを反映</button>
-        <button id="sccnowequip" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}が着ている装備（メインとシャドウ）だけを、このスロットに入れます（職業・ステータスはそのまま）` : "ゲームにログインすると使えます"}">⟳ 現在の装備を反映</button>` : ""}
-        ${lastChar() ? (nowChar() ? "" : `<span class="muted">ログインしていないので、最後にログインしていたキャラを使います。</span>`) : `<span class="muted">「現在のキャラ」のボタンは、ゲームにログインしてキャラを読み込むと使えます。</span>`}</div>
+      <div class="opts slotmake"><button id="sccnewslot" ${SIMC.busy ? "disabled" : ""} title="中身が空のスロットを作ります。そのあと、下の「ゲームのキャラから」「ラトリオ」で中身を入れられます">＋ 空のスロットを作る</button>
+        <span class="muted" title="スロット = 計算機の作業用の枠。ゲームのキャラ = ゲームにログインしてこのツールが覚えた原本(職業・Lv・ステータス・習得スキル・装備)。スロットは原本とは独立したコピーで、入れたあとにスロットを変えても原本は変わりません">${lastChar() ? `ゲームのキャラ「${esc(cn(lastChar()))}」${nowChar() ? "（ログイン中）" : "（最後にログイン）"}から:` : "ゲームのキャラ: ゲームにログインすると使えます"}</span>
+        <button id="sccnewnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてが入った、新しいスロットを作ります（いまのスロットはそのまま。名前は キャラ名_Lv_職業_装備スロット）` : "ゲームにログインして、キャラを読み込むと使えます"}">＋ 新しいスロットに全部入れる</button>
+        ${ch ? `<button id="sccnow" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてを、いま選んでいるスロットに上書きして入れます` : "ゲームにログインすると使えます"}">⟳ このスロットに全部入れる</button>
+        <button id="sccnowequip" ${lastChar() && !SIMC.busy ? "" : "disabled"} title="${lastChar() ? `${esc(charWho())}が着ている装備（メインとシャドウ）だけを、いま選んでいるスロットに入れます（職業・ステータス・スキルはそのまま）` : "ゲームにログインすると使えます"}">⟳ このスロットに装備だけ入れる</button>` : ""}</div>
       ${SIMC.msg && /できません|取り込めません|作れません/.test(SIMC.msg) ? `<div class="busybar" style="background:#e5484d;color:#fff">${esc(SIMC.msg)}</div>` : ""}
       ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}
       ${ch ? `<div class="muted" style="font-size:12px">${dirty ? `<span class="warn">＊ 保存していない変更があります。</span>「保存」でこのスロットに残ります（アプリを閉じても作業中の内容は消えませんが、「ロード」で保存したときの内容に戻せます）。` : "変更は作業中の内容として自動で残ります。区切りのよいところで「保存」すると、あとで「ロード」で戻せます。"}</div>` : ""}</div>`;
   {
     const EQ = DATA.equip || {}, E = EQ.chars || {}, F = SIMC.fox, names = Object.keys(E);
-    let game = `<div class="muted">ゲームにログインすると、このツールがキャラ（職業・Lv・ステータス・装備）を覚えます。覚えたキャラから、新しいスロットを作れます。</div>`;
+    let game = `<div class="muted">ゲームにログインすると、このツールがキャラ（職業・Lv・ステータス・習得スキル・装備）を原本として覚えます。覚えたキャラから、新しいスロットを作れます。</div>`;
     if (names.length) {
       if (!names.includes(F.char)) F.char = names.slice().sort((x, y) => (E[y].updated || 0) - (E[x].updated || 0))[0];
       const opt = (T, cur, here) => `<option value="">${F.char === nowChar() ? "いま着ている装備" : "最後に着ていた装備"}</option>` + Object.entries(T || {}).filter(([, st]) => st.tag).sort((x, y) => String(x[1].tag).localeCompare(String(y[1].tag), "ja", { numeric: true }))
@@ -145,14 +145,14 @@ function renderSimChara() {
       game = `<div class="opts"><label>キャラ <select id="sfc">${names.map((c) => `<option value="${esc(c)}" ${c === F.char ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
         <label>装備スロット <select id="sfs">${opt(EQ.sets, F.set, E[F.char].cur)}</select></label>
         <label>シャドウのスロット <select id="sfh">${opt(EQ.shadows, F.shadow, E[F.char].shadow)}</select></label>
-        <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>このキャラで新しいスロットを作る</button></div>
-        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションも入ります（ラトリオに無い効果は、入らなかったものとして出ます）。いまログインしているキャラは、上の「現在のキャラを反映」でも入れられます。</div>`;
+        <button id="sfnew" ${SIMC.busy ? "disabled" : ""}>＋ このキャラで新しいスロットを作る</button></div>
+        <div class="muted" style="font-size:12px">このツールが覚えている、そのキャラの職業・Lv・ステータスと、装備（精錬・カード・エンチャント）が入ります。ランダムオプションも入ります（ラトリオに無い効果は、入らなかったものとして出ます）。ログイン中のキャラは、上の「このスロットに全部入れる」でも入れられます（そのときは選んだ装備スロットではなく、いま着ている装備が入ります）。</div>`;
     }
     const rat = `<div class="opts"><button class="ghost" id="sccnew" ${ENG.ready ? "" : "disabled"}>職業を選んで1から作る</button>
         <button class="ghost" id="sccurl">保存URLから読み込む</button>
         <button class="ghost" id="sccfile" title="ラトリオの「セーブデータの書き出し」で作ったファイル（ratoriohub….txt）">セーブファイルから読み込む</button>
         ${ch ? `<button class="ghost" id="sccexp" ${ENG.ready ? "" : "disabled"} title="いまのスロットを、ROラトリオHub で開ける保存URL にします">保存URLを書き出す</button>` : ""}</div>`;
-    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "保存したキャラから作る", game, ` <span class="muted">（このツールが覚えている、ゲームのキャラ）</span>`, false)}${simcFold("mkrat", "ラトリオ", rat, ` <span class="muted">（1から作る・保存URL やセーブファイルを読み込む・保存URL を書き出す）</span>`, false)}</div>`;
+    h += `<div class="simc simc2" style="margin-bottom:10px">${simcFold("mkchar", "ゲームのキャラから作る（原本）", game, ` <span class="muted">（ゲームにログインして、このツールが覚えたキャラ。スロットはそのコピーで、独立しています）</span>`, false)}${simcFold("mkrat", "ラトリオ", rat, ` <span class="muted">（1から作る・保存URL やセーブファイルを読み込む・保存URL を書き出す）</span>`, false)}</div>`;
   }
   if (SIMC.exp && SIMC.exp.id === SIMC.cur) {
     h += `<div class="panel simbox"><div><b>保存URL</b> <span class="muted">ROラトリオHub でそのまま開けます（「保存URLから読み込む」にも貼れます）。${SIMC.exp.copied ? "クリップボードにコピーしました。" : ""}</span></div>
@@ -172,7 +172,7 @@ function renderSimChara() {
       ${rep.rows.map((x, i) => `<div class="sfrow"><span class="muted">${esc(x.slot)}</span> ${esc(x.name)} <button class="ghost" data-fix="${i}">選ぶ</button></div>`).join("")}</div>`;
   }
   if (!ch) {
-    h += `<div class="panel empty">上の「新しいスロットを作成」を押すか、「保存したキャラから作る」「ラトリオ」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
+    h += `<div class="panel empty">上の「空のスロットを作る」を押すか、「ゲームのキャラから作る」「ラトリオ」で、最初のスロットを作ってください。<br>作ったものは、この PC に保存されます。</div>`;
   } else if (!ENG.ready) {
     h += `<div class="panel empty">${ENG.err ? "計算係（ROラトリオHub）を起動できませんでした。上の「もう一度試す」を押してください。" : "計算係（ROラトリオHub）を起動しています…<br>初回は、ラトリオの部品を全部読み込むので1分ほどかかることがあります。2回目からは速くなります。"}</div>`;
   } else {
@@ -240,7 +240,7 @@ function renderSimChara() {
       const id = "c" + Date.now().toString(36);
       SIMC.chars[id] = { name: v.trim().slice(0, 40), model, saved: simcClone(model) };
       simcSelect(id); await simcPut(id);
-      SIMC.msg = nowChar() ? "空のスロットを作りました。「現在のキャラを反映」で、ログインしているキャラを入れられます。" : "空のスロットを作りました。";
+      SIMC.msg = nowChar() ? "空のスロットを作りました。「このスロットに全部入れる」で、ゲームのキャラを入れられます。" : "空のスロットを作りました。";
     } catch (e) { SIMC.msg = "作れませんでした: " + e.message; }
     SIMC.busy = ""; render();
   };

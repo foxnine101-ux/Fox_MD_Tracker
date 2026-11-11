@@ -301,12 +301,12 @@ function renderSandbagTab() {
   const ch = simcCur(), ids = Object.keys(SIMC.chars), lc = lastChar(), nowDis = lc && !SIMC.busy ? "" : "disabled";
   let calc = `<div class="panel simbox" id="sbcalc"><div class="opts"><b>サンドバックマン</b>
       <label>スロット <select id="sbxslot">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}${simcDirtySlot(SIMC.chars[id]) ? " ＊" : ""}</option>`).join("") : `<option value="">（スロットがありません）</option>`}</select></label>
-      ${ch ? `<button id="sbxnow" ${nowDis} title="${lc ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備を、このスロットに入れます` : "ゲームにログインすると使えます"}">現在のキャラと装備を反映</button>` : ""}
-      <button class="ghost" id="sbxnew" ${nowDis} title="${lc ? `${esc(charWho())}の職業・Lv・ステータス・習得スキル・装備が入った、新しいスロットを作ります` : "ゲームにログインすると使えます"}">＋ 現在のキャラで新しいスロットを作成</button>
-      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sbxretry">もう一度試す</button>` : "計算係を起動しています…") : lc ? (nowChar() ? "" : "ログインしていないので、最後にログインしていたキャラを使います。") : "ゲームにログインすると、現在のキャラを使えます。"}</span></div>
+      ${ch ? `<button id="sbxnow" ${nowDis} title="${lc ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてを、いま選んでいるスロットに上書きして入れます` : "ゲームにログインすると使えます"}">⟳ このスロットに全部入れる</button>` : ""}
+      <button class="ghost" id="sbxnew" ${nowDis} title="${lc ? `${esc(charWho())}の、職業・Lv・ステータス・習得スキル・装備すべてが入った、新しいスロットを作ります` : "ゲームにログインすると使えます"}">＋ 新しいスロットに全部入れる</button>
+      <span class="muted">${SIMC.busy ? esc(SIMC.busy) : !ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span> <button class="ghost" id="sbxretry">もう一度試す</button>` : "計算係を起動しています…") : lc ? (nowChar() ? `ゲームのキャラ「${esc(cn(lc))}」（ログイン中）から入れます。` : `ゲームのキャラ「${esc(cn(lc))}」（最後にログイン）から入れます。`) : "ゲームにログインすると、ゲームのキャラから入れられます。"}</span></div>
     ${SIMC.msg ? (/できません|取り込めません|作れません/.test(SIMC.msg) ? `<div class="busybar" style="background:#e5484d;color:#fff">${esc(SIMC.msg)}</div>` : `<div class="muted">${esc(SIMC.msg)}</div>`) : ""}
     ${SIMC.busy ? `<div class="busybar">${esc(SIMC.busy)}</div>` : ""}`;
-  if (!ch) calc += `<p class="hint">計算するキャラのスロットがありません。「＋ 現在のキャラで新しいスロットを作成」を押すか、「キャラシミュレーター」で作ってください。</p></div>`;
+  if (!ch) calc += `<p class="hint">計算するキャラのスロットがありません。「＋ 新しいスロットに全部入れる」を押すか、「キャラシミュレーター」で作ってください。</p></div>`;
   else if (!ENG.ready) calc += `</div>`;
   else calc += `</div>${simcFold("sbeq", "現在の装備", sbEquipHtml(ch.model), sbEquipSum(ch.model), false)}<div class="panel simbox" id="sbcbody"><div class="opts"><span class="muted">比べる装備スロット:</span>${simcCmpChips(ch.model)}</div><div style="margin-top:6px">${simcSbHtml(ch.model, true)}</div></div>`;
   const R = SBX.recs, f = (v, d = 0) => simcNum(v, d);

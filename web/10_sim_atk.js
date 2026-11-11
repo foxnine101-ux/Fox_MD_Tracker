@@ -204,7 +204,7 @@ function renderAtkTab() {
   let h = simNav() + `<div class="panel simbox"><div class="opts"><b>与ダメシミュ</b>
     <label>キャラ(スロット) <select id="atkslot">${ids.length ? ids.map((id, i) => `<option value="${esc(id)}" ${id === SIMC.cur ? "selected" : ""}>${i + 1}: ${esc(SIMC.chars[id].name)}</option>`).join("") : `<option>（スロットがありません）</option>`}</select></label>
     <span class="muted">${!ENG.ready ? (ENG.err ? `<span class="err">${esc(ENG.err)}</span>` : "計算係を起動中…（初回は1分ほどかかります）") : "キャラ・装備は「キャラシミュレーター」で整えたものを使います。"}</span></div></div>`;
-  if (!ch) { V.innerHTML = h + `<div class="panel empty">キャラシミュレーターでスロットを作ってください(「現在のキャラで新しいスロットを作成」が早いです)。</div>`; bindSimNav(); atkBind(); return; }
+  if (!ch) { V.innerHTML = h + `<div class="panel empty">キャラシミュレーターでスロットを作ってください(「ゲームのキャラから」作るのが早いです)。</div>`; bindSimNav(); atkBind(); return; }
   if (!ENG.ready || !ENG.sb) { V.innerHTML = h + (ENG.ready ? `<div class="warn">計算の入口が見つかりません（ラトリオの更新で変わった可能性があります）。</div>` : ""); bindSimNav(); atkBind(); return; }
   if (!ATK.mons) { V.innerHTML = h + `<div class="panel empty"><span class="spin">モンスターの一覧を読み込み中…</span></div>`; bindSimNav(); atkBind(); atkMons().then(render).catch((e) => { ATK.mons = []; ATK.byId = new Map(); ATK.msg = "モンスターの一覧を読めませんでした: " + e.message; render(); }); return; }
   const m = ch.model, mob = (ATK.byId || new Map()).get(ATKS.mob);
