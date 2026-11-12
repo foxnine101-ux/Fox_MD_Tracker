@@ -185,7 +185,7 @@ function renderInventory(chars) {
     const s = slots.find((x) => x.id === INVSUB);
     head = bar(`<span class="muted">${esc(cn(INV_CHAR))} のアカウントの倉庫</span>`);
     if (!s || !s.st) body = `<div class="panel empty">「${esc(s ? s.label : "")}」は、まだ読めていません。<br>ゲームで、その倉庫を開くと記録されます（ツールを動かしたまま）。</div>`;
-    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cnU(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの状態です（出し入れは、次に開くまで反映されません）。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
+    else body = `<div class="muted" style="margin-bottom:6px">「${esc(s.st.title || s.label)}」　最終確認 ${when(s.st.t)}（${esc(cnU(s.st.by || ""))} が開いたとき）　品 ${s.st.items.length}・装備 ${(s.st.eq || []).length}${invChk(s.st)}　倉庫の中身は、開いたときの一覧に、そのあとの出し入れを足したものです${s.st.live ? `（最後の出し入れ ${when(s.st.live)}）` : ""}。</div>` + `<div id="invtbl"></div>`; if (s && s.st) tblFn = () => invTable(invRows(s.st.items, s.st.eq));
   }
   const catBar = INVSUB === "all" ? "" : `<div class="simnav" id="invcat">${INV_CATS.map(([k, l]) => `<button data-invcat="${k}" class="${INV_CAT === k ? "on" : ""}">${l}</button>`).join("")}</div>`;
   $("#view").innerHTML = `${nav}${head}${catBar}${body}`;

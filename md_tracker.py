@@ -1086,6 +1086,7 @@ def upload(cfg, payload):
 # ---------------------------------------------------------------
 OP_0B39 = bytes((0x39, 0x0B))      # 0B39(装備の一覧)の先頭2バイト
 OP_07FA = bytes((0xFA, 0x07))      # 07FA(持ち物から消えた)の先頭2バイト
+OP_0B09 = bytes((0x09, 0x0B))      # 0B09(装備でない品の一覧)の先頭2バイト
 
 
 class _Scanner(gp.StreamScanner):
@@ -1099,6 +1100,7 @@ class _Scanner(gp.StreamScanner):
         if CHARS is None:
             return
         self._scan_equip_list(region)
+        self._scan_item_list(region)
         i = region.find(OP_07FA)
         while i != -1:
             if i + 8 <= len(region):
@@ -1110,6 +1112,29 @@ class _Scanner(gp.StreamScanner):
                         except Exception:
                             pass
             i = region.find(OP_07FA, i + 1)
+
+    def _scan_item_list(self, region):
+        """見失った区間に埋もれた品の一覧(0B09: 種類 + 34バイト×N)を、長さと中身の形を確かめて拾う(倉庫の一覧の取りこぼし対策)。"""
+        i = region.find(OP_0B09)
+        while i != -1:
+            ok, ln = False, 0
+            if i + 5 <= len(region):
+                ln, kind = struct.unpack_from("<HB", region, i + 2)
+                body = ln - 5
+                size = next((z for z in char_core.ITEM_SIZES if body > 0 and body % z == 0), 0)
+                n = body // size if size else 0
+                if kind <= 4 and size and 0 < n <= 100 and i + ln <= len(region):
+                    ok = all(0 <= struct.unpack_from("<H", region, i + 5 + size * k)[0] < 4000 and struct.unpack_from("<I", region, i + 7 + size * k)[0] > 0
+                             and struct.unpack_from("<H", region, i + 12 + size * k)[0] > 0 for k in range(n))
+                    if ok:
+                        print("[倉庫] 見失った区間から、品の一覧(0B09 種類={}・{}件)を拾いました(見失った元の通信 {})".format(
+                            kind, n, "{:04X}".format(self.lost_op) if self.lost_op is not None else "つなぎ目の抜け"))
+                        with self.lock:
+                            try:
+                                CHARS.feed(self.key, bytes(region[i:i + ln]))
+                            except Exception:
+                                pass
+            i = region.find(OP_0B09, i + (ln if ok else 1))
 
     def _scan_equip_list(self, region):
         """見失った区間に埋もれた装備の一覧(0B39: 種類 + 68バイト×N)を、長さと中身の形を確かめて拾う(ログイン時の一覧を取りこぼす対策)。"""
