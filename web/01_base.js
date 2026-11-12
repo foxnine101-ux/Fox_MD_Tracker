@@ -324,7 +324,18 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["chars", "キャラ"], ["gsets", "装備セット"], ["sim", "計算機"], ["calc", "ラトリオ"], ["event", "イベント"], ["inv", "インベントリ"]];   // 入場履歴・設定は見出しの歯車(⚙)のメニューから。ニャル様・ハロウィンは「イベント」のサブタブ
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["battle", "バトル"], ["chars", "キャラ"], ["simu", "シミュ"], ["event", "イベント"], ["inv", "インベントリ"]];   // 入場履歴・設定は見出しの歯車(⚙)のメニューから。ニャル様・ハロウィンは「イベント」のサブタブ
+// まとめたタブ: 見出しには「バトル」「シミュ」だけを出し、中の画面は今までの名前(TAB = "resist" など)のまま。
+// ほかの画面からの飛び先(TAB = "gsets" / "dmg" / "sim" …)はそのまま動き、どのまとめに入るかは TAB_GROUPS で決まる
+const TAB_GROUPS = { battle: [["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["gsets", "装備セット"]], simu: [["sim", "計算機"], ["calc", "ラトリオ"]] };
+const tabGroupOf = (k) => Object.keys(TAB_GROUPS).find((g) => TAB_GROUPS[g].some(([x]) => x === k)) || "";
+function tabResolve() {      // 見出しの「バトル」「シミュ」を押した = そのまとめで最後に見ていた画面へ
+  const g = TAB_GROUPS[TAB];
+  if (!g) return;
+  const last = store.get("md_tabg_" + TAB);
+  TAB = g.some(([x]) => x === last) ? last : g[0][0];
+  store.set("md_tab", TAB);
+}
 const GEAR_TABS = [["history", "入場履歴"], ["mapview", "マップ読み込み"], ["settings", "設定"]];
 let GEAR_EVENTS = 0;      // イベントの件数(歯車のメニューに出す)
 
@@ -373,6 +384,7 @@ function setHtmlKeepFolds(el, html) {
 }
 let RENDER_HOLD = 0, RENDER_TAB = "";      // 描き直したあと、画面の高さを少しのあいだ保つタイマー・前に描いたタブ
 function render() {
+  tabResolve();
   const t0 = performance.now(), y = window.scrollY, hs = { tab: TAB, v: [...document.querySelectorAll(HSCROLL_SEL)].map((e) => e.scrollLeft) };
   // 描き直した直後は、あとから計算で埋まる表(比べる表・ステ振りなど)がまだ空で、ページ全体が一瞬短くなる → 見ていた位置が上に押し戻されて、埋まると戻る。
   // そこで、描き直す前の高さを最小の高さとして保ち、埋まり終わるころ(2.5秒後)に外す
@@ -409,11 +421,17 @@ function renderNow() {
     for (const G of groups) if (G.kind === kind) for (const c of chars) { const e = endOf(c, G); if (e !== null && e <= now) n++; }
     return n;
   };
-  const tord = SETTINGS.tabOrder || [], tabs = TABS.slice().sort((x, y) => ((tord.indexOf(x[0]) + 1) || 99) - ((tord.indexOf(y[0]) + 1) || 99));     // 並びは自分で変えられる(つかんで左右に動かす)
+  tabResolve();
+  const grp = tabGroupOf(TAB);
+  if (grp) store.set("md_tabg_" + grp, TAB);
+  const tord = SETTINGS.tabOrder || [];
+  const trank = (k) => { const r = [k, ...(TAB_GROUPS[k] || []).map(([x]) => x)].map((x) => tord.indexOf(x)).filter((i) => i >= 0); return r.length ? Math.min(...r) : 99; };      // まとめる前の並び(耐性・計算機の位置)も引き継ぐ
+  const tabs = TABS.slice().sort((x, y) => trank(x[0]) - trank(y[0]));     // 並びは自分で変えられる(つかんで左右に動かす)
   $("#tabs").innerHTML = tabs.map(([k, l]) => {
     const n = ["weekly", "daily"].includes(k) ? countOk(k) : 0;
-    return `<button data-tab="${k}" class="${TAB === k ? "on" : ""}" title="つかんで左右に動かすと、並びを変えられます"><span class="grip tgrip">${l}</span>${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
-  }).join("");
+    return `<button data-tab="${k}" class="${TAB === k || grp === k ? "on" : ""}" title="つかんで左右に動かすと、並びを変えられます"><span class="grip tgrip">${l}</span>${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
+  }).join("") + (grp ? `<div class="simnav" id="grpnav" style="flex-basis:100%">${TAB_GROUPS[grp].map(([k, l]) => `<button data-grp="${k}" class="${TAB === k ? "on" : ""}">${l}</button>`).join("")}</div>` : "");
+  $("#tabs").querySelectorAll("#grpnav [data-grp]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); if (TAB !== b.dataset.grp) { TAB = b.dataset.grp; store.set("md_tab", TAB); render(); } });
   makeSortable($("#tabs"), "button[data-tab]", tabs.map((t) => t[0]), (arr) => { SETTINGS.tabOrder = arr; saveSettings(); render(); }, "x",
     (row) => { if (TAB !== row.dataset.tab) { TAB = row.dataset.tab; store.set("md_tab", TAB); render(); } });      // 動かさずに離した = ふつうのクリック
   $("#upd").textContent = DATA.updated ? `最終受信 ${when(DATA.updated)}` : "まだ記録がありません";
