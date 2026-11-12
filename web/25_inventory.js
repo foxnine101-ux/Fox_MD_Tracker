@@ -29,7 +29,7 @@ function invLoad() {
   INV_LOADING = true; INV_T = (DATA && DATA.inv_t) || 0;
   fetch("/api/market?brief=1").then((r) => r.json()).then((b) => { MKB = b || {}; }).catch(() => {});
   fetch("/api/inv").then((r) => r.json()).then((d) => { INV = d; }).catch(() => { INV = INV || { chars: {}, stores: {}, names: {} }; })
-    .finally(() => { INV_LOADING = false; if (TAB === "inv") render(); });
+    .finally(() => { INV_LOADING = false; if (TAB === "inv" || (TAB === "event" && EVSUB === "fancy")) render(); });
 }
 const invName = (id) => (INV && INV.names && INV.names[String(id)]) || (DATA.item_names || {})[String(id)] || `ID${id}`;
 
