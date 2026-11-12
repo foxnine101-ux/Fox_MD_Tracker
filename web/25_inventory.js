@@ -179,16 +179,20 @@ function ledItems(r) {
   const it = (r.it || []).map((x) => `${x[2] ? "+" + x[2] + " " : ""}${esc(ledName(x[0]))} ×${fmtN(Math.abs(x[1]))}`).join("、");
   return it + (r.p ? `<span class="sub">（1個 ${fmtN(Math.round(r.p))}z）</span>` : "");
 }
+const ledNoa = (s) => /noatun|ノアトゥーン/i.test(serverLabel(s) || "");
 function renderLedger(chars) {
   if (!LED || LED_T !== ((DATA && DATA.ledger_t) || 0)) ledLoad();
   const nav = invNav(invStoreSlots(INV_CHAR || nowChar() || lastChar()));
   if (!LED) { $("#view").innerHTML = `${nav}<div class="panel empty">読み込んでいます…</div>`; ledBind(); return; }
   const K = LED.kinds || {}, all = LED.rows || [];
   if (!all.length) { $("#view").innerHTML = `${nav}<div class="panel empty">まだ記録がありません。<br>ツールを動かしたまま、露店で売り買い・買取露店・メールの受け取りなどをすると記録されます。</div>`; ledBind(); return; }
-  // ワールドごとに分ける(ノアトゥーンはゼニーの桁がちがうので、ワールドをまたいで足さない)
+  // ワールドごとに分ける。「全ワールド」はノアトゥーンの金額を B鯖換算(×1000・公式の為替)にしてから足す
   const srvs = [...new Set(all.map((r) => srvOf(r.c)))];
-  if (!srvs.includes(LED_SRV)) { const cs = srvOf(nowChar() || lastChar() || ""); LED_SRV = srvs.includes(cs) ? cs : (srvs[0] || ""); }
-  const inSrv = all.filter((r) => srvOf(r.c) === LED_SRV);
+  const ALLW = srvs.length > 1 && LED_SRV === "*";
+  if (!ALLW && !srvs.includes(LED_SRV)) { const cs = srvOf(nowChar() || lastChar() || ""); LED_SRV = srvs.includes(cs) ? cs : (srvs[0] || ""); }
+  const noaIn = srvs.some(ledNoa), noaNow = !ALLW && ledNoa(LED_SRV);
+  const conv = (r) => (ALLW && ledNoa(srvOf(r.c)) ? { ...r, d: r.d * 1000, b: r.b == null ? r.b : r.b * 1000, p: r.p ? r.p * 1000 : r.p, noa: 1 } : r);
+  const inSrv = (ALLW ? all : all.filter((r) => srvOf(r.c) === LED_SRV)).map(conv);
   const cl = [...new Set(inSrv.map((r) => r.c))].sort((a, b) => cn(a).localeCompare(cn(b), "ja"));
   if (LED_CHAR && !cl.includes(LED_CHAR)) LED_CHAR = "";
   const cut = LED_DAYS ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() / 1000 - (LED_DAYS - 1) * 86400; })() : 0;
@@ -201,10 +205,10 @@ function renderLedger(chars) {
   const byDay = new Map();
   for (const r of real) { const d = ledDay(r.t), e = byDay.get(d) || { i: 0, o: 0 }; if (r.d > 0) e.i += r.d; else e.o -= r.d; byDay.set(d, e); }
   const opt = (v, cur, l) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`;
-  const bar = `<div class="invbar">${srvs.length > 1 ? `<select id="ledsrv">${srvs.map((s) => opt(s, LED_SRV, serverLabel(s))).join("")}</select>` : ""}<select id="ledchar">${opt("", LED_CHAR, "全キャラ")}${cl.map((c) => opt(c, LED_CHAR, cn(c))).join("")}</select><select id="leddays">${[[1, "今日"], [7, "7日"], [30, "30日"], [0, "全部"]].map(([v, l]) => `<option value="${v}" ${v === LED_DAYS ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
-  const note = `<div class="muted" style="margin-bottom:6px">ツールを動かしているあいだの、ゼニーの増減と、そのとき動いた品の記録です（この PC だけに保存）。「何で」は前後の通信からの見立てです。ワールドごとに分けています（ノアトゥーンはゼニーの桁がちがうので混ぜません）。</div>`;
+  const bar = `<div class="invbar">${srvs.length > 1 ? `<select id="ledsrv">${srvs.map((s) => opt(s, LED_SRV, serverLabel(s))).join("")}${opt("*", LED_SRV, noaIn ? "全ワールド（B鯖換算）" : "全ワールド")}</select>` : ""}<select id="ledchar">${opt("", LED_CHAR, "全キャラ")}${cl.map((c) => opt(c, LED_CHAR, ALLW ? `${cn(c)}（${serverLabel(srvOf(c))}）` : cn(c))).join("")}</select><select id="leddays">${[[1, "今日"], [7, "7日"], [30, "30日"], [0, "全部"]].map(([v, l]) => `<option value="${v}" ${v === LED_DAYS ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
+  const note = `<div class="muted" style="margin-bottom:6px">ツールを動かしているあいだの、ゼニーの増減と、そのとき動いた品の記録です（この PC だけに保存）。「何で」は前後の通信からの見立てです。${ALLW && noaIn ? "ノアトゥーンの金額は B鯖換算（×1000）にして足しています。" : "ワールドごとに分けています。「全ワールド」を選ぶと、ノアトゥーンを B鯖換算（×1000）にして合わせて出します。"}</div>`;
   const big = (l, n, c) => `<div style="min-width:120px">${l}<b class="${c}" style="display:block;font-size:18px">${ledZ(n)} z</b></div>`;
-  const sum = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0">${big("収入", inc, "ok")}${big("支出", -out, "warn")}${big("差し引き", inc - out, ledCls(inc - out))}</div>`;
+  const sum = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0">${big("収入", inc, "ok")}${big("支出", -out, "warn")}${big("差し引き", inc - out, ledCls(inc - out))}${noaNow ? `<div style="min-width:120px" class="muted">B鯖換算（×1000）<b class="${ledCls(inc - out)}" style="display:block;font-size:18px">${ledZ((inc - out) * 1000)} z</b></div>` : ""}</div>`;
   const kinds = [...byK].sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z));
   const kt = `<div class="tablewrap"><table class="invt"><thead><tr><th>何で</th><th class="n">回数</th><th class="n">金額</th></tr></thead><tbody>${kinds.map(([k, e]) =>
     `<tr data-ledk="${esc(k)}" style="cursor:pointer${LED_KIND === k ? ";background:var(--line)" : ""}" title="押すと明細をこれだけにします"><td>${esc(K[k] || k)}${k === "unseen" ? `<span class="sub">（収入・支出に入れない）</span>` : ""}</td><td class="n">${fmtN(e.n)}</td><td class="n ${ledCls(e.z)}">${ledZ(e.z)}</td></tr>`).join("")}</tbody></table></div>`;
@@ -214,7 +218,7 @@ function renderLedger(chars) {
   const cap = rows.slice(0, 300);
   const det = `<div style="margin:12px 0 4px;font-weight:bold">明細${LED_KIND ? `（${esc(K[LED_KIND] || LED_KIND)}だけ <button class="ghost" id="ledkx">全部に戻す</button>）` : ""}<span class="muted" style="font-weight:normal">　${fmtN(rows.length)} 件${rows.length > cap.length ? `（新しい ${cap.length} 件を表示）` : ""}</span></div>
     <div class="tablewrap"><table class="invt"><thead><tr><th>日時</th>${LED_CHAR ? "" : "<th>キャラ</th>"}<th>何で</th><th class="n">金額</th><th>品物</th><th class="n">所持金</th></tr></thead><tbody>${cap.map((r) =>
-    `<tr><td>${esc(when(r.t))}</td>${LED_CHAR ? "" : `<td>${esc(cn(r.c))}</td>`}<td>${esc(K[r.k] || r.k)}</td><td class="n ${ledCls(r.d)}">${r.d ? ledZ(r.d) : ""}</td><td>${ledItems(r)}</td><td class="n muted">${r.b == null ? "" : fmtN(r.b)}</td></tr>`).join("")}</tbody></table></div>`;
+    `<tr><td>${esc(when(r.t))}</td>${LED_CHAR ? "" : `<td>${esc(cn(r.c))}${r.noa ? `<span class="sub">（N・換算）</span>` : ""}</td>`}<td>${esc(K[r.k] || r.k)}</td><td class="n ${ledCls(r.d)}">${r.d ? ledZ(r.d) : ""}</td><td>${ledItems(r)}</td><td class="n muted">${r.b == null ? "" : fmtN(r.b)}</td></tr>`).join("")}</tbody></table></div>`;
   $("#view").innerHTML = `${nav}${bar}${note}${sum}${kt}${dt}${det}`;
   ledBind();
 }
