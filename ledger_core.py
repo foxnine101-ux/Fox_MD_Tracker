@@ -390,7 +390,16 @@ class Ledger(object):
             its = [[h["id"], h["n"], h["r"]] for h in co]
         elif "bs_sell" in hk:
             k = "bs_sell"
-            sold = [[h["id"], h["n"], h["r"]] for h in hints if h["k"] == "bs_sell"]
+            sold = []
+            for h in hints:
+                if h["k"] != "bs_sell":
+                    continue
+                iid = h["id"]
+                if not iid and h.get("z") and s["bsl"]:
+                    # 持ち物の番号から品が分からないとき: 見た買取露店の一覧で、同じ1個の値段の品が1つに決まればその品(jRO 実測 0818 + 081C)
+                    c = {e["id"] for e in s["bsl"][1] if e["p"] == h["z"]}
+                    iid = c.pop() if len(c) == 1 else None
+                sold.append([iid, h["n"], h["r"]])
             its = sold if not any(x[1] < 0 for x in its) else its
         elif "bs_buy" in hk:
             k = "bs_buy"                       # 品は 09E6 の中身を正とする(開くときのライセンスの出し入れ・失敗で戻った分を混ぜない)
