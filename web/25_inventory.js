@@ -114,8 +114,10 @@ async function invNameSet(id) {
 function mkCells(id) {      // 覚えている相場(「相場」ボタンで取ったもの)から、直近の売価と中央値。まだ取っていない品は空欄
   const b = MKB[String(id)];
   if (!b) return `<td class="n muted"></td><td class="n muted"></td>`;
-  const ago = b[0] ? `取得 ${when(b[0])}` : "";
-  return `<td class="n" title="${esc((b[2] || "") + " の取引 / " + ago)}">${b[1] == null ? "-" : mktYen(b[1])}</td><td class="n" title="${esc(ago)}">${b[3] == null ? "-" : mktYen(b[3])}</td>`;
+  const ago = b[0] ? `取得 ${when(b[0])}` : "", sh = b[4] === "s";      // sh = 身内の共有相場(RO相場自動記録が貯めた日ごとの値)
+  const t1 = sh ? `${b[2] || ""} の中央値(身内の共有相場) / ${ago}` : `${b[2] || ""} の取引 / ${ago}`, t2 = sh ? `直近30日の中央値(身内の共有相場) / ${ago}` : ago;
+  const mark = sh ? `<span class="sub" title="身内の共有相場">共</span>` : "";
+  return `<td class="n" title="${esc(t1)}">${b[1] == null ? "-" : mktYen(b[1])}${mark}</td><td class="n" title="${esc(t2)}">${b[3] == null ? "-" : mktYen(b[3])}${mark}</td>`;
 }
 function invRows(items, eq, cat = INV_CAT) {
   const q = INV_Q.trim().toLowerCase();

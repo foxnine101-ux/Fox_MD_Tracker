@@ -35,6 +35,7 @@ if DATA_HOME != HERE:
 
 import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと共通)
 import market_core          # 相場(公式ツールの露店の取引履歴。この PC だけに覚える)
+import zatta_core           # 身内の共有相場(RO相場自動記録が貯めたもの)を受け取るだけ
 import md_core
 import quest_names
 import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
@@ -55,6 +56,7 @@ STATE_FILE = os.path.join(DATA_HOME, "md_state.json")
 CHAR_STATE_FILE = os.path.join(DATA_HOME, "char_state.json")
 DMG_FILE = os.path.join(DATA_HOME, "被ダメ記録.json")
 MARKET_FILE = os.path.join(DATA_HOME, "相場.json")      # 相場(露店の取引履歴。この PC だけ。配らない)
+SHARED_FILE = os.path.join(DATA_HOME, "共有相場.json")      # 身内の共有相場(受け取ったもの。この PC だけ)
 OFFICIAL_FILE = os.path.join(DATA_HOME, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
 LANTERN_FILE = os.path.join(DATA_HOME, "ランタンハント.json")      # ランタンの座標の一覧(利用者が貼り付けた・取り込んだもの。同梱しない・配らない)
 SANDBAG_FILE = os.path.join(DATA_HOME, "サンドバックマン記録.json")   # サンドバックマンの計算結果の記録 {records: [{id, key, t, slot, job, model, sb, res, note}]}
@@ -548,8 +550,8 @@ def start_live_server(core, lock, cfg):
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/market" and self._local_only() and MARKET is not None:       # 相場。id=アイテム番号・refresh=1 で取り直し(裏で取る。画面は少し待ってまた読む)
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                if q.get("brief"):                       # 一覧用: 覚えている相場の要約(通信はしない)
-                    return self._send(200, json.dumps(MARKET.brief(), ensure_ascii=False), "application/json; charset=utf-8")
+                if q.get("brief"):                       # 一覧用: 覚えている相場の要約(通信はしない)。自分で取ったものが無い・古い品は共有相場で埋める
+                    return self._send(200, json.dumps(market_brief(), ensure_ascii=False), "application/json; charset=utf-8")
                 try:
                     iid = int((q.get("id") or ["0"])[0])
                 except ValueError:
@@ -1196,6 +1198,22 @@ _RING, _RING_LOGS = collections.deque(maxlen=40), [0]      # 直前の通信(め
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 MARKET = None  # market_core.Market
+SHARED = None  # zatta_core.Shared(身内の共有相場)
+
+
+def market_brief():
+    """画面の一覧用の相場: {番号: [時刻, 直近, その日, 中央値, 出どころ]}。出どころ "m" = 自分で取った・"s" = 身内の共有相場。
+    日付の新しい方を使う(同じ日なら自分で取った方)。"""
+    own = MARKET.brief() if MARKET is not None else {}
+    sh = SHARED.brief() if SHARED is not None else {}
+    out = {}
+    for k in set(own) | set(sh):
+        a, b = own.get(k), sh.get(k)
+        if a and (not b or str(a[2] or "")[:10] >= str(b[2] or "")):
+            out[k] = list(a) + ["m"]
+        else:
+            out[k] = list(b) + ["s"]
+    return out
 SERVERS = server_core.Servers(log=print)   # どのサーバーの通信か(記録しないサーバーを読み飛ばす)
 DMG = None     # dmg_core.DmgCore (被ダメの記録)
 OFFICIAL = None  # ro_official.Official (公式サイトから集めたモンスター情報)
@@ -1831,6 +1849,13 @@ def main():
     except Exception as e:
         print("[利用キー] 使えません:", e)
         LIC = None
+    global SHARED
+    try:
+        SHARED = zatta_core.Shared(SHARED_FILE, key=lambda: LIC.data_key("zatta") if LIC is not None else "", log=print)
+        SHARED.start()
+    except Exception as e:
+        print("[共有相場] 使えません:", e)
+        SHARED = None
     lock = threading.Lock()
     start_live_server(core, lock, cfg)   # 画面は先に出す(Npcapが無くても見られるように)
     if OFFICIAL is not None and DMG is not None:

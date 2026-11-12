@@ -20,7 +20,7 @@ a = ap.parse_args()
 import md_tracker as mt, md_core, char_core, dmg_core
 T = tempfile.mkdtemp(prefix="fox_ui_")
 for k in ("CONFIG_FILE", "STATE_FILE", "CHAR_STATE_FILE", "DMG_FILE", "SKILL_FIX_FILE", "DMG_RAW_FILE", "LOG_FILE", "ACCOUNTS_FILE",
-          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE", "MARKET_FILE"):
+          "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE", "MARKET_FILE", "SHARED_FILE"):
     if hasattr(mt, k):
         setattr(mt, k, os.path.join(T, os.path.basename(getattr(mt, k))))
 if a.data:      # 計算機のスロットも、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)
@@ -64,6 +64,10 @@ if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))
 import market_core
 mt.MARKET = market_core.Market(mt.MARKET_FILE, log=print)
+import zatta_core
+mt.SHARED = zatta_core.Shared(mt.SHARED_FILE)      # 受け取りは動かさない(見本だけ)
+if os.environ.get("FOX_SEED_INV"):
+    mt.SHARED.merge([[501, 0, "", "", "", "n", zatta_core._day_ago(1), 12, 150, 120, 200], [607, 0, "", "", "", "n", zatta_core._day_ago(3), 4, 52000, 50000, 55000]])
 if os.environ.get("FOX_SEED_INV"):      # インベントリ画面の確認用: 見本の持ち物と倉庫を入れる
     _n = next(iter(mt.CHARS.chars), "テスト")
     mt.CHARS.chars.setdefault(_n, {"stats": {}, "derived": {}, "statusPoint": None, "equips": [], "updated": 1})
