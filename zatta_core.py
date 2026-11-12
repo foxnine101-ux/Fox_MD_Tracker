@@ -11,6 +11,7 @@ import json
 import os
 import threading
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -29,8 +30,8 @@ def _day_ago(n):
 
 
 class Shared(object):
-    def __init__(self, path, key=lambda: "", log=None, url=URL):
-        self.path, self.key, self.log, self.url = path, key, log or (lambda *a: None), url
+    def __init__(self, path, key=lambda: "", log=None, url=URL, drop=lambda: None):
+        self.path, self.key, self.log, self.url, self.drop = path, key, log or (lambda *a: None), url, drop      # drop = 覚えた合言葉を捨てる(401 のとき。次にもらい直す)
         self.lock = threading.Lock()
         self.d = {"t": "", "items": {}}      # items: {アイテム番号: {日: [件数, 中央値, 最安, 最高]}}(通常のワールド・絞り込みなしの値だけ)
         self.err = ""
@@ -82,22 +83,32 @@ class Shared(object):
 
     def poll(self):
         """1回確かめる。受け取った行数を返す(合言葉が無ければ -1)。"""
-        tok = self.key() or ""
+        tok = (self.key() or "").strip()
         if not tok:
             self.err = "nokey"
             return -1
         self.checked = time.time()
-        last = self._get("/lastupdate", tok).get("t") or ""
+        try:
+            last = self._get("/lastupdate", tok).get("t") or ""
+        except urllib.error.HTTPError as e:
+            if e.code == 401:      # 合言葉が変わった → 覚えたものを捨てて、次にもらい直す
+                self.drop()
+                self.err = "401"
+                return -1
+            raise
         if last and last == self.d["t"]:
             self.err = ""
             return 0
-        since, got = self.d["t"], 0
+        since, got, done = self.d["t"], 0, False
         for _ in range(20):      # 続きがあれば続けて(1回 5000 行まで)
             r = self._get("/latest?" + urllib.parse.urlencode({"since": since}), tok)
             got += self.merge(r.get("rows") or [])
             since = r.get("next") or since
             if not r.get("more"):
+                done = True
                 break
+        if done and last > since:      # 最後まで受け取れた: 60日より古い日の更新は返らないので、時刻は /lastupdate に合わせる(毎回取り直さない)
+            since = last
         with self.lock:
             self.d["t"] = since
         self.save()

@@ -1851,7 +1851,8 @@ def main():
         LIC = None
     global SHARED
     try:
-        SHARED = zatta_core.Shared(SHARED_FILE, key=lambda: LIC.data_key("zatta") if LIC is not None else "", log=print)
+        SHARED = zatta_core.Shared(SHARED_FILE, key=lambda: LIC.data_key("zatta") if LIC is not None else "", log=print,
+                                   drop=lambda: LIC.drop_data_key("zatta") if LIC is not None else None)
         SHARED.start()
     except Exception as e:
         print("[共有相場] 使えません:", e)

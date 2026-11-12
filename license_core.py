@@ -108,6 +108,12 @@ class License:
                             }.get(r.get("reason"), "登録できませんでした。")
             return self.status()
 
+    def drop_data_key(self, name):
+        """覚えた鍵を捨てる(相手が受け付けなくなったとき。次の data_key でもらい直す)"""
+        with self.lock:
+            if (self.d.get("dkeys") or {}).pop(name, None) is not None:
+                self._save()
+
     def data_key(self, name="lantern", fetch=True):
         """同梱データの鍵。利用キーが有効なら、サーバーから1度もらって覚える(オフラインでも使える)。無ければ """""
         if not self._usable():

@@ -111,11 +111,11 @@ async function invNameSet(id) {
   await fetch("/api/itemname", { method: "POST", body: JSON.stringify({ id: +id, name: nm.trim() }) }).catch(() => null);
   INV_T = -1; render();
 }
-function mkCells(id) {      // 覚えている相場(「相場」ボタンで取ったもの)から、直近の売価と中央値。まだ取っていない品は空欄
+function mkCells(id, eq) {      // 覚えている相場(「相場」ボタンで取ったもの・身内の共有相場)から、直近の売価と中央値。無い品は空欄
   const b = MKB[String(id)];
-  if (!b) return `<td class="n muted"></td><td class="n muted"></td>`;
+  if (!b || (eq && b[4] === "s")) return `<td class="n muted"></td><td class="n muted"></td>`;
   const ago = b[0] ? `取得 ${when(b[0])}` : "", sh = b[4] === "s";      // sh = 身内の共有相場(RO相場自動記録が貯めた日ごとの値)
-  const t1 = sh ? `${b[2] || ""} の中央値(身内の共有相場) / ${ago}` : `${b[2] || ""} の取引 / ${ago}`, t2 = sh ? `直近30日の中央値(身内の共有相場) / ${ago}` : ago;
+  const t1 = sh ? `${b[2] || ""} の中央値(身内の共有相場)${ago ? " / " + ago : ""}` : `${b[2] || ""} の取引 / ${ago}`, t2 = sh ? `直近30日の中央値(身内の共有相場)${ago ? " / " + ago : ""}` : ago;
   const mark = sh ? `<span class="sub" title="身内の共有相場">共</span>` : "";
   return `<td class="n" title="${esc(t1)}">${b[1] == null ? "-" : mktYen(b[1])}${mark}</td><td class="n" title="${esc(t2)}">${b[3] == null ? "-" : mktYen(b[3])}${mark}</td>`;
 }
@@ -134,7 +134,7 @@ function invRows(items, eq, cat = INV_CAT) {
 function invTable(rows) {
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   return `<div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">個数</th><th class="n" title="覚えている相場のうち、いちばん新しい取引の単価">直近の売価</th><th class="n" title="公式ツールの中央値(全期間)">中央値</th><th></th></tr></thead><tbody>${rows.map((r) =>
-    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td>${mkCells(r.id)}<td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${r.unk ? ` <button class="ghost nm" data-nm="${r.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+    `<tr><td>${esc(r.name)}${r.sub ? `<div class="sub">${esc(r.sub)}</div>` : ""}${r.opts ? `<div class="sub">${esc(r.opts)}</div>` : ""}</td><td class="n">${r.eq ? "" : fmtN(r.count)}</td>${mkCells(r.id, r.eq)}<td><button class="ghost mk" data-mk="${r.id}" data-mkn="${esc(r.base || r.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${r.unk ? ` <button class="ghost nm" data-nm="${r.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 function invAcct(owner) {      // 倉庫の持ち主(アカウント番号)→ 画面に出す呼び名
   const n = Object.entries((DATA && DATA.chars) || {}).filter(([k, c]) => String(c.account) === String(owner)).map(([k]) => k)[0];
@@ -145,7 +145,7 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
   const g = new Map();
   const add = (r, where) => {
     const key = r.base || r.name; let e = g.get(key);
-    if (!e) g.set(key, e = { id: r.id, name: key, total: 0, where: new Map(), unk: r.unk });
+    if (!e) g.set(key, e = { id: r.id, name: key, total: 0, where: new Map(), unk: r.unk, eq: r.eq });
     const n = r.eq ? 1 : r.count; e.total += n;
     const w = e.where.get(where) || { n: 0, tag: [] }; w.n += n;
     if (r.eq) { const t = r.name.endsWith(key) ? r.name.slice(0, r.name.length - key.length).trim() : ""; if (t) w.tag.push(t); }
@@ -157,7 +157,7 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
   if (!rows.length) return `<div class="muted" style="padding:10px">該当する品はありません。</div>`;
   const cap = rows.slice(0, 300);
   return `<div class="muted" style="margin:4px 0">${rows.length} 種類が見つかりました${rows.length > cap.length ? `（先頭 ${cap.length} 種類を表示）` : ""}。</div><div class="tablewrap"><table class="invt"><thead><tr><th>アイテム</th><th class="n">合計</th><th>どこに（個数）</th><th class="n">直近の売価</th><th class="n">中央値</th><th></th></tr></thead><tbody>${cap.map((e) =>
-    `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td>${mkCells(e.id)}<td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
+    `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td>${mkCells(e.id, e.eq)}<td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 function renderInventory(chars) {
