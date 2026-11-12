@@ -41,6 +41,8 @@ WATCH = set(OP_VEND_SOLD + (OP_CART_DEL, OP_MY_VEND) + OP_SHOP + OP_BS_BOUGHT + 
             + (OP_MAIL_Z, OP_MAIL_I) + OP_MAIL + OP_TRADE + OP_SEARCH)
 OPS = WATCH | {0x00B1, 0x0ACB, 0x0B41, 0x07FA} | set(OP_LIST)
 # 前後の通信を書き出すとき省く、いつも流れているもの(移動・出現・HP など)
+# チャット・耳打ち・告知(中身を動作ログに書かない。ギルメンが動作ログを送ってくるため)
+CHAT = {0x008D, 0x008E, 0x0097, 0x0098, 0x009A, 0x0109, 0x017F, 0x01C3, 0x02C1, 0x09DE, 0x09DF, 0x0A37, 0x0B17, 0x0B1E, 0x0BDA}
 NOISE = {0x0087, 0x0088, 0x0080, 0x0086, 0x09FD, 0x09FE, 0x09FF, 0x01DE, 0x08C8, 0x0ADF, 0x0095, 0x0A30, 0x00B0, 0x0A36,
          0x0B1B, 0x01FF, 0x0196, 0x0983, 0x0229, 0x0119, 0x007F, 0x0360, 0x0187, 0x00B4, 0x00B5, 0x02E1, 0x0A37, 0x0B4B}
 
@@ -129,7 +131,7 @@ class Ledger(object):
         with self.lock:
             s = self._st(key)
             if op not in NOISE:
-                s["ring"].append((now, op, len(pkt), bytes(pkt[:48])))
+                s["ring"].append((now, op, len(pkt), b"" if op in CHAT else bytes(pkt[:48])))
             if op not in OPS:
                 self._close(key, s, now)
                 return
@@ -174,6 +176,10 @@ class Ledger(object):
             if s["d41"] and s["d41"][0] == sig and now - s["d41"][1] < 0.8:       # 通常の読み取りと拾い直しの二重取り
                 return
             s["d41"] = (sig, now)
+            for h in s["cartout"]:
+                if not h.get("used") and h["n"] == -(cnt or 1) and 0 <= now - h["t"] <= 1.5:
+                    h["used"] = True           # カートから持ち物へ出しただけ(0125 → 0B41 同じ個数。RO Storage Manager と同じ見分け方)
+                    break
             if itid:
                 eq = bool(struct.unpack_from("<I", pkt, 28)[0])
                 s["ev"].append({"t": now, "id": itid, "n": cnt or 1, "r": pkt[68] if eq else 0})
@@ -255,8 +261,9 @@ class Ledger(object):
                 s["shop"] = (now, (old + ent)[-300:])     # 検索をくり返したら足していく(どの結果から買ったか分からないため)
         elif op in OP_NPC_RES:
             # 00CA(買った結果)は、NPC のお店の窓を開いていなければ露店検索からの購入(jRO の実測: ノアトゥーンの遠くの露店。品はあとでメール)
-            npc = s["ctx"].get("npc") and now - s["ctx"]["npc"] < NPC_SEC and s["ctx"]["npc"] >= s["ctx"].get("search", 0)
-            s["hint"].append({"t": now, "k": ("npc_buy" if op == 0x00CA else "npc_sell") if npc or op != 0x00CA else "search_buy"})
+            # 露店検索(結果 0B64 など)を最近見ていて、それが NPC の窓より新しいときだけ露店検索からの購入。ほかは NPC
+            srch = s["ctx"].get("search") and now - s["ctx"]["search"] < SHOP_SEC and s["ctx"]["search"] >= s["ctx"].get("npc", 0)
+            s["hint"].append({"t": now, "k": "search_buy" if op == 0x00CA and srch else ("npc_buy" if op == 0x00CA else "npc_sell")})
         elif op == OP_MAIL_Z:
             s["hint"].append({"t": now, "k": "mail"})
         elif op == OP_MAIL_I:
@@ -394,7 +401,7 @@ class Ledger(object):
                 m = self._match_shop(s["shop"][1], -d)                         # 検索結果の値段 × 個数 = 払った額 の品が1つに決まれば、その品
                 if m:
                     its = [[m[0], m[1], 0]]
-        elif d > 0 and recent("bs", SHOP_SEC) and s["bsl"] and self._match_shop(s["bsl"][1], d):
+        elif d > 0 and not hk and recent("bs", SHOP_SEC) and s["bsl"] and self._match_shop(s["bsl"][1], d):
             k = "bs_sell"                      # 人の買取露店を見たあと、値段 × 個数 がぴったりの額が増えた(jRO では 081C が来ない)
             m = self._match_shop(s["bsl"][1], d)
             its = [[m[0], -m[1], 0]] if not any(x[1] < 0 for x in its) else its
