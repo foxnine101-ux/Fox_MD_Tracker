@@ -69,6 +69,7 @@ class Ledger(object):
         self._saved = 0.0
         self._diag = {}
         self._nlog = 0
+        self._nother = 0
         self.load()
 
     # ---------- 保存 ----------
@@ -127,7 +128,7 @@ class Ledger(object):
         with self.lock:
             s = self._st(key)
             if op not in NOISE:
-                s["ring"].append((now, op, len(pkt)))
+                s["ring"].append((now, op, len(pkt), bytes(pkt[:48])))
             if op not in OPS:
                 self._close(key, s, now)
                 return
@@ -395,7 +396,7 @@ class Ledger(object):
             row["it"] = its
         if price:
             row["p"] = round(price, 2)
-        ops = sorted({"{:04X}".format(o) for (t, o, ln) in s["ring"] if t0 - 1.5 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB)})
+        ops = sorted({"{:04X}".format(o) for (t, o, ln, raw) in s["ring"] if t0 - 1.5 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB)})
         if ops and k.startswith("other"):
             row["ops"] = ops                   # 確認用: 何で動いたか分からなかったときの、前後の通信の種類
         self._add(row)
@@ -404,6 +405,12 @@ class Ledger(object):
             self.log("[家計簿] {} {:+,}z {}{}{} / 前後の通信: {}".format(
                 tx["c"], d, KINDS.get(k, k), (" " + "、".join("{}{}×{}".format("+{} ".format(x[2]) if x[2] else "", self._iname(x[0]) if x[0] else "品不明", abs(x[1])) for x in its)) if its else "",
                 " 単価{:,.0f}".format(price) if price else "", ",".join(ops) or "なし"))
+        if k.startswith("other") and self._nother < 40:
+            # 何で動いたか分からなかったとき: 前後 10秒の通信の中身を残す(jRO で使われる通信を見つけるため)
+            self._nother += 1
+            for (t, o, ln, raw) in s["ring"]:
+                if t0 - 10 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB):
+                    self.log("[家計簿]   確認用 {:+.1f}秒 {:04X} {}バイト: {}".format(t - t0, o, ln, raw.hex()))
 
     @staticmethod
     def _match_shop(entries, z):
