@@ -36,6 +36,7 @@ if DATA_HOME != HERE:
 import guild_packet as gp   # 通信の切り分け(ギルドトラッカーと共通)
 import market_core          # 相場(公式ツールの露店の取引履歴。この PC だけに覚える)
 import zatta_core           # 身内の共有相場(RO相場自動記録が貯めたもの)を受け取るだけ
+import ledger_core          # 家計簿(ゼニーの増減と動いた品。この PC だけ)
 import md_core
 import quest_names
 import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
@@ -56,6 +57,7 @@ STATE_FILE = os.path.join(DATA_HOME, "md_state.json")
 CHAR_STATE_FILE = os.path.join(DATA_HOME, "char_state.json")
 DMG_FILE = os.path.join(DATA_HOME, "被ダメ記録.json")
 MARKET_FILE = os.path.join(DATA_HOME, "相場.json")      # 相場(露店の取引履歴。この PC だけ。配らない)
+LEDGER_FILE = os.path.join(DATA_HOME, "家計簿.json")      # 家計簿(この PC だけ)
 SHARED_FILE = os.path.join(DATA_HOME, "共有相場.json")      # 身内の共有相場(受け取ったもの。この PC だけ)
 OFFICIAL_FILE = os.path.join(DATA_HOME, "公式モンスター.json")      # RO公式ツールから集めたモンスター情報(この PC だけ。配らない)
 LANTERN_FILE = os.path.join(DATA_HOME, "ランタンハント.json")      # ランタンの座標の一覧(利用者が貼り付けた・取り込んだもの。同梱しない・配らない)
@@ -511,6 +513,7 @@ def start_live_server(core, lock, cfg):
                         data["equip"] = CHARS.equip_view()
                         data["now_chars"] = [n for n in core.currents.values() if n]      # いまログインしているキャラ(つながっている通信ごと)
                         data["inv_t"] = max([c.get("items_t") or 0 for c in CHARS.chars.values()] + [s.get("t") or 0 for st in CHARS.stores.values() for s in st.values()] + [0])      # インベントリの更新時刻(画面が読み直す目印)
+                        data["ledger_t"] = LEDGER.t if LEDGER is not None else 0      # 家計簿の更新時刻
                     data["calc"] = CALC_DATA                  # 属性の相性表など(計算機の被ダメの検証用)
                     if DMG is not None:
                         data["skill_names"] = {k: DMG.skill_name(int(k)) for ch in (CHARS.chars.values() if CHARS is not None else [])
@@ -544,6 +547,14 @@ def start_live_server(core, lock, cfg):
                 with lock:
                     names = dict(CHARS.id2name) if CHARS is not None else {}
                 return self._send(200, json.dumps(names, ensure_ascii=False), "application/json; charset=utf-8")
+            if path == "/api/ledger" and self._local_only():       # 家計簿。タブを開いたときだけ読む(days=何日分。無ければ全部)
+                q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                try:
+                    days = int((q.get("days") or ["0"])[0])
+                except ValueError:
+                    days = 0
+                out = LEDGER.view(days or None) if LEDGER is not None else {"rows": [], "names": {}, "kinds": {}, "t": 0}
+                return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
             if path == "/api/inv" and self._local_only():          # インベントリ(持ち物と倉庫)。タブを開いたときだけ読む
                 with lock:
                     out = CHARS.inv_view() if CHARS is not None else {"chars": {}, "stores": {}, "names": {}}
@@ -1206,6 +1217,13 @@ class _Scanner(gp.StreamScanner):
                     DMG.feed(self.key, pkt)
                 except Exception:
                     pass
+            if LEDGER is not None:                    # 家計簿は char_core より先に(消えた品の番号を、消える前の持ち物から引く)
+                try:
+                    LEDGER.feed(self.key, pkt)
+                except Exception as e:
+                    STATS["errors"] += 1
+                    if STATS["errors"] <= 5:
+                        print("[家計簿] 解析エラー", repr(e))
             if CHARS is not None:
                 try:
                     CHARS.feed(self.key, pkt)
@@ -1230,7 +1248,7 @@ def used_ops():
         import dmg_core
     except Exception:
         dmg_core = None
-    for m, attr in ((char_core, "WANT_OPS"), (dmg_core, "OPS"), (server_core, "OP_TO_MAP")):
+    for m, attr in ((char_core, "WANT_OPS"), (dmg_core, "OPS"), (server_core, "OP_TO_MAP"), (ledger_core, "OPS")):
         try:
             u |= set(getattr(m, attr))
         except Exception:
@@ -1259,6 +1277,7 @@ _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通�
 CHARS = None   # char_core.CharCore (あれば)
 MARKET = None  # market_core.Market
 SHARED = None  # zatta_core.Shared(身内の共有相場)
+LEDGER = None  # ledger_core.Ledger(家計簿)
 
 
 def market_brief():
@@ -1909,6 +1928,12 @@ def main():
     except Exception as e:
         print("[利用キー] 使えません:", e)
         LIC = None
+    global LEDGER
+    try:
+        LEDGER = ledger_core.Ledger(LEDGER_FILE, chars=CHARS, md=core, log=print)
+    except Exception as e:
+        print("[家計簿] 使えません:", e)
+        LEDGER = None
     global SHARED
     try:
         SHARED = zatta_core.Shared(SHARED_FILE, key=lambda: LIC.data_key("zatta") if LIC is not None else "", log=print,
@@ -2194,6 +2219,11 @@ def run_loop(core, lock, cfg, stop):
             if SERVERS.changed:
                 SERVERS.changed = False
                 save_servers()
+        if LEDGER is not None:
+            try:
+                LEDGER.tick()                         # 前後の品が出そろった取引をまとめる・20秒に1回まで保存
+            except Exception as e:
+                print("[家計簿] まとめられませんでした:", repr(e))
         # 変化があったら少しまとめてから送る(ログイン直後の連続更新を1回に)
         if dirty_since and time.time() - dirty_since > 8 and time.time() - last_up > 15:
             with lock:

@@ -160,14 +160,84 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
     `<tr><td>${esc(e.name)}</td><td class="n">${fmtN(e.total)}</td><td>${[...e.where].map(([w, v]) => `${esc(w)} ×${fmtN(v.n)}${v.tag.length ? `<span class="sub">（${esc(v.tag.join("、"))}）</span>` : ""}`).join("<br>")}</td>${mkCells(e.id, e.eq)}<td><button class="ghost mk" data-mk="${e.id}" data-mkn="${esc(e.name)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>${e.unk ? ` <button class="ghost nm" data-nm="${e.id}" title="名前を手で付ける">名前</button>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
+// ---------- 家計簿(ゼニーの増減と、そのとき動いた品。ledger_core。/api/ledger。この PC だけ) ----------
+let LED = null, LED_T = -1, LED_LOADING = false, LED_SRV = "", LED_CHAR = "", LED_DAYS = +(store.get("md_leddays") || 7), LED_KIND = "";
+function invNav(slots) {
+  return `<div class="simnav" id="invnav"><button data-invsub="all" class="${INVSUB === "all" ? "on" : ""}" title="全キャラの持ち物とすべての倉庫から探す">全部から探す</button><button data-invsub="bag" class="${INVSUB === "bag" ? "on" : ""}">持ち物</button>${slots.map((s) => `<button data-invsub="${esc(s.id)}" class="${INVSUB === s.id ? "on" : ""}" ${s.st ? "" : `style="opacity:.55"`}>${esc(s.label)}</button>`).join("")}<button data-invsub="ledger" class="${INVSUB === "ledger" ? "on" : ""}" title="ゼニーの増減と、そのとき動いた品（露店・買取露店・メールなど）">家計簿</button></div>`;
+}
+function ledLoad() {
+  if (LED_LOADING) return;
+  LED_LOADING = true; LED_T = (DATA && DATA.ledger_t) || 0;
+  fetch("/api/ledger").then((r) => r.json()).then((d) => { LED = d; }).catch(() => { LED = LED || { rows: [], names: {}, kinds: {} }; })
+    .finally(() => { LED_LOADING = false; if (TAB === "inv" && INVSUB === "ledger") render(); });
+}
+const ledZ = (n) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtN(Math.abs(n))}`;
+const ledCls = (n) => n > 0 ? "ok" : n < 0 ? "warn" : "muted";
+const ledDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+function ledName(id) { return id ? ((LED && LED.names && LED.names[String(id)]) || (DATA.item_names || {})[String(id)] || `ID${id}`) : "品不明"; }
+function ledItems(r) {
+  const it = (r.it || []).map((x) => `${x[2] ? "+" + x[2] + " " : ""}${esc(ledName(x[0]))} ×${fmtN(Math.abs(x[1]))}`).join("、");
+  return it + (r.p ? `<span class="sub">（1個 ${fmtN(Math.round(r.p))}z）</span>` : "");
+}
+function renderLedger(chars) {
+  if (!LED || LED_T !== ((DATA && DATA.ledger_t) || 0)) ledLoad();
+  const nav = invNav(invStoreSlots(INV_CHAR || nowChar() || lastChar()));
+  if (!LED) { $("#view").innerHTML = `${nav}<div class="panel empty">読み込んでいます…</div>`; ledBind(); return; }
+  const K = LED.kinds || {}, all = LED.rows || [];
+  if (!all.length) { $("#view").innerHTML = `${nav}<div class="panel empty">まだ記録がありません。<br>ツールを動かしたまま、露店で売り買い・買取露店・メールの受け取りなどをすると記録されます。</div>`; ledBind(); return; }
+  // ワールドごとに分ける(ノアトゥーンはゼニーの桁がちがうので、ワールドをまたいで足さない)
+  const srvs = [...new Set(all.map((r) => srvOf(r.c)))];
+  if (!srvs.includes(LED_SRV)) { const cs = srvOf(nowChar() || lastChar() || ""); LED_SRV = srvs.includes(cs) ? cs : (srvs[0] || ""); }
+  const inSrv = all.filter((r) => srvOf(r.c) === LED_SRV);
+  const cl = [...new Set(inSrv.map((r) => r.c))].sort((a, b) => cn(a).localeCompare(cn(b), "ja"));
+  if (LED_CHAR && !cl.includes(LED_CHAR)) LED_CHAR = "";
+  const cut = LED_DAYS ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() / 1000 - (LED_DAYS - 1) * 86400; })() : 0;
+  const rows0 = inSrv.filter((r) => (!LED_CHAR || r.c === LED_CHAR) && r.t >= cut);
+  const rows = rows0.filter((r) => !LED_KIND || r.k === LED_KIND);
+  const real = rows0.filter((r) => r.k !== "unseen");
+  const inc = real.reduce((a, r) => a + (r.d > 0 ? r.d : 0), 0), out = real.reduce((a, r) => a + (r.d < 0 ? -r.d : 0), 0);
+  const byK = new Map();
+  for (const r of rows0) { const e = byK.get(r.k) || { n: 0, z: 0 }; e.n++; e.z += r.d; byK.set(r.k, e); }
+  const byDay = new Map();
+  for (const r of real) { const d = ledDay(r.t), e = byDay.get(d) || { i: 0, o: 0 }; if (r.d > 0) e.i += r.d; else e.o -= r.d; byDay.set(d, e); }
+  const opt = (v, cur, l) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(l)}</option>`;
+  const bar = `<div class="invbar">${srvs.length > 1 ? `<select id="ledsrv">${srvs.map((s) => opt(s, LED_SRV, serverLabel(s))).join("")}</select>` : ""}<select id="ledchar">${opt("", LED_CHAR, "全キャラ")}${cl.map((c) => opt(c, LED_CHAR, cn(c))).join("")}</select><select id="leddays">${[[1, "今日"], [7, "7日"], [30, "30日"], [0, "全部"]].map(([v, l]) => `<option value="${v}" ${v === LED_DAYS ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
+  const note = `<div class="muted" style="margin-bottom:6px">ツールを動かしているあいだの、ゼニーの増減と、そのとき動いた品の記録です（この PC だけに保存）。「何で」は前後の通信からの見立てです。ワールドごとに分けています（ノアトゥーンはゼニーの桁がちがうので混ぜません）。</div>`;
+  const big = (l, n, c) => `<div style="min-width:120px">${l}<b class="${c}" style="display:block;font-size:18px">${ledZ(n)} z</b></div>`;
+  const sum = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0">${big("収入", inc, "ok")}${big("支出", -out, "warn")}${big("差し引き", inc - out, ledCls(inc - out))}</div>`;
+  const kinds = [...byK].sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z));
+  const kt = `<div class="tablewrap"><table class="invt"><thead><tr><th>何で</th><th class="n">回数</th><th class="n">金額</th></tr></thead><tbody>${kinds.map(([k, e]) =>
+    `<tr data-ledk="${esc(k)}" style="cursor:pointer${LED_KIND === k ? ";background:var(--line)" : ""}" title="押すと明細をこれだけにします"><td>${esc(K[k] || k)}${k === "unseen" ? `<span class="sub">（収入・支出に入れない）</span>` : ""}</td><td class="n">${fmtN(e.n)}</td><td class="n ${ledCls(e.z)}">${ledZ(e.z)}</td></tr>`).join("")}</tbody></table></div>`;
+  const days = [...byDay].sort((a, b) => b[0].localeCompare(a[0]));
+  const dt = days.length > 1 ? `<div class="tablewrap" style="margin-top:8px"><table class="invt"><thead><tr><th>日</th><th class="n">収入</th><th class="n">支出</th><th class="n">差し引き</th></tr></thead><tbody>${days.slice(0, 60).map(([d, e]) =>
+    `<tr><td>${esc(d.slice(5).replace("-", "/"))}</td><td class="n ok">${ledZ(e.i)}</td><td class="n warn">${ledZ(-e.o)}</td><td class="n ${ledCls(e.i - e.o)}">${ledZ(e.i - e.o)}</td></tr>`).join("")}</tbody></table></div>` : "";
+  const cap = rows.slice(0, 300);
+  const det = `<div style="margin:12px 0 4px;font-weight:bold">明細${LED_KIND ? `（${esc(K[LED_KIND] || LED_KIND)}だけ <button class="ghost" id="ledkx">全部に戻す</button>）` : ""}<span class="muted" style="font-weight:normal">　${fmtN(rows.length)} 件${rows.length > cap.length ? `（新しい ${cap.length} 件を表示）` : ""}</span></div>
+    <div class="tablewrap"><table class="invt"><thead><tr><th>日時</th>${LED_CHAR ? "" : "<th>キャラ</th>"}<th>何で</th><th class="n">金額</th><th>品物</th><th class="n">所持金</th></tr></thead><tbody>${cap.map((r) =>
+    `<tr><td>${esc(when(r.t))}</td>${LED_CHAR ? "" : `<td>${esc(cn(r.c))}</td>`}<td>${esc(K[r.k] || r.k)}</td><td class="n ${ledCls(r.d)}">${r.d ? ledZ(r.d) : ""}</td><td>${ledItems(r)}</td><td class="n muted">${r.b == null ? "" : fmtN(r.b)}</td></tr>`).join("")}</tbody></table></div>`;
+  $("#view").innerHTML = `${nav}${bar}${note}${sum}${kt}${dt}${det}`;
+  ledBind();
+}
+function ledBind() {
+  const v = $("#view");
+  v.querySelectorAll("[data-invsub]").forEach((b) => b.onclick = () => { INVSUB = b.dataset.invsub; store.set("md_invsub", INVSUB); render(); });
+  v.querySelectorAll("[data-ledk]").forEach((tr) => tr.onclick = () => { LED_KIND = LED_KIND === tr.dataset.ledk ? "" : tr.dataset.ledk; render(); });
+  const on = (id, f) => { const e = $(id); if (e) e.onchange = () => { f(e.value); render(); }; };
+  on("#ledsrv", (x) => { LED_SRV = x; LED_CHAR = ""; });
+  on("#ledchar", (x) => { LED_CHAR = x; });
+  on("#leddays", (x) => { LED_DAYS = +x; store.set("md_leddays", String(LED_DAYS)); });
+  const kx = $("#ledkx"); if (kx) kx.onclick = () => { LED_KIND = ""; render(); };
+}
+
 function renderInventory(chars) {
+  if (INVSUB === "ledger") { renderLedger(chars); return; }
   if (!INV || INV_T !== ((DATA && DATA.inv_t) || 0)) invLoad();
   if (!INV) { $("#view").innerHTML = `<div class="panel empty">読み込んでいます…</div>`; return; }
   const cur = nowChar() || lastChar();
   if (!INV_CHAR || !chars.includes(INV_CHAR)) INV_CHAR = cur && chars.includes(cur) ? cur : (chars.find((c) => INV.chars[c]) || chars[0] || "");
   const slots = invStoreSlots(INV_CHAR);
   if (INVSUB !== "bag" && INVSUB !== "all" && !slots.some((s) => s.id === INVSUB)) INVSUB = "bag";
-  const nav = `<div class="simnav" id="invnav"><button data-invsub="all" class="${INVSUB === "all" ? "on" : ""}" title="全キャラの持ち物とすべての倉庫から探す">全部から探す</button><button data-invsub="bag" class="${INVSUB === "bag" ? "on" : ""}">持ち物</button>${slots.map((s) => `<button data-invsub="${esc(s.id)}" class="${INVSUB === s.id ? "on" : ""}" ${s.st ? "" : `style="opacity:.55"`}>${esc(s.label)}</button>`).join("")}</div>`;
+  const nav = invNav(slots);
   let head = "", body = "", tblFn = null;
   const unk = invUnknownIds();
   const resBtn = unk.length || INV_RES.run ? `<button class="ghost" id="invres" ${INV_RES.run ? "disabled" : ""} title="公式ツールの露店の取引から、名前を調べます（1件3秒ほど。取引が無い品は分かりません）">${INV_RES.run ? `調べています… 残り ${INV_RES.left} / ${INV_RES.total} 件` : `名前不明 ${unk.length} 件を調べる`}</button>` : "";
