@@ -24,7 +24,8 @@ EQUIP_SIZE = 68
 OP_VEND_SOLD = (0x0137, 0x09E5)        # 自分の露店で売れた [カートの番号2][個数2](09E5 は +買った人・時刻・金額)
 OP_CART_DEL = 0x0125                   # カートから消えた [番号2][個数4]
 OP_MY_VEND = 0x0136                    # 自分の露店の品の一覧(値段つき)
-OP_SHOP = (0x0133, 0x0800)             # 人の露店の品の一覧(値段つき)
+OP_SHOP = (0x0133, 0x0800, 0x0B3D, 0x0B62)   # 人の露店の品の一覧(値段つき。jRO は 0B3D(先頭12)・0B62(先頭17)。RO Storage Manager の実測)
+OP_SEARCH_RES = 0x0B64                 # 露店検索の結果(N鯖の販売アイテム検索)。先頭7 + 142バイト×n: 品@88・1個の値段@93・個数@97(RO Storage Manager の実測)
 OP_BS_BOUGHT = (0x081B, 0x09E6)        # 自分の買取露店が買い取った
 OP_BS_SOLD = 0x081C                    # 人の買取露店に売った [持ち物の番号2][個数2][金額4]
 OP_BS_VIEW = (0x0818, 0x0813)          # 買取露店の一覧(人の・自分の)
@@ -33,7 +34,7 @@ OP_NPC_RES = (0x00CA, 0x00CB)
 OP_MAIL_Z, OP_MAIL_I = 0x09F2, 0x09F4  # メールからゼニー・品を受け取った
 OP_MAIL = (0x09EB, 0x0AC2, 0x09F0, 0x0A7D, 0x09E7)     # メールを読んだ・一覧・新着
 OP_TRADE = (0x00F0, 0x00E9, 0x00EC)    # 取引(成立・品が足された・始まった)
-OP_SEARCH = (0x0836, 0x0837, 0x083A, 0x083D)   # 露店検索(結果・見つからない・窓を開いた・品を押した)
+OP_SEARCH = (0x0836, 0x0837, 0x083A, 0x083D, OP_SEARCH_RES)   # 露店検索(結果・見つからない・窓を開いた・品を押した)
 CART_SEC = 15.0                        # 自分の露店で売れたとき、カートから消えた(0125)のあと、ゼニーが増えるまでの待ち(jRO の実測で 6秒)
 OP_LIST = (0x0B08, 0x0B09, 0x0B39, 0x0B0B)
 WATCH = set(OP_VEND_SOLD + (OP_CART_DEL, OP_MY_VEND) + OP_SHOP + OP_BS_BOUGHT + (OP_BS_SOLD,) + OP_BS_VIEW + OP_NPC + OP_NPC_RES
@@ -105,7 +106,7 @@ class Ledger(object):
         s = self._c.get(key)
         if s is None:
             s = self._c[key] = {"z": None, "tx": [], "ev": [], "hint": [], "ctx": {}, "cart": {}, "cart_t": 0, "vend": {},
-                                "shop": None, "ring": deque(maxlen=200), "d41": None, "d07": None, "cartout": []}
+                                "shop": None, "ring": deque(maxlen=200), "d41": None, "d07": None, "cartout": [], "bsl": None}
         return s
 
     def _name(self, key):
@@ -229,10 +230,29 @@ class Ledger(object):
             s["hint"].append({"t": now, "k": "bs_sell", "id": it[0] if it else None, "n": -(amt or 1), "r": it[1] if it else 0, "z": z})
         elif op in OP_BS_VIEW:
             s["ctx"]["bs"] = now
+            if op == 0x0818:
+                # 人の買取露店の一覧: 先頭16 + 11バイト×n [1個の値段4][個数2][種類1][品4](RO Storage Manager の実測)
+                ent = []
+                for o in range(16, min(len(pkt), struct.unpack_from("<H", pkt, 2)[0] or len(pkt)) - 10, 11):
+                    pr, n, _, iid = struct.unpack_from("<IHBI", pkt, o)
+                    if not (0 < iid < 2000000 and 0 < pr and 0 < n):
+                        break
+                    ent.append({"p": pr, "n": n, "id": iid})
+                s["bsl"] = (now, ent)
         elif op in OP_NPC:
             s["ctx"]["npc"] = now
         elif op in OP_SEARCH:
             s["ctx"]["search"] = now
+            if op == OP_SEARCH_RES and len(pkt) >= 7 + 142:
+                end = min(len(pkt), struct.unpack_from("<H", pkt, 2)[0] or len(pkt))
+                ent = []
+                for o in range(7, end - 141, 142):
+                    iid = struct.unpack_from("<I", pkt, o + 88)[0]
+                    pr, n = struct.unpack_from("<IH", pkt, o + 93)
+                    if 0 < iid < 2000000 and pr > 0:
+                        ent.append({"p": pr, "n": n or 1, "id": iid})
+                old = s["shop"][1] if s["shop"] and now - s["shop"][0] < SHOP_SEC else []
+                s["shop"] = (now, (old + ent)[-300:])     # 検索をくり返したら足していく(どの結果から買ったか分からないため)
         elif op in OP_NPC_RES:
             # 00CA(買った結果)は、NPC のお店の窓を開いていなければ露店検索からの購入(jRO の実測: ノアトゥーンの遠くの露店。品はあとでメール)
             npc = s["ctx"].get("npc") and now - s["ctx"]["npc"] < NPC_SEC and s["ctx"]["npc"] >= s["ctx"].get("search", 0)
@@ -295,7 +315,7 @@ class Ledger(object):
         """露店の品の一覧(可変長)を読む。1件の大きさと始まりは、品の番号が名前の表にある並びを探して決める(jRO の形は未確認)。
         1件 = [値段4][個数2][番号2][種類1][品4]…(人の露店)・[値段4][番号2][個数2][種類1][品4]…(自分の露店)"""
         best = None
-        for head in (4, 8, 12):
+        for head in (4, 8, 12, 17):
             body = pkt[head:]
             for size in range(20, 120):
                 if not body or len(body) % size:
@@ -370,6 +390,14 @@ class Ledger(object):
             its = [[h["id"], h["n"], 0] for h in hints if h["k"] == "bs_buy" and h["id"]] or its
         elif "search_buy" in hk:
             k = "vend_buy" if any(x[1] > 0 for x in its) else "vend_buy_mail"     # 露店検索から買った(品が来なければメールで届く)
+            if k == "vend_buy_mail" and s["shop"] and d < 0:
+                m = self._match_shop(s["shop"][1], -d)                         # 検索結果の値段 × 個数 = 払った額 の品が1つに決まれば、その品
+                if m:
+                    its = [[m[0], m[1], 0]]
+        elif d > 0 and recent("bs", SHOP_SEC) and s["bsl"] and self._match_shop(s["bsl"][1], d):
+            k = "bs_sell"                      # 人の買取露店を見たあと、値段 × 個数 がぴったりの額が増えた(jRO では 081C が来ない)
+            m = self._match_shop(s["bsl"][1], d)
+            its = [[m[0], -m[1], 0]] if not any(x[1] < 0 for x in its) else its
         elif "mail" in hk:
             k = "mail"
         elif "trade" in hk:
