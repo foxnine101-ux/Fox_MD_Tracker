@@ -1220,6 +1220,41 @@ SNIFFER = None      # 通信を聞いているもの(run_loop が、通信が来
 STATS = {"segments": 0, "ops": {}, "errors": 0, "conns": set()}
 _ZENY_LOGS = [0]
 _RING, _RING_LOGS = collections.deque(maxlen=40), [0]      # 直前の通信(めったに来ない種類だけ)・記録の回数(倉庫の見分け方の確認用)
+_OP_HOUR, _OP_PREV = [time.time()], {}      # 通信の種類の記録(1時間ごと): 前に書いた時刻・そのときの回数
+
+
+def used_ops():
+    """アプリが中身を読んでいる通信の種類(記録の「使っている/使っていない」の見分け用)。"""
+    u = set(md_core.WANT_OPS)
+    try:
+        import dmg_core
+    except Exception:
+        dmg_core = None
+    for m, attr in ((char_core, "WANT_OPS"), (dmg_core, "OPS"), (server_core, "OP_TO_MAP")):
+        try:
+            u |= set(getattr(m, attr))
+        except Exception:
+            pass
+    return u
+
+
+def log_op_census():
+    """この1時間に届いた通信の種類と回数を、すべて動作ログに書く(使っているもの・使っていないものに分けて、多い順)。"""
+    cur = dict(_OP_TOTAL)
+    d = {k: v - _OP_PREV.get(k, 0) for k, v in cur.items() if v - _OP_PREV.get(k, 0) > 0}
+    _OP_PREV.clear()
+    _OP_PREV.update(cur)
+    if not d:
+        return
+    u = used_ops()
+    fmt = lambda xs: ", ".join("{:04X}×{}".format(k, v) for k, v in sorted(xs, key=lambda x: (-x[1], x[0])))
+    a, b = [x for x in d.items() if x[0] in u], [x for x in d.items() if x[0] not in u]
+    print("[通信の種類] この1時間: {}種類・{}回(使っている {}種類・{}回 / 使っていない {}種類・{}回)".format(
+        len(d), sum(d.values()), len(a), sum(v for _, v in a), len(b), sum(v for _, v in b)))
+    print("[通信の種類] 使っている: " + (fmt(a) or "なし"))
+    print("[通信の種類] 使っていない: " + (fmt(b) or "なし"))
+
+
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 MARKET = None  # market_core.Market
@@ -2141,6 +2176,9 @@ def run_loop(core, lock, cfg, stop):
             ops = ", ".join("{:04X}×{}".format(k, v) for k, v in sorted(STATS["ops"].items()))
             print("[状況] 届いたかたまり {} / 接続 {} / 大事な通信: {} / キャラ {} / エラー {}".format(
                 STATS["segments"], len(STATS["conns"]), ops or "なし", ", ".join(core.chars) or "なし", STATS["errors"]))
+            if time.time() - _OP_HOUR[0] >= 3600:
+                _OP_HOUR[0] = time.time()
+                log_op_census()
             if core.exp_stats:
                 print("[状況] 経験値の通信(varID/種類: 回数・最大): " + ", ".join(
                     "{}: {}回・{:,}".format(k, v[0], v[1]) for k, v in sorted(core.exp_stats.items())))

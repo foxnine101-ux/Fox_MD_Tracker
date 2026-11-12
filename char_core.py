@@ -30,7 +30,7 @@ import time
 
 WANT_OPS = {0x0141, 0x00BD, 0x00B0, 0x0B39, 0x0999, 0x099A, 0x0B32, 0x010F, 0x010E, 0x07FA, 0x0B41, 0x00B1, 0x0ACB}
 INV_PAGE = 100      # 一覧は100件で区切って届く
-STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x00F6, 0x00F2)     # 倉庫まわりの通信の候補。本物の形がまだ分からないので、最初の数回だけ中身を記録する(確認用)
+STORAGE_OPS = (0x00F4, 0x01C4, 0x0A0A, 0x00F6, 0x00F2, 0x00F8)     # 倉庫まわりの通信(最初の数回だけ中身を記録する・確認用)。00F8 = 倉庫を閉じた(2バイト。取り出しの直後に届くのを実測で確認)
 WANT_OPS |= set(STORAGE_OPS)
 # 持ち物・倉庫の「装備ではない品」の一覧(RO Storage Manager の読み方と同じ): 0B08 一覧の始まり [op2][長さ2=5][種類1] → 0B09 品 [op2][長さ2][種類1] + 34バイト×n
 #   (品: 番号2 アイテム4 種類1 個数2 …)→ 0B39 装備(68バイト×n)→ 0B0B 終わり。種類 0=持ち物・1=カート・2=倉庫・3=ギルド倉庫・4=W倉庫。
@@ -235,6 +235,7 @@ class CharCore(object):
         self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
         self._recent_any = {}  # 接続 -> [(アイテム番号, 時刻)]。装備でない品も含めて、直前に持ち物へ増えた品(倉庫に入れられなかった品の見分け用)
         self._lend = {}        # 接続 -> 倉庫の一覧を受け取り終えた時刻(その直後の 00F2 だけ、取りこぼしの採点で前の記録に戻してよい)
+        self._open = {}        # 接続 -> 倉庫を開いているか(一覧が届いたら開いた・00F8 で閉じた)。閉じているときの出し入れは倉庫に足さない
         self._stor = {}        # 倉庫の装備の一覧(種類 -> 前回・今回の一覧)。増えた品から「倉庫に入れた」を見つける
         self.stores = {}       # 倉庫の中身(装備ではない品+装備): 持ち主(アカウント。分からなければキャラ名) -> {"種類|名前": {inv, title, items:[{itemId,count}], eq:[装備], t}}
         self._lst = {}         # 接続 -> いま受け取り中の一覧 {inv, title, items, eq, t, new}
@@ -997,6 +998,14 @@ class CharCore(object):
                 self._cnt[key] = (struct.unpack_from("<H", pkt, 2)[0], struct.unpack_from("<H", pkt, 4)[0], time.time())
                 le = self._lend.pop(key, None)
                 self._verify_last(key, final=self._lst.get(key) is None, restore=bool(le and time.time() - le < 2.5))
+            elif op == 0x00F8:                           # 倉庫を閉じた
+                key = getattr(self, "_key", None)
+                was = self._open.pop(key, False)
+                self._nclose = getattr(self, "_nclose", 0) + 1
+                if self._nclose <= 200:
+                    ls = self._lastslot.get(key)
+                    sl = self.stores.get(ls[0], {}).get(ls[1]) if ls else None
+                    self.log("[倉庫] 倉庫を閉じた(00F8){}".format("「{}」".format((sl or {}).get("title") or "?") if was else "(開いた記録なし)"))
             elif op == 0x00F6 and len(pkt) >= 8:         # 倉庫から取り出した [倉庫の番号2][個数4]
                 idx, amt = struct.unpack_from("<HI", pkt, 2)
                 self._store_take(idx, amt)
@@ -1211,6 +1220,7 @@ class CharCore(object):
                     slots.pop(kk, None)
             self.changed = True
             self._lastslot[getattr(self, "_key", None)] = (owner, k, time.time())
+            self._open[getattr(self, "_key", None)] = True
             self._verify_last(getattr(self, "_key", None), final=final)
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 1000:
@@ -1337,8 +1347,9 @@ class CharCore(object):
 
     def _open_store(self):
         """この接続で最後に開いた倉庫の記録(無ければ None)。"""
-        ls = self._lastslot.get(getattr(self, "_key", None))
-        if not ls:
+        key = getattr(self, "_key", None)
+        ls = self._lastslot.get(key)
+        if not ls or not self._open.get(key):            # 閉じたあと(00F8)は足さない
             return None
         return self.stores.get(ls[0], {}).get(ls[1])
 
