@@ -11,7 +11,7 @@
 - 公開: `PYTHONIOENCODING=utf-8 python tools/release.py <版> "<日本語メッセージ>" --notes <公開メモ>`(検査 → VERSION → release_notes.md → コミット → push → Actions 成功まで待つ。`--dry-run` で検査だけ)。**公開メモは先頭が見出し行(「・…（v2.xx.x）」)、続きが「  - …」の箇条書き。メモのファイルはリポジトリの外(scratchpad)に置く**(`git add -A` で入る)。メッセージに絵文字を入れない(cp932 で落ちる)。細かい公開を重ねない(利用者の希望)。リリース前に critic に diff を見せる。場所探しは scout
 - 画面のテスト: `python tools/ui_test_server.py`(ポート 18788・保存は一時フォルダ・起動時に `web/*.js` を写すので JS を直したら起動し直す)。本物のデータは `--data <フォルダ>` で読むだけ、計算機の中身は `--ratorio <フォルダ>`。確認は新しいタブで。自動更新の確認は `tools/redraw_check.js`(`{kept:true, redrawn:true}` が正常)
 - 検査: `python -m pyflakes *.py`、`web/*.js` を1つずつ `node --check`(`release.py` がやる)。**属性やメソッドを足すときは同名が無いか grep**(`self.kinds` が `kinds()` を上書きして `/api/data` が落ちた)。公開前は本物のデータで `/api/data` が 200 で返ることを確認
-- 利用者の実測データ: `C:\Users\fuso1\OneDrive\Desktop\Fox_MD_Tracker`(読むだけ。`設定.json` は送信キーがあるので開かない)。開発用のコピー: `F:\Claude\Fox_dev_data\Fox_MD_Tracker\`(環境変数 `FOX_MD_HOME` で `DATA_HOME` を差しかえる。`tools/run_dev.bat`)
+- 利用者の実測データ: `C:\Users\fuso1\Desktop\Fox_MD_Tracker`(2026-11 のクリーンインストールで OneDrive の下から移った。読むだけ。`設定.json` は送信キーがあるので開かない)。開発用のコピー: `F:\Claude\Fox_dev_data\Fox_MD_Tracker\`(環境変数 `FOX_MD_HOME` で `DATA_HOME` を差しかえる。`tools/run_dev.bat`)
 - 公開の落とし穴: 作業ツリー(worktree)は古い写しから始まる → 最初に pull。`release.py` は作業ツリーでは使えない(手で `git fetch && git rebase origin/main && git push origin HEAD:main` → `gh run watch`)。`release.py` は `git add -A` なので、鍵・`api.txt`・データを置かない
 - 新しく通信を足すときは `context=netutil.CTX` を付ける(証明書エラー対策)
 - **教訓(再発したもの)**: ①保存するものに変わりうる辞書を参照で入れない(コピーする)②同じデータを作る場所は全部探す(`SIMC.report` が2か所)③「PID が生きている」は「自分が動いている」ではない(mutex を使う)④押せないボタンは反応がないように見える → 理由を出す ⑤「署名が無い」問題はインストーラー形式を変えても直らない ⑥heredoc で日本語・バックスラッシュ入りのコードを書くと壊れる → ファイルに書いて実行するか Edit を使う
