@@ -13,7 +13,7 @@ function fancyId(nm, have) {      // 品の名前 → 番号(持っていれば�
 }
 function fancyLinks(nm, have) {      // 入手先: 公式ツールのアイテムページ(落とすモンスター・マップ)と、露店の相場
   const id = fancyId(nm, have);
-  return id ? `<a href="https://rotool.gungho.jp/item/${encodeURIComponent(id)}/" target="_blank" rel="noopener" title="RO公式ツールで、落とすモンスター・出るマップを見る">入手先</a> <button class="ghost mk" data-mk="${id}" data-mkn="${esc(nm)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>` : "";
+  return id ? `<a href="https://rotool.gungho.jp/item/${encodeURIComponent(id)}/" target="_blank" rel="noopener" title="RO公式ツールで、落とすモンスター・出るマップを見る">入手</a> <button class="ghost mk" data-mk="${id}" data-mkn="${esc(nm)}" title="公式ツールの露店の取引履歴(相場)を見る">相場</button>` : "";
 }
 function fancyCount(chars) {      // 品の名前 → {n: 合計, where: [[場所, 個数]]}
   const have = new Map(), seen = new Set();
@@ -60,7 +60,7 @@ function renderFancy(chars) {
       <span class="muted" style="margin-left:8px">${done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
       <div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>`;
   }
-  h += `<p class="hint">「入手先」はRO公式ツールのアイテムのページ（落とすモンスター・出るマップ）を開きます。NPC のお店で買える場所は公式ツールに載っていないので、ここには出せません。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
+  h += `<p class="hint">「入手」はRO公式ツールのアイテムのページ（落とすモンスター・出るマップ）を開きます。NPC のお店で買える場所は公式ツールに載っていないので、ここには出せません。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
   $("#view").innerHTML = h;
   document.querySelectorAll("#view [data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn));
   const hide = $("#fchide"); if (hide) hide.onchange = () => { FANCY_HIDE = hide.checked; store.set("md_fancy_hide", FANCY_HIDE ? "1" : "0"); render(); };
