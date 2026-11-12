@@ -34,7 +34,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11.18'      # 3.11.9 は ssl の脆弱性(CVE-2026-115557・eMudhra の盗まれた鍵を信じてしまう)あり。3.11.18 で修正
 
       - name: 部品を入れる
         shell: pwsh
