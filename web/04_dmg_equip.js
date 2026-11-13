@@ -72,7 +72,7 @@ function carryChip(c, always) {         // MD の表のキャラの横。いま�
   // 通常装備が未登録(記号なし)なら 👕 だけ。シャドウの記号は出さない(👕 と同じ「持ったまま」の印なので)。登録ずみ(A・B…)なら、シャドウも登録ずみ(S1…)のときだけ並べる
   const tags = (k.set && !(st && st.tag)) ? [] : [st && st.tag ? st : null, sh && sh.tag ? sh : null].filter(Boolean);
   const label = tags.length ? tags.map((x) => `<span class="ctag" style="background:${tagColor(x)}">${esc(x.tag)}</span>`).join("") : "👕";
-  return `<span class="carry${tags.length ? " set" : ""}${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）${tags.length ? "。着ているのは装備スロット " + tags.map((x) => x.tag).join("・") : ""}: ${names}${k.stale ? "。このログインでは装備の一覧が読めていないので、古い記録です" : ""}。クリックでキャラ詳細`)}">${label}</span>`;
+  return `<span class="carry${tags.length ? " set" : ""}${k.stale ? " stale" : ""}" title="${esc(`装備を持ったままです（着ている ${k.worn}・持ち物 ${k.bag}）${tags.length ? "。着ているのは装備スロット " + tags.map((x) => x.tag).join("・") : ""}: ${names}${k.stale ? (k.moved ? "。" + eqMovedNote(k.moved).replace(/。$/, "") : "。このログインでは装備の一覧が読めていないので、古い記録です") : ""}。クリックでキャラ詳細`)}">${label}</span>`;
 }
 function carryHtml(c) {                 // キャラ詳細: 倉庫に入れていない(持ったままの)装備
   const all = carryAll(c);
@@ -81,7 +81,7 @@ function carryHtml(c) {                 // キャラ詳細: 倉庫に入れて�
   const ig = carryIgnored(c), k = carryOf(c), gone = (all.gone || []).slice().reverse();
   const rows = all.items.map((it) => { const off = ig.has(carryKey(it)); return `<tr class="${off ? "dim" : ""}"><th>${esc(it.slot)}</th><td>${itemLine(it)} <button class="ghost cig" data-cig="${esc(c)}" data-cigk="${esc(carryKey(it))}" title="${off ? "また数えます" : "いつも持っている装備(スペア)は、外し忘れの数に入れません"}">${off ? "数える" : "数えない"}</button></td></tr>`; }).join("");
   return `<div class="carry-box"><h3>倉庫に入れていない装備（持ったまま ${k.n}点${all.n !== k.n ? `・数えないもの ${all.n - k.n}点` : ""}）</h3>
-    ${all.stale ? `<div class="warn" style="margin:4px 0">このログインでは装備の一覧（ログイン時に届く通信）を受け取れていないので、下は古い記録です。</div>` : ""}
+    ${all.stale ? `<div class="warn" style="margin:4px 0">${all.moved ? esc(eqMovedNote(all.moved)) + "このキャラでログインし直すと取り直します。" : "このログインでは装備の一覧（ログイン時に届く通信）を受け取れていないので、下は古い記録です。"}</div>` : ""}
     ${all.n ? `<table class="eq-t"><tbody>${rows}</tbody></table>` : `<div class="muted">持ったままの装備はありません（着ている装備も、持ち物の装備もありません）。</div>`}
     <div class="muted" style="font-size:12px;margin-top:4px">着ている装備（衣装は除く）と、着ていない持ち物の装備です。いつも持っているスペアは「数えない」で、数から外せます（同じ名前・同じ精錬値のものが全部対象。キャラごとの設定）。持ち物から消えた装備は、倉庫に入れたとみなします（途中で取り出して持ったままにした分は、取り出しの通信を読めたときだけ反映されます）。${gone.length ? `<br>最後に持ち物から外れた装備: ${gone.map((g) => `${esc(g.refine ? "+" + g.refine + " " : "")}${esc(g.name)}（${when(g.t)}）`).join("、")}` : ""}</div></div>`;
 }
@@ -108,4 +108,11 @@ function statusHtmlEq(st) {
     ${s.POW ? `<div class="eq-st">${["POW", "STA", "WIS", "SPL", "CON", "CRT"].map((k) => cell(k, sv(k))).join("")}</div>` : ""}
     <div class="eq-st">${cell("Atk", two("ATK", "ATK2"))}${cell("Matk", d.MATKmin !== undefined ? `${d.MATKmin} + ${d.MATKmax}` : "-")}${cell("Def", two("DEF", "DEF2"))}${cell("Mdef", two("MDEF", "MDEF2"))}${cell("Hit", d.HIT ?? "-")}${cell("Flee", two("FLEE", "FLEE2"))}${cell("Critical", d.CRIT ?? "-")}</div>
     ${d["P.ATK"] !== undefined || d.RES !== undefined ? `<div class="eq-st">${["P.ATK", "S.MATK", "RES", "MRES", "H.PLUS", "C.RATE"].map((k) => cell(k, d[k] ?? "-")).join("")}</div>` : ""}`;
+}
+
+// 装備を倉庫経由で別のキャラへ移したとき(char_core._claim): 古い記録から外した、という説明
+function eqMovedNote(m) {
+  const to = m && (Array.isArray(m.to) ? m.to : m.to ? [m.to] : []);
+  if (!to || !to.length) return "";
+  return `装備 ${m.n}点は、いまは ${to.map((x) => /^倉庫/.test(x) ? x : cn(x)).join("・")} にあるので、この記録から外しました（倉庫経由で受け渡したもの）。`;
 }

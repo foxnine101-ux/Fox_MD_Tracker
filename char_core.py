@@ -572,7 +572,7 @@ class CharCore(object):
             if name == UNKNOWN or not (ch.get("equips") or "bag" in ch or ch.get("stats") or ch.get("skills")):      # 全部はずしているキャラ(装備が空)も、持ち物の一覧を受け取っていれば出す
                 continue
             chars[name] = {"cur": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
-                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "inv": "bag" in ch, "stale": bool(ch.get("eq_stale")),
+                           "missing": ch.get("missing") or [], "has_equip": bool(ch.get("equips")), "inv": "bag" in ch, "stale": bool(ch.get("eq_stale")), "moved": ch.get("eq_moved") or None,
                            "now": [self._item_view(it) for it in self._worn(ch)], "carry": self.carry_view(ch), "status": self._status_view(name, ch),
                            "skills": ch.get("skills") or {}, "updated": ch.get("updated") or 0}
         return {"chars": chars, "sets": self.sets, "shadows": self.shadows, "unknown": self.unknown_items()}
@@ -849,12 +849,15 @@ class CharCore(object):
                 for k in ("equips", "bag", "eq_stale"):
                     if k in rec:
                         ch[k] = rec[k]
+                ch.pop("eq_moved", None)
                 if rec.get("gone"):
                     ch["gone"] = ((ch.get("gone") or []) + rec["gone"])[-30:]
             if "items" in rec:
                 ch["items"], ch["items_t"] = rec["items"], rec.get("items_t") or 0
             ch["updated"] = max(ch.get("updated") or 0, rec.get("updated") or 0)
             self.log("[キャラ] {} の記録に、名前が決まる前に届いた分({})を合流させました".format(cur, "装備の一覧あり" if "bag" in rec else "装備の一覧なし"))
+        if "bag" in rec:
+            self._claim(cur, (rec.get("equips") or []) + (rec.get("bag") or []))
         self.changed = True
 
     def _stale_key(self, key):
@@ -1062,6 +1065,8 @@ class CharCore(object):
             self.changed = True
             if not more:
                 self.log("[キャラ] {} の装備 {}点を記録".format(self._name(), len(worn)))
+            ch.pop("eq_moved", None)
+            self._claim(self._name(), worn + bag)
 
         elif op in TITLE_OPS and len(pkt) >= 28:         # 倉庫の名前(メイン・サブ…)。直後に一覧が届く
             t = pkt[4:28].split(b"\0")[0].decode("cp932", "replace").strip()
@@ -1225,6 +1230,8 @@ class CharCore(object):
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 1000:
                 self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
+            if lst["eq"]:
+                self._claim(None, lst["eq"], before=now, srv=srv, who="倉庫「{}」".format(title or "名前不明"))
 
     def _srv(self):
         """いまの接続のワールド(サーバー)。わからなければ空。"""
@@ -1460,6 +1467,67 @@ class CharCore(object):
         return (e.get("itemId"), e.get("refine"), e.get("grade"), tuple(c.get("id") for c in e.get("cards") or []),
                 tuple((o.get("index"), o.get("value")) for o in e.get("options") or []))
 
+    def claim_all(self):
+        """起動時に1回: 新しい記録のキャラが持っている装備が、もっと古い記録のキャラにも残っていたら、古いほうから外す(前の版で残った「分裂」を片づける)。"""
+        order = sorted(((ch.get("updated") or 0, n) for n, ch in self.chars.items() if isinstance(ch, dict) and "bag" in ch and not ch.get("eq_stale")), reverse=True)
+        for up, n in order:
+            ch = self.chars.get(n) or {}
+            if ch.get("eq_stale"):                      # もっと新しいキャラに装備を取られて、古い記録になった
+                continue
+            self._claim(n, (ch.get("equips") or []) + (ch.get("bag") or []), before=up)
+        for owner, slots in (self.stores or {}).items():          # 倉庫に入っている装備も、それより古いキャラの記録には無い
+            for v in list((slots or {}).values()):
+                if v.get("eq"):
+                    self._claim(None, v["eq"], before=v.get("t") or 0, srv=self._slot_srv(v), who="倉庫「{}」".format(v.get("title") or "名前不明"))
+
+    def _claim(self, name, items, before=None, srv=None, who=None):
+        """name が持っている(着ている・持ち物にある)装備と同じ品が、ほかのキャラの古い記録に残っていたら、そちらから外す。
+        装備一式を倉庫経由で何人かのキャラで使い回すと、前に着ていたキャラの記録に残り、同じ装備が2人に「分裂」して見えるため。
+        見分けは番号・精錬・★・カード・ランダムOP。ありふれた品(+0・カードもOPも無い)は同じものが何個もありうるので対象にしない。"""
+        if name == UNKNOWN or not (name or who):
+            return
+        if srv is None:
+            srv = name.rpartition("@")[2]
+        who = who or name
+        want = {}
+        for e in items or []:
+            k = self._ident(e)
+            if k[0] and (k[1] or any(k[3]) or k[4]):
+                want[k] = want.get(k, 0) + 1
+        if not want:
+            return
+        for other, ch in self.chars.items():
+            if other == name or other.rpartition("@")[2] != srv or not isinstance(ch, dict):
+                continue
+            if before is not None and (ch.get("updated") or 0) >= before:      # 起動時の片づけ: 自分より新しい記録には手を出さない
+                continue
+            moved, w = 0, dict(want)                    # 同じ品はほかのどのキャラにも無いはず → キャラごとに数え直す
+            for fld in ("equips", "bag"):
+                keep = []
+                for e in ch.get(fld) or []:
+                    k = self._ident(e)
+                    if w.get(k, 0) > 0:
+                        w[k] -= 1
+                        moved += 1
+                    else:
+                        keep.append(e)
+                if moved and fld in ch:
+                    ch[fld] = keep
+            if moved:
+                ch["eq_stale"] = True
+                bits = 0
+                for it in self._worn(ch):
+                    bits |= it.get("wear", 0)
+                ch["missing"] = [n for b, n in MAIN_SLOTS + SHADOW_SLOTS if not bits & b]
+                for req, key in ((MAIN_BITS, "cur_set"), (SHADOW_BITS, "cur_shadow")):      # 欠けたセットは、もう着ていない(装備セットの画面で2人に出ないように)
+                    if bits & req != req:
+                        ch[key] = ""
+                mv = ch.get("eq_moved") if isinstance(ch.get("eq_moved"), dict) else {"to": [], "n": 0}
+                to = mv.get("to") if isinstance(mv.get("to"), list) else [mv["to"]] if mv.get("to") else []
+                ch["eq_moved"] = {"to": to + ([who] if who not in to else []), "t": int(time.time()), "n": (mv.get("n") or 0) + moved}
+                self.changed = True
+                self.log("[装備] {} にある装備 {}点が {} の古い記録にも残っていたので、{} の記録から外しました(倉庫経由で受け渡したもの)".format(who, moved, other, other))
+
     def _storage_list(self, kind, items):
         """倉庫の装備の一覧(0B39 種類2〜4)。前に届いた一覧より増えた品が、いま持っている(着ていない)装備と同じなら、倉庫に入れたとみなす。
         控えめに判定する: 増えたのが1〜3種類・各々持ち物に同じ品がある場合だけ。アカウントの切り替えなどで大きく違うときは、一覧を覚え直すだけ。"""
@@ -1556,7 +1624,7 @@ class CharCore(object):
         worn = self._worn(ch)
         bag = [x for x in (ch.get("bag") or []) if x.get("loc") is None or (x.get("loc", 0) & ~COSTUME_BITS)]        # 衣装(見た目だけの装備)は数えない
         items = [self._item_view(it) for it in worn] + [dict(self._item_view(it), slot="持ち物（着ていない）") for it in bag]
-        return {"known": "bag" in ch, "stale": bool(ch.get("eq_stale")), "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
+        return {"known": "bag" in ch, "stale": bool(ch.get("eq_stale")), "moved": ch.get("eq_moved") or None, "n": len(items), "worn": len(worn), "bag": len(bag), "items": items,
                 "set": ch.get("cur_set") or "", "shadow": ch.get("cur_shadow") or "",
                 "gone": (ch.get("gone") or [])[-5:]}
 
@@ -1587,6 +1655,7 @@ class CharCore(object):
                 bag.append(x)
             item["wear"], item["slot"] = loc, LOC_NAMES.get(loc, str(loc))
             eq.append(item)
+            self._claim(self._name(), [item])
         else:
             item["wear"], item["slot"] = 0, ""
             bag.append(item)

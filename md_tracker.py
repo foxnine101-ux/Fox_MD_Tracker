@@ -1871,6 +1871,7 @@ def main():
             if os.path.exists(CHAR_STATE_FILE):
                 with open(CHAR_STATE_FILE, "r", encoding="utf-8") as f:
                     CHARS.restore(json.load(f))
+            CHARS.claim_all()
         except Exception as e:
             print("[キャラ] 記録が読めませんでした(新しく作ります):", e)
 

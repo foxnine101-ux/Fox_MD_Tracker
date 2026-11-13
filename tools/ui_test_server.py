@@ -62,6 +62,7 @@ mt.resource = lambda n: os.path.join(T, n) if n == "app.html" or n.startswith("w
 mt.CHARS = char_core.CharCore(md=core, log=print)
 if rd("char_state.json"):
     mt.CHARS.restore(rd("char_state.json"))
+    mt.CHARS.claim_all()      # 本物の起動と同じ: 倉庫経由で受け渡した装備の古い記録を片づける
 import market_core
 mt.MARKET = market_core.Market(mt.MARKET_FILE, log=print)
 import zatta_core
