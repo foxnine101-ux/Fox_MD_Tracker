@@ -1104,6 +1104,40 @@ class _Scanner(gp.StreamScanner):
     def __init__(self, core, key, lock):
         gp.StreamScanner.__init__(self, lambda e: None)
         self.core, self.key, self.lock = core, key, lock
+        # 確認用(ログイン時に装備の一覧を取りこぼす原因調べ): この接続の最初の20秒に何が起きたか
+        self.dg = {"t": time.time(), "bytes": 0, "pk": 0, "head": "", "lose": [], "gap": 0, "lost_len": [], "list": []}
+
+    def _dg_on(self):
+        return time.time() - self.dg["t"] < 20
+
+    def feed(self, data):
+        d = self.dg
+        if self._dg_on():
+            if not d["head"]:
+                d["head"] = bytes(data[:16]).hex()
+            d["bytes"] += len(data)
+        gp.StreamScanner.feed(self, data)
+
+    def _gap(self):
+        if self._dg_on():
+            self.dg["gap"] += 1
+        gp.StreamScanner._gap(self)
+
+    def _lose(self, op):
+        if self._dg_on() and len(self.dg["lose"]) < 8:
+            self.dg["lose"].append(("{:04X}".format(op) if op is not None else "抜け", round(time.time() - self.dg["t"], 1), self.dg["bytes"]))
+        gp.StreamScanner._lose(self, op)
+
+    def _learn(self, distance):
+        if self._dg_on() and len(self.dg["lost_len"]) < 8:
+            self.dg["lost_len"].append(distance)
+        return gp.StreamScanner._learn(self, distance)
+
+    def dg_text(self):
+        """12秒たっても装備の一覧が届かなかったときに動作ログへ出す、この接続の様子。"""
+        d = self.dg
+        return "受け取った {}バイト・切り分けた {}個・見失い {}(原因の通信・秒・それまでのバイト) 見失った長さ {}・つなぎ目の抜け {}回・一覧の通信 {}・最初の16バイト {}".format(
+            d["bytes"], d["pk"], d["lose"] or "なし", d["lost_len"] or "なし", d["gap"], " ".join(d["list"]) or "なし", d["head"] or "なし")
 
     def _scan_lost(self, region):
         """見失った区間から、倉庫に入れた通信(07FA 理由4・1個)だけは形を確かめて拾う(RO Storage Manager と同じ考え方。通信のつなぎ目の途中に埋もれていることがある)。"""
@@ -1158,7 +1192,8 @@ class _Scanner(gp.StreamScanner):
                 if kind <= 4 and ln == 5 + 68 * n and 0 <= n <= 100 and i + ln <= len(region):
                     ok = all(0 < struct.unpack_from("<H", region, i + 5 + 68 * k)[0] < 4000 and struct.unpack_from("<I", region, i + 7 + 68 * k)[0] > 0 for k in range(n))
                     if ok:
-                        print("[装備] 見失った区間から、装備の一覧(0B39 種類={}・{}件)を拾いました".format(kind, n))
+                        print("[装備] 見失った区間から、装備の一覧(0B39 種類={}・{}件)を拾いました(見失った元の通信 {}・この接続の見失い {})".format(
+                            kind, n, "{:04X}".format(self.lost_op) if self.lost_op is not None else "つなぎ目の抜け", self.dg["lose"] or "なし"))
                         with self.lock:
                             try:
                                 CHARS.feed(self.key, bytes(region[i:i + ln]))
@@ -1167,6 +1202,11 @@ class _Scanner(gp.StreamScanner):
             i = region.find(OP_0B39, i + (ln if ok else 1))
 
     def _handle(self, pkt):
+        if self._dg_on() and len(pkt) >= 4:
+            self.dg["pk"] += 1
+            op0 = pkt[0] | (pkt[1] << 8)
+            if op0 in (0x0B08, 0x0B09, 0x0B39, 0x0B0B) and len(self.dg["list"]) < 12:
+                self.dg["list"].append("{:04X}{}".format(op0, "/{}".format(pkt[4]) if op0 != 0x0B0B and len(pkt) > 4 else ""))
         with self.lock:
             SERVERS.packet(self.key, pkt)            # マップへの行き先(どのサーバーか引き継ぐ用)は必ず読む
             if SERVERS.ignored(self.key):
@@ -2187,7 +2227,8 @@ def run_loop(core, lock, cfg, stop):
                             if ch_ is not None and not ch_.get("eq_stale"):
                                 ch_["eq_stale"] = True       # 一覧が届かないまま遊んでいる間は、前の記録を「古い記録」として扱う(持ったまま判定を当てにしない)
                                 CHARS.changed = True
-                            print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} (この接続でそれまでに読んだ通信: {}件)".format(n, c.get("map") or "不明", c.get("n", "?")))
+                            sc_ = SNIFFER.scanners.get(key) if SNIFFER is not None else None
+                            print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} / この接続: {}".format(n, c.get("map") or "不明", sc_.dg_text() if sc_ is not None else "通信の記録なし"))
                         else:
                             print("[装備] 装備の一覧を受け取っています: {} マップ={}".format(n, c.get("map") or "不明"))
         sn = SNIFFER
