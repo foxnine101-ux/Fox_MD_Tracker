@@ -2231,7 +2231,9 @@ def run_loop(core, lock, cfg, stop):
                             sc_ = SNIFFER.scanners.get(key) if SNIFFER is not None else None
                             print("[装備] ログインして12秒たっても装備の一覧が届いていません: {} マップ={} / この接続: {}".format(n, c.get("map") or "不明", sc_.dg_text() if sc_ is not None else "通信の記録なし"))
                         else:
-                            print("[装備] 装備の一覧を受け取っています: {} マップ={}".format(n, c.get("map") or "不明"))
+                            sc_ = SNIFFER.scanners.get(key) if SNIFFER is not None else None
+                            odd = sc_ is not None and (sc_.dg["lose"] or sc_.dg["gap"] or "0B08/0" not in sc_.dg["list"])      # 届いたが、始まり(0B08)が抜けた・途中で見失った
+                            print("[装備] 装備の一覧を受け取っています: {} マップ={}{}".format(n, c.get("map") or "不明", " / この接続: " + sc_.dg_text() if odd else ""))
         sn = SNIFFER
         if sn is not None and not sn.widened and not STATS["segments"] and time.time() - sn.t0 > 75 and not cfg.get("ネットワーク名"):
             try:
