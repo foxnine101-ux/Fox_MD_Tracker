@@ -77,7 +77,7 @@ function renderEventTab(groups, chars, now) {
   if (!EV_SUBS.some(([k]) => k === EVSUB)) EVSUB = "event";
   if (EVSUB === "nyar") renderNyar(groups, chars, now);
   else if (EVSUB === "hw") renderHalloween(chars, now);
-  else if (EVSUB === "fancy") renderFancy(chars);
+  else if (EVSUB === "fancy") { if (renderFancy(chars) === true) return; }      // 中身が前と同じ → 画面はそのまま
   else renderEvents(chars, now);
   const v = $("#view");
   v.insertAdjacentHTML("afterbegin", `<div class="simnav" id="evnav">${EV_SUBS.map(([k, l]) => `<button data-evsub="${k}" class="${EVSUB === k ? "on" : ""}">${l}</button>`).join("")}</div>`);
