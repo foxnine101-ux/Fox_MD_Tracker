@@ -291,7 +291,7 @@ class Ledger(object):
     def _inv_item(self, key, idx):
         """持ち物の番号 → (品の番号, 精錬)。char_core の記録から(消える前に引く)。"""
         s = self._c.get(key)
-        own = s["n41"].get(idx) if s else None
+        own = s["n41"].get(idx) if s else None      # この接続で入るのを見た品
         cc = self.chars
         if cc is None:
             return (own, 0) if own else None
@@ -525,11 +525,18 @@ class Ledger(object):
                 self._dirty = True
                 self.log("[家計簿] あとから品が分かりました: {} {} {:+,}z → {}×{}".format(time.strftime("%m/%d %H:%M", time.localtime(r["t"])), r["c"], r["d"], self._iname(unk[0][0]), abs(unk[0][1])))
 
-    def set_item(self, t, c, i, iid):
-        """画面から: 明細(時刻 t・キャラ c)の i 番目の品を、手で決める(iid = 番号。0 なら品不明に戻す)。"""
+    def forget(self, key):
+        """同じポートで接続し直された: 前の接続の、まとめ待ちの取引を書き出してから状態を捨てる(持ち物の番号は接続ごと)。"""
+        with self.lock:
+            s = self._c.pop(key, None)
+            if s is not None:
+                self._close(key, s, time.time(), force=True)
+
+    def set_item(self, t, c, i, iid, d=None):
+        """画面から: 明細(時刻 t・キャラ c・金額 d)の i 番目の品を、手で決める(iid = 番号。0 なら品不明に戻す)。"""
         with self.lock:
             for r in self.rows:
-                if r["t"] == t and r["c"] == c and 0 <= i < len(r.get("it") or []):
+                if r["t"] == t and r["c"] == c and (d is None or r.get("d") == d) and 0 <= i < len(r.get("it") or []):
                     r["it"][i][0] = iid or None
                     r["fill"] = "hand" if iid else "none"      # none = 手で品不明に戻した(あとから自動で埋めない)
                     r.pop("p", None)

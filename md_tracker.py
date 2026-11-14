@@ -981,7 +981,7 @@ def start_live_server(core, lock, cfg):
                             near = sorted({v for v in list(tbl.values()) if nm in str(v)}, key=len)[:12] if not hit else []
                             return self._send(200, json.dumps({"ok": False, "many": hit[:12], "near": near}, ensure_ascii=False), "application/json; charset=utf-8")
                         iid = hit[0]
-                    if not LEDGER.set_item(int(b["t"]), str(b["c"]), int(b.get("i") or 0), iid):
+                    if not LEDGER.set_item(int(b["t"]), str(b["c"]), int(b.get("i") or 0), iid, b.get("d")):
                         raise ValueError
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
@@ -1755,6 +1755,8 @@ class Sniffer(object):
                             CHARS._items_synced.discard(key)
                             CHARS._lst.pop(key, None)
                             CHARS._title.pop(key, None)
+                        if LEDGER is not None:
+                            LEDGER.forget(key)          # 持ち物の番号は接続ごと(前の接続で覚えた番号を使わない)
                         for k in [k for k in _EQ_WATCH if k[0] == key]:
                             _EQ_WATCH.pop(k, None)
                             _EQ_LOGGED.discard(k)

@@ -177,8 +177,8 @@ const ledDay = (t) => { const d = new Date(t * 1000); return `${d.getFullYear()}
 function ledName(id) { return id ? ((LED && LED.names && LED.names[String(id)]) || (DATA.item_names || {})[String(id)] || `ID${id}`) : "品不明"; }
 function ledItems(r) {      // 品不明は押すと品を決められる。あとから決まった品には印(自動 = 前後に見た買取露店の一覧から・手 = 手で決めた)
   const it = (r.it || []).map((x, i) => {
-    const nm = x[0] ? esc(ledName(x[0])) : `<button class="ghost mk" data-ledfix="${i}" data-ledt="${r.t}" data-ledc="${esc(r.c)}" title="押すと品を決められます（あとから直せます）">品不明</button>`;
-    return `${x[2] ? "+" + x[2] + " " : ""}${nm} ×${fmtN(Math.abs(x[1]))}${x[0] && (r.fill === "hand" || r.fill === "auto") ? ` <a class="sub" href="#" data-ledfix="${i}" data-ledt="${r.t}" data-ledc="${esc(r.c)}" title="${r.fill === "hand" ? "手で決めた品です。押すと直せます" : "あとから、前後に見た買取露店の一覧で分かった品です。押すと直せます"}">（${r.fill === "hand" ? "手" : "あとから"}）</a>` : ""}`;
+    const nm = x[0] ? esc(ledName(x[0])) : `<button class="ghost mk" data-ledfix="${i}" data-ledt="${r.t}" data-ledd="${r.d0 ?? r.d}" data-ledc="${esc(r.c)}" title="押すと品を決められます（あとから直せます）">品不明</button>`;
+    return `${x[2] ? "+" + x[2] + " " : ""}${nm} ×${fmtN(Math.abs(x[1]))}${x[0] && (r.fill === "hand" || r.fill === "auto") ? ` <a class="sub" href="#" data-ledfix="${i}" data-ledt="${r.t}" data-ledd="${r.d0 ?? r.d}" data-ledc="${esc(r.c)}" title="${r.fill === "hand" ? "手で決めた品です。押すと直せます" : "あとから、前後に見た買取露店の一覧で分かった品です。押すと直せます"}">（${r.fill === "hand" ? "手" : "あとから"}）</a>` : ""}`;
   }).join("、");
   const p = r.p || (r.it && r.it.length === 1 && r.it[0][1] && r.d ? Math.abs(r.d) / Math.abs(r.it[0][1]) : 0);
   return it + (p ? `<span class="sub">（1個 ${fmtN(Math.round(p))}z）</span>` : "");
@@ -190,13 +190,13 @@ function ledGuess(r) {      // 品を決めるときの候補: 同じワール�
   cand.sort((a, b) => (Math.abs(per(a) - z) / z + Math.abs(a.t - r.t) / 864000) - (Math.abs(per(b) - z) / z + Math.abs(b.t - r.t) / 864000));
   return cand[0] ? ledName(cand[0].it[0][0]) : "";
 }
-async function ledFix(t, c, i) {
-  const r = (LED.rows || []).find((x) => x.t === t && x.c === c);
+async function ledFix(t, c, i, d) {
+  const r = (LED.rows || []).find((x) => x.t === t && x.c === c && x.d === d);
   if (!r) return;
   const cur = r.it[i][0] ? ledName(r.it[i][0]) : ledGuess(r);
   let nm = prompt(`${when(r.t)} ${cn(r.c)} ${ledZ(r.d)}z の品の名前（または番号）を入れてください。空にすると「品不明」に戻します。`, cur);
   while (nm !== null) {
-    const j = await fetch("/api/ledger", { method: "POST", body: JSON.stringify({ t, c, i, name: nm.trim() }) }).then((x) => x.json()).catch(() => null);
+    const j = await fetch("/api/ledger", { method: "POST", body: JSON.stringify({ t, c, i, d, name: nm.trim() }) }).then((x) => x.json()).catch(() => null);
     if (!j) { alert("保存できませんでした"); return; }
     if (j.ok) break;
     nm = prompt(j.many && j.many.length ? `「${nm}」という名前の品が ${j.many.length} 個あります。番号で入れてください: ${j.many.join("、")}` : `「${nm}」という名前の品が見つかりません。${j.near && j.near.length ? "近い名前: " + j.near.join("、") : "正しい名前か番号を入れてください。"}`, nm);
@@ -215,7 +215,7 @@ function renderLedger(chars) {
   const ALLW = srvs.length > 1 && LED_SRV === "*";
   if (!ALLW && !srvs.includes(LED_SRV)) { const cs = srvOf(nowChar() || lastChar() || ""); LED_SRV = srvs.includes(cs) ? cs : (srvs[0] || ""); }
   const noaIn = srvs.some(ledNoa), noaNow = !ALLW && ledNoa(LED_SRV);
-  const conv = (r) => (ALLW && ledNoa(srvOf(r.c)) ? { ...r, d: r.d * 1000, b: r.b == null ? r.b : r.b * 1000, p: r.p ? r.p * 1000 : r.p, noa: 1 } : r);
+  const conv = (r) => (ALLW && ledNoa(srvOf(r.c)) ? { ...r, d0: r.d, d: r.d * 1000, b: r.b == null ? r.b : r.b * 1000, p: r.p ? r.p * 1000 : r.p, noa: 1 } : r);
   const inSrv = (ALLW ? all : all.filter((r) => srvOf(r.c) === LED_SRV)).map(conv);
   const cl = [...new Set(inSrv.map((r) => r.c))].sort((a, b) => cn(a).localeCompare(cn(b), "ja"));
   if (LED_CHAR && !cl.includes(LED_CHAR)) LED_CHAR = "";
@@ -255,7 +255,7 @@ function ledBind() {
   on("#ledchar", (x) => { LED_CHAR = x; });
   on("#leddays", (x) => { LED_DAYS = +x; store.set("md_leddays", String(LED_DAYS)); });
   const kx = $("#ledkx"); if (kx) kx.onclick = () => { LED_KIND = ""; render(); };
-  v.querySelectorAll("[data-ledfix]").forEach((b) => b.onclick = (e) => { e.preventDefault(); ledFix(+b.dataset.ledt, b.dataset.ledc, +b.dataset.ledfix); });
+  v.querySelectorAll("[data-ledfix]").forEach((b) => b.onclick = (e) => { e.preventDefault(); ledFix(+b.dataset.ledt, b.dataset.ledc, +b.dataset.ledfix, +b.dataset.ledd); });
 }
 
 function renderInventory(chars) {
