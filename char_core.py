@@ -616,8 +616,9 @@ class CharCore(object):
             self.changed = True
         return n
 
-    def unknown_items(self):
-        """名前がわからないアイテム(いま着ている装備と、覚えてある装備セットの中): [{id, slot}]"""
+    def unknown_items(self, wide=False):
+        """名前がわからないアイテム(いま着ている装備と、覚えてある装備セットの中): [{id, slot}]
+        wide = 持ち物(着ていない装備・ふつうの品)と倉庫も(公式サイトから名前を取るとき用。画面の一覧には出さない)"""
         seen = {}
 
         def look(it, slot):
@@ -631,6 +632,14 @@ class CharCore(object):
             for s in table.values():
                 for it in s.get("items") or []:
                     look(it, it.get("slot") or "")
+        if wide:
+            for ch in self.chars.values():
+                for it in (ch.get("bag") or []) + (ch.get("items") or []):
+                    look(it, "持ち物")
+            for sl in self.stores.values():
+                for v in sl.values():
+                    for it in (v.get("eq") or []) + (v.get("items") or []):
+                        look(it, "倉庫")
         return [{"id": k, "slot": v} for k, v in seen.items()]
 
     def _table(self, sid):

@@ -829,7 +829,7 @@ def start_live_server(core, lock, cfg):
                         with lock:
                             w = DMG.wanted()
                             if CHARS is not None:
-                                w["items"] = [u["id"] for u in CHARS.unknown_items()]
+                                w["items"] = [u["id"] for u in CHARS.unknown_items(wide=True)]
                         started = OFFICIAL.kick(w)
                 except Exception:
                     return self._send(400, "bad data", "text/plain")
@@ -1130,7 +1130,7 @@ class _Scanner(gp.StreamScanner):
         gp.StreamScanner.__init__(self, lambda e: None)
         self.core, self.key, self.lock = core, key, lock
         # 確認用(ログイン時に装備の一覧を取りこぼす原因調べ): この接続の最初の20秒に何が起きたか
-        self.dg = {"t": time.time(), "bytes": 0, "pk": 0, "head": "", "lose": [], "gap": 0, "lost_len": [], "list": []}
+        self.dg = {"t": time.time(), "bytes": 0, "pk": 0, "head": "", "lose": [], "gap": 0, "lost_len": [], "list": [], "prev": [], "at": ""}
 
     def _dg_on(self):
         return time.time() - self.dg["t"] < 20
@@ -1149,6 +1149,13 @@ class _Scanner(gp.StreamScanner):
         gp.StreamScanner._gap(self)
 
     def _lose(self, op):
+        d = self.dg
+        if self._dg_on() and not d["lose"] and d["prev"]:
+            # 最初に見失ったとき: 直前に切り分けた通信と、その後ろの生のバイト(どの通信の長さがずれたのかを見るため)
+            last = d["prev"][-1][2]
+            i = self.buf.rfind(last)
+            d["at"] = "直前 {} / 後ろ {}".format(" ".join("{:04X}({}バイト):{}".format(o, n, b[:96].hex()) for (o, n, b) in d["prev"][-3:]),
+                                               (self.buf[i + len(last):i + len(last) + 64] if i >= 0 else self.buf[:64]).hex())      # 見つからない = 前の受け取りの最後で切れた → いまの先頭が続き
         if self._dg_on() and len(self.dg["lose"]) < 8:
             self.dg["lose"].append(("{:04X}".format(op) if op is not None else "抜け", round(time.time() - self.dg["t"], 1), self.dg["bytes"]))
         gp.StreamScanner._lose(self, op)
@@ -1161,8 +1168,9 @@ class _Scanner(gp.StreamScanner):
     def dg_text(self):
         """12秒たっても装備の一覧が届かなかったときに動作ログへ出す、この接続の様子。"""
         d = self.dg
-        return "受け取った {}バイト・切り分けた {}個・見失い {}(原因の通信・秒・それまでのバイト) 見失った長さ {}・つなぎ目の抜け {}回・一覧の通信 {}・最初の16バイト {}".format(
-            d["bytes"], d["pk"], d["lose"] or "なし", d["lost_len"] or "なし", d["gap"], " ".join(d["list"]) or "なし", d["head"] or "なし")
+        return "受け取った {}バイト・切り分けた {}個・見失い {}(原因の通信・秒・それまでのバイト) 見失った長さ {}・つなぎ目の抜け {}回・一覧の通信 {}・最初の16バイト {}{}".format(
+            d["bytes"], d["pk"], d["lose"] or "なし", d["lost_len"] or "なし", d["gap"], " ".join(d["list"]) or "なし", d["head"] or "なし",
+            " / 最初に見失った場所: " + d["at"] if d["at"] else "")
 
     def _scan_lost(self, region):
         """見失った区間から、倉庫に入れた通信(07FA 理由4・1個)だけは形を確かめて拾う(RO Storage Manager と同じ考え方。通信のつなぎ目の途中に埋もれていることがある)。"""
@@ -1227,6 +1235,8 @@ class _Scanner(gp.StreamScanner):
             i = region.find(OP_0B39, i + (ln if ok else 1))
 
     def _handle(self, pkt):
+        if self._dg_on() and len(pkt) >= 2 and not self.dg["lose"]:
+            self.dg["prev"] = (self.dg["prev"] + [(pkt[0] | (pkt[1] << 8), len(pkt), bytes(pkt))])[-3:]
         if self._dg_on() and len(pkt) >= 4:
             self.dg["pk"] += 1
             op0 = pkt[0] | (pkt[1] << 8)
@@ -2023,7 +2033,7 @@ def main():
             with lock:
                 w = DMG.wanted()
                 if CHARS is not None:
-                    w["items"] = [u["id"] for u in CHARS.unknown_items()]      # 名前の分からないアイテム(新しい装備など)も、公式のアイテムのページから
+                    w["items"] = [u["id"] for u in CHARS.unknown_items(wide=True)]      # 名前の分からないアイテム(新しい装備など)も、公式のアイテムのページから
                 return w
         OFFICIAL.start(_wanted)          # しばらくしてから、足りないモンスター情報を公式サイトからゆっくり集める(裏の作業)
     sn = Sniffer(core, lock, cfg.get("ネットワーク名") or None)
