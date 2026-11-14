@@ -961,6 +961,31 @@ def start_live_server(core, lock, cfg):
                 except Exception as e:
                     out = {"ok": False, "error": str(e)}
                 return self._send(200, json.dumps(out, ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/ledger" and self._local_only():      # 家計簿の品を手で決める: {t, c, i, name}(名前か番号。空 = 品不明に戻す)
+                try:
+                    n = int(self.headers.get("Content-Length") or 0)
+                    b = json.loads(self.rfile.read(min(n, 10000)).decode("utf-8"))
+                    if LEDGER is None:
+                        raise ValueError
+                    nm = str(b.get("name") or "").strip()
+                    if nm[:2] == "ID" and nm[2:].isdigit():      # 名前の分からない品は「ID番号」と出しているので、そのまま入れても通す
+                        nm = nm[2:]
+                    if not nm:
+                        iid = 0
+                    elif nm.isdigit():
+                        iid = int(nm)
+                    else:
+                        tbl = (CHARS.id2name if CHARS is not None else None) or LEDGER.id2name or {}
+                        hit = sorted({int(k) for k, v in list(tbl.items()) if v == nm and str(k).isdigit()})
+                        if len(hit) != 1:
+                            near = sorted({v for v in list(tbl.values()) if nm in str(v)}, key=len)[:12] if not hit else []
+                            return self._send(200, json.dumps({"ok": False, "many": hit[:12], "near": near}, ensure_ascii=False), "application/json; charset=utf-8")
+                        iid = hit[0]
+                    if not LEDGER.set_item(int(b["t"]), str(b["c"]), int(b.get("i") or 0), iid):
+                        raise ValueError
+                except Exception:
+                    return self._send(400, "bad data", "text/plain")
+                return self._send(200, '{"ok":true}', "application/json")
             if self.path.split("?")[0] == "/api/itemname" and self._local_only():
                 try:
                     n = int(self.headers.get("Content-Length") or 0)

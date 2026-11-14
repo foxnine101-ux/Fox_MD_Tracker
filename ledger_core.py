@@ -15,6 +15,8 @@ from collections import deque
 WIN = 1.2            # ゼニーの変化と品物の変化を、同じ取引とみなす前後の秒数
 KEEP_ROWS = 30000    # 明細の上限(古いものから捨てる)
 KEEP_DAYS = 400
+BSL_KEEP = 3 * 86400  # 見た買取露店の一覧を覚えておく秒数(品の分からない売上を、あとから埋めるため)
+BSL_NEAR = 6 * 3600   # 売上のこの秒数前後に見た一覧だけで、品を当てる
 SHOP_SEC = 600       # 露店の品の一覧を見てから、この秒数のうちの購入は「露店で買った」とみなす
 NPC_SEC = 300
 ITEM_SIZES = (34, 31, 27)
@@ -67,6 +69,7 @@ class Ledger(object):
         self.rows = []              # 明細 [{t, c, k, d, b, it:[[品, 個数(+増/-減), 精錬]], p?, ops?}]
         self.last = {}              # キャラ -> 最後に見た所持ゼニー(次のログインで「見ていない間の増減」を出す)
         self.t = 0                  # 最後に変わった時刻(画面が読み直す目安)
+        self.bsl = []               # 見た買取露店の一覧 [[時刻, ワールド, [[1個の値段, 品], ...]], ...](品の分からない売上を、あとから埋める)
         self._c = {}                # 接続 -> 状態
         self._dirty = False
         self._saved = 0.0
@@ -83,8 +86,10 @@ class Ledger(object):
             self.rows = d.get("rows") or []
             self.last = d.get("last") or {}
             self.t = d.get("t") or 0
+            self.bsl = d.get("bsl") or []
         except (OSError, ValueError):
             pass
+        self._backfill()
 
     def save(self, force=False):
         with self.lock:
@@ -92,7 +97,8 @@ class Ledger(object):
                 return
             cut = time.time() - KEEP_DAYS * 86400
             self.rows = [r for r in self.rows if r["t"] >= cut][-KEEP_ROWS:]
-            data = json.dumps({"v": 1, "t": self.t, "rows": self.rows, "last": self.last}, ensure_ascii=False, separators=(",", ":"))
+            self.bsl = [x for x in self.bsl if x[0] >= time.time() - BSL_KEEP][-200:]
+            data = json.dumps({"v": 1, "t": self.t, "rows": self.rows, "last": self.last, "bsl": self.bsl}, ensure_ascii=False, separators=(",", ":"))
             self._dirty = False
             self._saved = time.time()
         tmp = self.path + ".tmp"
@@ -245,6 +251,10 @@ class Ledger(object):
                         break
                     ent.append({"p": pr, "n": n, "id": iid})
                 s["bsl"] = (now, ent)
+                if ent:
+                    self.bsl.append([int(now), self._srv(self._name(key)), sorted({(e["p"], e["id"]) for e in ent})])
+                    self._dirty = True
+                    self._backfill()
         elif op in OP_NPC:
             s["ctx"]["npc"] = now
         elif op in OP_SEARCH:
@@ -470,6 +480,61 @@ class Ledger(object):
         self.rows.append(row)
         self.t = int(time.time())
         self._dirty = True
+        if row["k"] == "bs_sell":
+            self._backfill()
+
+    @staticmethod
+    def _srv(c):
+        return str(c or "").partition("@")[2]
+
+    @staticmethod
+    def _set_price(row):
+        n = sum(abs(x[1]) for x in row.get("it") or [] if x[0])
+        ids = {x[0] for x in row.get("it") or [] if x[0]}
+        if row.get("d") and n and len(ids) == 1 and all(x[0] for x in row["it"]):
+            row["p"] = round(abs(row["d"]) / n, 2)
+
+    def _backfill(self):
+        """品の分からない「買取露店に売った」を、前後に見た買取露店の一覧(同じワールド・同じ1個の値段の品が1つに決まるとき)で埋める。
+        売った接続でその一覧を見ていなかった(別のキャラで見た・古い版で記録した)ときも、あとから埋まる。"""
+        if not self.bsl:
+            return
+        for r in self.rows[-3000:]:
+            if r["k"] != "bs_sell" or not r.get("d") or r.get("fill") == "none":
+                continue
+            its = r.get("it") or []
+            unk = [x for x in its if not x[0]]
+            if len(unk) != 1 or len(its) != 1 or not unk[0][1]:
+                continue
+            z = abs(r["d"]) / abs(unk[0][1])
+            if z != int(z):
+                continue
+            sv = self._srv(r["c"])
+            c = {iid for (t, w, ent) in self.bsl if abs(t - r["t"]) <= BSL_NEAR and (not w or not sv or w == sv) for (p, iid) in ent if p == z}
+            if len(c) == 1:
+                unk[0][0] = c.pop()
+                r["fill"] = "auto"
+                self._set_price(r)
+                self.t = int(time.time())
+                self._dirty = True
+                self.log("[家計簿] あとから品が分かりました: {} {} {:+,}z → {}×{}".format(time.strftime("%m/%d %H:%M", time.localtime(r["t"])), r["c"], r["d"], self._iname(unk[0][0]), abs(unk[0][1])))
+
+    def set_item(self, t, c, i, iid):
+        """画面から: 明細(時刻 t・キャラ c)の i 番目の品を、手で決める(iid = 番号。0 なら品不明に戻す)。"""
+        with self.lock:
+            for r in self.rows:
+                if r["t"] == t and r["c"] == c and 0 <= i < len(r.get("it") or []):
+                    r["it"][i][0] = iid or None
+                    r["fill"] = "hand" if iid else "none"      # none = 手で品不明に戻した(あとから自動で埋めない)
+                    r.pop("p", None)
+                    self._set_price(r)
+                    self.t = int(time.time())
+                    self._dirty = True
+                    break
+            else:
+                return False
+        self.save(force=True)
+        return True
 
     # ---------- 外から ----------
     def tick(self):

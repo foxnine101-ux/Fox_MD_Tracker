@@ -23,11 +23,12 @@ for k in ("CONFIG_FILE", "STATE_FILE", "CHAR_STATE_FILE", "DMG_FILE", "SKILL_FIX
           "NYAR_FIX_FILE", "SERVERS_FILE", "VIEW_SETTINGS_FILE", "ITEM_FIX_FILE", "SIM_CHARS_FILE", "OFFICIAL_FILE", "SANDBAG_FILE", "LANTERN_FILE", "MARKET_FILE", "SHARED_FILE", "LEDGER_FILE"):
     if hasattr(mt, k):
         setattr(mt, k, os.path.join(T, os.path.basename(getattr(mt, k))))
-if a.data:      # 計算機のスロットも、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)
-    _sc = os.path.join(a.data, os.path.basename(mt.SIM_CHARS_FILE))
-    if os.path.exists(_sc):
-        import shutil
-        shutil.copy(_sc, mt.SIM_CHARS_FILE)
+if a.data:      # 計算機のスロット・家計簿も、本物の写しを一時フォルダに入れて読む(本物のファイルは書かない)
+    import shutil
+    for _f in (mt.SIM_CHARS_FILE, mt.LEDGER_FILE):
+        _sc = os.path.join(a.data, os.path.basename(_f))
+        if os.path.exists(_sc):
+            shutil.copy(_sc, _f)
 if a.data and os.path.exists(os.path.join(a.data, "公式モンスター.json")):      # 公式のマップ一覧(ランタンのマップ ID を引く用)。写しを一時フォルダに置いて読む(取りにいく処理は動かさない)
     import shutil, ro_official
     shutil.copy(os.path.join(a.data, "公式モンスター.json"), mt.OFFICIAL_FILE)
