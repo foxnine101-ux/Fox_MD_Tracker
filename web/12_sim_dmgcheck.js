@@ -5,7 +5,8 @@
 // 軽減に入れるもの: 鎧の属性の相性・属性耐性・種族・ボス/一般・サイズ・遠距離/魔法・DEF/MDEF・RES/MRES・補助
 // (データはラトリオ = jRO 準拠。セット効果・ランダムオプションの一部・条件つきの効果は入らないので目安)
 const SIM = { char: "", md: "", key: "", base: "", manual: false, dmg: 0, kind: "魔法", ele: "無", race: "", size: "", boss: "", sets: null, shadow: "",
-  buffB: { ec: 0, cut: 0, extra: 0 }, buffT: { ec: 0, cut: 0, extra: 0 }, hp: 0, eleOv: "" };
+  buffB: { ec: 0, cut: 0, extra: 0 }, buffT: { ec: 0, cut: 0, extra: 0 }, hp: 0, eleOv: "", pick: false, others: false };
+const SIM_TOP = 8;      // おすすめ順で結果の表に並べる数
 const SIM_RACES = ["無形", "不死", "動物", "植物", "昆虫", "魚貝", "悪魔", "人間", "天使", "竜"], SIM_ELES = ["無", "水", "地", "火", "風", "毒", "聖", "闇", "念", "不死"];
 const SIM_CUTS = [[0, "なし"], [20, "20%カット"], [40, "40%カット（アンチマジックなど）"], [60, "60%カット（うずくまる）"], [80, "80%カット（金剛）"], [90, "90%カット"]];
 const first = (v) => String(v ?? "").split("/")[0];
@@ -88,13 +89,24 @@ function renderSimDmg(chars) {
   if (SIM.manual && !S[gearMain(SIM.base)]) SIM.base = E[c] && E[c].cur ? E[c].cur + (E[c].shadow ? "+" + E[c].shadow : "") : Object.keys(S)[0];
   const baseMain = gearMain(SIM.base), baseSh = gearShadow(SIM.base);
   if (!SIM.sets) SIM.sets = new Set(Object.keys(S).filter((id) => (S[id].chars || {})[c]));
-  const cmp = Object.keys(S).filter((id) => SIM.sets.has(id) && id !== baseMain).sort((a, b) => (S[a].first || 0) - (S[b].first || 0));
   const shFor = SIM.shadow && SH[SIM.shadow] ? SIM.shadow : baseSh;
   // 逆算
   const B = simStages(atk, simProfile(baseMain, baseSh), simStatus(c, baseMain), SIM.buffB);
   const raw = B.mult > 0 ? (baseDmg + B.sub) / B.mult : 0;
-  const cols = [[baseMain, baseSh, B, baseDmg, true]].concat(cmp.map((id) => { const T = simStages(atk, simProfile(id, shFor), simStatus(c, id), SIM.buffT); return [id, shFor, T, Math.max(0, Math.round(raw * T.mult - T.sub)), false]; }));
+  const colOf = (id) => { const T = simStages(atk, simProfile(id, shFor), simStatus(c, id), SIM.buffT); return [id, shFor, T, Math.max(0, Math.round(raw * T.mult - T.sub)), false]; };
   const hpOf = (id) => +SIM.hp || (simStatus(c, id).derived || {}).MaxHP || 0;
+  // おすすめ順: 全部の装備セットを計算して、受けたときより軽くなるものだけを軽い順に(同じ名前のものは1つにまとめる)
+  // 対象 = このキャラが着たことのある装備セットと、登録した装備セット(記号つき)。ほかのキャラの装備は選んだときだけ
+  const cand = Object.keys(S).filter((id) => id !== baseMain && (SIM.others || S[id].tag || (S[id].chars || {})[c]));
+  const seenRk = new Set(), rank = cand.map(colOf).sort((a, b) => a[3] - b[3] || (S[b[0]].tag ? 1 : 0) - (S[a[0]].tag ? 1 : 0)).filter((x) => {
+    const k = (S[x[0]].name || S[x[0]].auto || "").replace(/ \(\d+\)$/, "");      // 「(2)」などは精錬・カード違いの同じ組み合わせ → いちばん軽いものだけ
+    return seenRk.has(k) ? false : (seenRk.add(k), true);
+  });
+  const better = rank.filter((x) => x[3] < baseDmg);
+  const cmp = SIM.pick ? Object.keys(S).filter((id) => SIM.sets.has(id) && id !== baseMain).sort((a, b) => (S[a].first || 0) - (S[b].first || 0)).map(colOf) : better.slice(0, SIM_TOP);
+  const cols = [[baseMain, baseSh, B, baseDmg, true]].concat(cmp);
+  const pctOf = (d) => baseDmg ? (d <= baseDmg ? "−" : "+") + Math.abs(Math.round((d - baseDmg) * 100 / baseDmg)) + "%" : "";
+  const judge = (id, d) => { const hp = hpOf(id); return !hp ? "" : d < hp ? `<span class="sim-ok">耐える</span>` : `<span class="sim-ng">倒れる</span>`; };
   const selOpt = (arr, cur) => arr.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(cur) ? "selected" : ""}>${esc(l)}</option>`).join("");
   const buffRow = (id, b, label) => `<div class="opts"><span class="muted" style="min-width:9.5em">${label}</span>
       <label>エナジーコート <select data-buff="${id}.ec">${selOpt([[0, "なし"], [6, "6%"], [12, "12%"], [18, "18%"], [24, "24%"], [30, "30%"]], b.ec)}</select></label>
@@ -124,6 +136,14 @@ function renderSimDmg(chars) {
       ${!SIM.manual && !baseOpts.length ? `<span class="muted">この攻撃を受けたときの装備の記録が無いので、着ていた装備を選んでください</span>` : ""}</div>
     ${buffRow("B", SIM.buffB, "そのときの補助")}</div>
     <div class="panel simbox"><div class="opts"><b>3. 比べる装備セット</b>
+      <label><input type="radio" name="simpick" value="0" ${SIM.pick ? "" : "checked"}> ダメージが減る順（おすすめ）</label>
+      <label><input type="radio" name="simpick" value="1" ${SIM.pick ? "checked" : ""}> 手で選ぶ</label>
+      ${SIM.pick ? "" : `<label><input type="checkbox" id="simothers" ${SIM.others ? "checked" : ""}> ほかのキャラが着た装備も入れる</label>`}</div>
+      ${SIM.pick ? "" : better.length ? `<table class="sim-t simrank"><thead><tr><th>順</th><th>装備セット</th><th>ダメージ</th><th></th><th>判定</th></tr></thead><tbody>`
+        + better.slice(0, 20).map(([id, , , d], i) => `<tr><td>${i + 1}</td><td>${tagChip(S[id])} ${esc(S[id].name || S[id].auto)}</td><td>${fmtN(d)}</td><td class="muted">${pctOf(d)}</td><td>${judge(id, d)}</td></tr>`).join("")
+        + `</tbody></table><p class="hint">${cand.length} 通りを計算し（同じ名前のものはいちばん軽いものだけ）、受けたとき（${fmtN(baseDmg)}）より軽くなる ${better.length} 通り${better.length > 20 ? "のうち上位20" : ""}を出しています。結果の表には上位 ${Math.min(SIM_TOP, better.length)} 通りの内訳。</p>`
+        : `<p class="hint">${cand.length} 通りを計算しましたが、受けたときの装備より軽くなる装備セットはありませんでした（この攻撃には、いまの装備がいちばん軽い）。</p>`}
+      <div class="opts" style="${SIM.pick ? "" : "display:none"}">
       ${Object.entries(S).filter(([id]) => id !== baseMain).sort((a, b) => (a[1].first || 0) - (b[1].first || 0)).map(([id, st]) => `<label class="simset"><input type="checkbox" data-simset="${esc(id)}" ${SIM.sets.has(id) ? "checked" : ""}>${tagChip(st)} ${esc(st.name || st.auto)}</label>`).join("") || `<span class="muted">ほかの装備セットがまだありません</span>`}</div>
       <div class="opts"><label>シャドウ <select id="simsh">${selOpt([["", "受けたときと同じ"]].concat(Object.entries(SH).map(([id, st]) => [id, `${setLabel(st)}: ${st.name || st.auto}`])), SIM.shadow)}</select></label>
       <label>最大HP <input type="number" id="simhp" min="0" value="${SIM.hp || ""}" placeholder="${hpOf(baseMain) || "自動"}"></label><span class="muted">（空欄 = その装備を着ていたときの最大HP）</span></div>
@@ -134,7 +154,7 @@ function renderSimDmg(chars) {
   h += `<h2>結果</h2><div class="panel tablewrap"><table class="sim-t"><thead><tr><th></th>${cols.map(([id, sh, , , base]) => `<th class="${base ? "base" : ""}">${setLabel(id, sh)}${base ? `<br><span class="muted">受けたとき</span>` : ""}</th>`).join("")}</tr></thead><tbody>`
     + stageNames.map((n) => `<tr><td>${esc(n)}</td>${cols.map(([, , T, , base]) => `<td class="${base ? "base" : ""}">${cell(T, n)}</td>`).join("")}</tr>`).join("")
     + `<tr><td>引かれる分（ステータスの DEF/MDEF）</td>${cols.map(([, , T, , base]) => `<td class="${base ? "base" : ""}">${T.sub ? "−" + fmtN(T.sub) : "-"}</td>`).join("")}</tr>
-      <tr class="big"><td>ダメージ</td>${cols.map(([, , , d, base]) => `<td class="${base ? "base" : ""}">${fmtN(d)}${base ? "" : ` <span class="muted" style="font-size:12px">${baseDmg ? (d <= baseDmg ? "−" : "+") + Math.abs(Math.round((d - baseDmg) * 100 / baseDmg)) + "%" : ""}</span>`}</td>`).join("")}</tr>
+      <tr class="big"><td>ダメージ</td>${cols.map(([, , , d, base]) => `<td class="${base ? "base" : ""}">${fmtN(d)}${base ? "" : ` <span class="muted" style="font-size:12px">${pctOf(d)}</span>`}</td>`).join("")}</tr>
       <tr><td>最大HP</td>${cols.map(([id, , , , base]) => `<td class="${base ? "base" : ""}">${hpOf(id) ? fmtN(hpOf(id)) : "-"}</td>`).join("")}</tr>
       <tr class="big"><td>判定</td>${cols.map(([id, , , d, base]) => { const hp = hpOf(id); return `<td class="${base ? "base" : ""}">${!hp ? "-" : d < hp ? `<span class="sim-ok">耐える</span> <span class="muted" style="font-size:12px">残り ${fmtN(hp - d)}</span>` : `<span class="sim-ng">倒れる</span> <span class="muted" style="font-size:12px">あと ${fmtN(d - hp + 1)}</span>`}</td>`; }).join("")}</tr>
     </tbody></table></div>
@@ -150,6 +170,8 @@ function renderSimDmg(chars) {
   on("simbase", (t) => { SIM.base = t.value; });
   on("simsh", (t) => { SIM.shadow = t.value; });
   on("simhp", (t) => { SIM.hp = +t.value || 0; });
+  on("simothers", (t) => { SIM.others = t.checked; });
+  $("#view").querySelectorAll("[name=simpick]").forEach((el) => el.onchange = () => { SIM.pick = el.value === "1"; render(); });
   on("simdmg", (t) => { SIM.dmg = +t.value || 0; });
   on("simkind", (t) => { SIM.kind = t.value; }); on("simele", (t) => { SIM.ele = t.value; });
   on("simrace", (t) => { SIM.race = t.value; }); on("simsize", (t) => { SIM.size = t.value; }); on("simboss", (t) => { SIM.boss = t.value; });
