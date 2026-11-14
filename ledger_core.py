@@ -114,7 +114,7 @@ class Ledger(object):
         s = self._c.get(key)
         if s is None:
             s = self._c[key] = {"z": None, "tx": [], "ev": [], "hint": [], "ctx": {}, "cart": {}, "cart_t": 0, "vend": {},
-                                "shop": None, "ring": deque(maxlen=200), "d41": None, "d07": None, "cartout": [], "bsl": None}
+                                "shop": None, "ring": deque(maxlen=200), "d41": None, "d07": None, "cartout": [], "bsl": None, "n41": {}}
         return s
 
     def _name(self, key):
@@ -182,6 +182,8 @@ class Ledger(object):
             if s["d41"] and s["d41"][0] == sig and now - s["d41"][1] < 0.8:       # 通常の読み取りと拾い直しの二重取り
                 return
             s["d41"] = (sig, now)
+            if itid:
+                s["n41"][idx] = itid           # この接続で持ち物に入った品の番号(ログインで持ち物の一覧を取りこぼしても、倉庫から出した品は引けるように)
             for h in s["cartout"]:
                 if not h.get("used") and h["n"] == -(cnt or 1) and 0 <= now - h["t"] <= 1.5:
                     h["used"] = True           # カートから持ち物へ出しただけ(0125 → 0B41 同じ個数。RO Storage Manager と同じ見分け方)
@@ -288,19 +290,23 @@ class Ledger(object):
 
     def _inv_item(self, key, idx):
         """持ち物の番号 → (品の番号, 精錬)。char_core の記録から(消える前に引く)。"""
+        s = self._c.get(key)
+        own = s["n41"].get(idx) if s else None
         cc = self.chars
         if cc is None:
-            return None
+            return (own, 0) if own else None
         name = self._name(key)
         ch = cc.chars.get(name) if name else None
-        if not ch:
-            return None
-        for x in ch.get("items") or []:
-            if x.get("index") == idx:
-                return (x.get("itemId"), 0)
-        for e in (ch.get("equips") or []) + (ch.get("bag") or []):
-            if e.get("inventoryIndex") == idx:
-                return (e.get("itemId"), e.get("refine") or 0)
+        if ch:
+            for e in (ch.get("equips") or []) + (ch.get("bag") or []):
+                if e.get("inventoryIndex") == idx:
+                    return (e.get("itemId"), e.get("refine") or 0)
+        if own:
+            return (own, 0)                    # この接続で入るのを見た品(持ち物の一覧より新しい)
+        if ch:
+            for x in ch.get("items") or []:
+                if x.get("index") == idx:
+                    return (x.get("itemId"), 0)
         return None
 
     def _cart_list(self, s, op, pkt, now):
