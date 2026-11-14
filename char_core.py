@@ -230,6 +230,7 @@ class CharCore(object):
         self.changed = False
         self._diag = {}        # 倉庫まわりの通信(確認用): op -> 受け取った回数
         self._snap = {}        # (持ち主, 倉庫の枠) -> 一覧を受け取り始める前の記録(取りこぼしたときに戻す)
+        self._cos = {}         # 接続 -> 衣装倉庫を開いたときに続けて届く、種類4の小さな一覧を足し合わせたもの {t, eq}
         self._pending = {}     # 接続 -> 名前が決まる前に届いた分の記録(装備の一覧など)。名前が決まったら、そのキャラの記録に合流させる
         self._inv_chunk = {}   # 接続 -> (最後に持ち物の一覧が届いた時刻, その件数)。100件で区切られた続きかを見分ける
         self._recent_add = {}  # 接続 -> [(アイテム番号, 時刻)]。直前に持ち物へ戻った品(失敗した預け入れの見分け用)
@@ -282,6 +283,9 @@ class CharCore(object):
             self.sim_links = data.get("sim_links") or {}
             if "stores" in data:                       # 記録の取り込み(records_sync)は stores を持たない → 持っているものを消さない
                 self.stores = data.get("stores") or {}
+                for sl in self.stores.values():
+                    for kk in [kk for kk, v in sl.items() if v.get("inv") == 4 and not v.get("items") and not v.get("eq")]:
+                        sl.pop(kk, None)      # 前の版が、衣装倉庫の空の一覧で W倉庫を上書きしたもの
             self._tidy_stores()
             self._migrate_sets()
             self.repair_sets()
@@ -1181,6 +1185,20 @@ class CharCore(object):
             self._items_synced.add(getattr(self, "_key", None))
             self.changed = True
         elif lst["inv"] in (2, 3, 4):
+            eq_w = lst["eq"]
+            if lst["inv"] == 4 and not lst["items"] and all(e.get("loc") and not (e.get("loc") & ~COSTUME_BITS) for e in lst["eq"]):
+                # jRO の衣装倉庫: W倉庫と同じ種類4で、品(0B09)は空・衣装だけの小さな一覧が続けて何本も届く(11/14 実測: 9・5・0・0…件)。
+                # 1本ずつ置きかえると最後の空の一覧で消える → 続けて届いた分を足し合わせて「衣装倉庫」に書く。空だけなら書かない(W倉庫を消さない)
+                ck, tnow = getattr(self, "_key", None), time.time()
+                b = self._cos.get(ck)
+                if b is None or tnow - b["t"] > 10:
+                    b = self._cos[ck] = {"t": tnow, "eq": []}
+                have = {(e.get("inventoryIndex"), e.get("itemId")) for e in b["eq"]}
+                b["eq"] += [dict(e) for e in lst["eq"] if (e.get("inventoryIndex"), e.get("itemId")) not in have]
+                b["t"] = tnow
+                if not b["eq"]:
+                    return
+                lst["title"], eq_w = "衣装倉庫", b["eq"]
             name = self._name()
             if name == UNKNOWN:
                 # キャラの名前がまだ決まっていない(ログイン時のクエスト一覧が届かなかった等)。アカウントが1つだけなら、倉庫は持ち主(アカウント)で分かるので捨てずに記録する
@@ -1224,7 +1242,7 @@ class CharCore(object):
                 lst["snap_k"] = k
                 self._snap[(owner, k)] = json.loads(json.dumps(slots[k])) if k in slots else None
             slots[k] = {"inv": lst["inv"], "title": title, "items": [dict(x) for x in lst["items"]],
-                        "eq": [dict(x) for x in lst["eq"]], "t": now, "by": name, "srv": srv}
+                        "eq": [dict(x) for x in eq_w], "t": now, "by": name, "srv": srv}
             if title:                                            # 名前つきの枠ができたら、同じ中身の「名前なし」の仮の枠は片づける(倉庫が増えて見える元)
                 for kk in [kk for kk, v in slots.items() if kk != k and v.get("inv") == lst["inv"] and not v.get("title") and self._slot_srv(v) == srv and self._same_store(v, slots[k])]:
                     slots.pop(kk, None)
@@ -1238,9 +1256,9 @@ class CharCore(object):
             self._verify_last(getattr(self, "_key", None), final=final)
             self._ncommit = getattr(self, "_ncommit", 0) + 1
             if self._ncommit <= 1000:
-                self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(lst["eq"])))
-            if lst["eq"]:
-                self._claim(None, lst["eq"], before=now, srv=srv, who="倉庫「{}」".format(title or "名前不明"))
+                self.log("[倉庫] {} の倉庫「{}」(種類{})を記録: 品{}・装備{}".format(owner, title, lst["inv"], len(lst["items"]), len(eq_w)))
+            if eq_w:
+                self._claim(None, eq_w, before=now, srv=srv, who="倉庫「{}」".format(title or "名前不明"))
 
     def _srv(self):
         """いまの接続のワールド(サーバー)。わからなければ空。"""

@@ -1150,12 +1150,14 @@ class _Scanner(gp.StreamScanner):
 
     def _lose(self, op):
         d = self.dg
-        if self._dg_on() and not d["lose"] and d["prev"]:
-            # 最初に見失ったとき: 直前に切り分けた通信と、その後ろの生のバイト(どの通信の長さがずれたのかを見るため)
+        if self._dg_on() and self.synced and d["prev"] and d["at"].count("直前") < 2:
+            # 正しく切り分けていた途中で見失ったとき(2回まで): 直前に切り分けた通信と、その後ろの生のバイト(どの通信の長さがずれたのかを見るため)。
+            # 接続の最初の6バイトの 0 で見失うのは毎回のことなので、まだ切り分けを始めていないもの(synced でない)は数えない
             last = d["prev"][-1][2]
             i = self.buf.rfind(last)
-            d["at"] = "直前 {} / 後ろ {}".format(" ".join("{:04X}({}バイト):{}".format(o, n, b[:96].hex()) for (o, n, b) in d["prev"][-3:]),
+            d["at"] += (" || " if d["at"] else "") + "直前 {} / 後ろ {}".format(" ".join("{:04X}({}バイト):{}".format(o, n, b[:96].hex()) for (o, n, b) in d["prev"][-3:]),
                                                (self.buf[i + len(last):i + len(last) + 64] if i >= 0 else self.buf[:64]).hex())      # 見つからない = 前の受け取りの最後で切れた → いまの先頭が続き
+        d["prev"] = []
         if self._dg_on() and len(self.dg["lose"]) < 8:
             self.dg["lose"].append(("{:04X}".format(op) if op is not None else "抜け", round(time.time() - self.dg["t"], 1), self.dg["bytes"]))
         gp.StreamScanner._lose(self, op)
@@ -1170,7 +1172,7 @@ class _Scanner(gp.StreamScanner):
         d = self.dg
         return "受け取った {}バイト・切り分けた {}個・見失い {}(原因の通信・秒・それまでのバイト) 見失った長さ {}・つなぎ目の抜け {}回・一覧の通信 {}・最初の16バイト {}{}".format(
             d["bytes"], d["pk"], d["lose"] or "なし", d["lost_len"] or "なし", d["gap"], " ".join(d["list"]) or "なし", d["head"] or "なし",
-            " / 最初に見失った場所: " + d["at"] if d["at"] else "")
+            " / 見失った場所: " + d["at"] if d["at"] else "")
 
     def _scan_lost(self, region):
         """見失った区間から、倉庫に入れた通信(07FA 理由4・1個)だけは形を確かめて拾う(RO Storage Manager と同じ考え方。通信のつなぎ目の途中に埋もれていることがある)。"""
@@ -1235,7 +1237,7 @@ class _Scanner(gp.StreamScanner):
             i = region.find(OP_0B39, i + (ln if ok else 1))
 
     def _handle(self, pkt):
-        if self._dg_on() and len(pkt) >= 2 and not self.dg["lose"]:
+        if self._dg_on() and len(pkt) >= 2:
             self.dg["prev"] = (self.dg["prev"] + [(pkt[0] | (pkt[1] << 8), len(pkt), bytes(pkt))])[-3:]
         if self._dg_on() and len(pkt) >= 4:
             self.dg["pk"] += 1

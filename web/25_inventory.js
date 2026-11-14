@@ -59,7 +59,7 @@ function invStoreSlots(c) {
   const S = !sv || !multi ? S0 : Object.fromEntries(Object.entries(S0).filter(([, v]) => (v.srv ?? srvOf(v.by)) === sv));      // 倉庫はワールドごとに別。見ているキャラのワールドの分だけ
   const list = Object.entries(S).map(([k, v]) => ({ k, ...v }));
   list.sort((a, b) => (a.inv - b.inv) || String(a.title).localeCompare(String(b.title), "ja", { numeric: true }));
-  const normal = list.filter((x) => x.inv === 2), w = list.filter((x) => x.inv === 4), guild = list.filter((x) => x.inv === 3);
+  const normal = list.filter((x) => x.inv === 2), w = list.filter((x) => x.inv === 4 && x.title !== "衣装倉庫"), cos = list.filter((x) => x.inv === 4 && x.title === "衣装倉庫"), guild = list.filter((x) => x.inv === 3);      // 衣装倉庫は W倉庫と同じ種類4(名前で分ける)
   const slots = [], arr = [null, null, null, null], rest = [];
   for (const x of normal) { const i = invSlotNo(x.title); if (i >= 0 && i < 4 && !arr[i]) arr[i] = x; else rest.push(x); }      // 名前で枠を決める(メイン倉庫=1つ目・サブ倉庫1=2つ目 …)
   for (const x of rest) { const j = arr.indexOf(null); if (j >= 0) arr[j] = x; else arr.push(x); }
@@ -68,10 +68,12 @@ function invStoreSlots(c) {
     const x = normal[0], wn = (typeof worldName === "function" && worldName(x.srv || (sv || ""))) || "";
     slots.push({ id: x.k, label: `${wn ? wn + "の" : ""}倉庫`, st: x });
     slots.push(w[0] ? { id: w[0].k, label: "W倉庫", st: w[0] } : { id: "w", label: "W倉庫", st: null });
+    if (cos[0]) slots.push({ id: cos[0].k, label: "衣装倉庫", st: cos[0] });
     return slots;
   }
   arr.forEach((x, i) => slots.push(x ? { id: x.k, label: x.title || `倉庫${i + 1}（名前不明）`, st: x } : { id: "n" + i, label: DEF[i] || `倉庫${i + 1}`, st: null }));
   slots.push(w[0] ? { id: w[0].k, label: "W倉庫", st: w[0] } : { id: "w", label: "W倉庫", st: null });
+  if (cos[0]) slots.push({ id: cos[0].k, label: "衣装倉庫", st: cos[0] });
   if (guild[0]) slots.push({ id: guild[0].k, label: "ギルド倉庫", st: guild[0] });
   return slots;
 }
