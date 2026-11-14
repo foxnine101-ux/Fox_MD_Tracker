@@ -1152,7 +1152,7 @@ class _Scanner(gp.StreamScanner):
         d = self.dg
         if self._dg_on() and self.synced and d["prev"] and d["at"].count("直前") < 2:
             # 正しく切り分けていた途中で見失ったとき(2回まで): 直前に切り分けた通信と、その後ろの生のバイト(どの通信の長さがずれたのかを見るため)。
-            # 接続の最初の6バイトの 0 で見失うのは毎回のことなので、まだ切り分けを始めていないもの(synced でない)は数えない
+            # まだ切り分けを始めていないもの(synced でない)は数えない
             last = d["prev"][-1][2]
             i = self.buf.rfind(last)
             d["at"] += (" || " if d["at"] else "") + "直前 {} / 後ろ {}".format(" ".join("{:04X}({}バイト):{}".format(o, n, b[:96].hex()) for (o, n, b) in d["prev"][-3:]),
@@ -1774,7 +1774,7 @@ class Sniffer(object):
                             _EQ_LOGGED.discard(k)
                         print("[通信] 同じポートで接続し直されました。前の接続の記録を捨てます: {}:{} → {}:{}".format(*key))
                 return
-            data = bytes(tcp.payload)
+            data = gp.tcp_data(ip, tcp)      # 0 の詰め物を外す(外さないと、確認応答のたびに流れが6バイトずれていた)
             if not data:
                 return
             if tcp.sport in server_core.LOGIN_PORTS:
@@ -1793,11 +1793,12 @@ class Sniffer(object):
                 sc = _Scanner(self.core, key, self.lock)
                 self.scanners[key] = sc
                 self._cur_key = key
+                full = len(data)
                 data = self._strip_account(data, tcp)
                 if not data:
                     sc.next_seq = (tcp.seq + 4) & 0xFFFFFFFF
                     return
-                if len(bytes(tcp.payload)) != len(data):
+                if full != len(data):
                     sc.feed_segment((tcp.seq + 4) & 0xFFFFFFFF, data)
                     return
             sc.feed_segment(tcp.seq, data)

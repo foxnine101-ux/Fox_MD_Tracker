@@ -276,6 +276,21 @@ def load_lengths():
     return _LENGTHS
 
 
+def tcp_data(ip, tcp):
+    """TCP の中身。scapy の tcp.payload には、短い通信(60バイト未満)の後ろに付く 0 の詰め物(イーサネットのパディング)が入る。
+    これを中身として読むと、データのない確認応答(ACK)が「0 が6バイト」になって流れに割り込み、次の本物のデータの頭が6バイト切られる。
+    5バイト以下の通信(0B08 など)も 0 が1つ付いて次の通信の頭を食う(11/14 実測: ログイン時の持ち物の一覧を取りこぼしていた原因)。
+    → IP の全長からヘッダーを引いた長さで切る。"""
+    data = bytes(tcp.payload)
+    try:
+        n = int(ip.len) - int(ip.ihl) * 4 - int(tcp.dataofs) * 4
+    except (TypeError, ValueError):
+        return data
+    if ip.len and 0 <= n <= len(data):
+        return data[:n]
+    return data
+
+
 # ===============================================================
 #  TCPの流れを1本のデータにつなぎ直して、パケットに切り分ける
 # ===============================================================
@@ -509,7 +524,14 @@ class StreamScanner(object):
                 return None     # 最後のほうで候補あり。続きを待ってから決める
         return None
 
+    @staticmethod
+    def _op_ok(op):
+        """学んでよい通信の番号か(RO の通信は 0x0064〜0x0CFF。0 や見失った途中のでたらめを覚えると、全部の接続が壊れる)"""
+        return op is not None and 0x0064 <= op <= 0x0CFF
+
     def _learn_var(self, op):
+        if not self._op_ok(op):
+            return
         c = self.learn.setdefault(op, {"n": 0, "var": 0, "len": {}})
         c["var_ok"] = c.get("var_ok", 0) + 1
         if c["var_ok"] >= 3:
@@ -518,7 +540,7 @@ class StreamScanner(object):
     def _learn(self, distance):
         """見失ってから復帰するまでの長さ = 表になかったパケットの長さ(かもしれない)。"""
         op = self.lost_op
-        if op is None or not (2 <= distance <= self.MAX_PACKET):
+        if not self._op_ok(op) or not (2 <= distance <= self.MAX_PACKET):
             return
         c = self.learn.setdefault(op, {"n": 0, "var": 0, "len": {}})
         c["n"] += 1
@@ -822,7 +844,7 @@ class PacketWatcher(object):
             ip, tcp = p[IP], p[TCP]
             if not ip.src.startswith(RO_SERVER_PREFIX):
                 return
-            data = bytes(tcp.payload)
+            data = tcp_data(ip, tcp)
             if not data:
                 return
             self.stats["packets"] += 1
