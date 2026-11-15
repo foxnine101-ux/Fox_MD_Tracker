@@ -1301,7 +1301,7 @@ class DmgCore(object):
         from collections import Counter
         hist = getattr(self.md, "history", []) or []
         off = self.official
-        key = (len(hist), len(off.maplist) if off is not None else 0)
+        key = (len(hist), (hist[-1].get("t") if hist else 0), len(off.maplist) if off is not None else 0)      # 履歴は300件で頭打ちになるので、最後の時刻も見る
         if getattr(self, "_pm_key", None) == key:
             return self._pm
         jp, eng = {}, {}
@@ -1319,7 +1319,10 @@ class DmgCore(object):
             for f, n in off.maplist:
                 if "@" in f:
                     offn.setdefault(f.split("@", 1)[1], Counter())[re.split(r"[ 　]", str(n), 1)[0]] += 1
-        self._pm = ({s: c.most_common(1)[0][0] for s, c in jp.items()}, eng, {s: c.most_common(1)[0][0] for s, c in offn.items()})
+        def _clear(c):     # 票が割れているもの(前の MD の名前が残ったまま別のマップに入った記録が混じる)は採用しない: 1位が3票以上かつ 3/4 以上のときだけ
+            n, t = c.most_common(1)[0][1], sum(c.values())
+            return n >= 3 and n * 4 >= t * 3
+        self._pm = ({s: c.most_common(1)[0][0] for s, c in jp.items() if _clear(c)}, eng, {s: c.most_common(1)[0][0] for s, c in offn.items()})
         map_ledger.learn(self._pm[0], self._pm[2], off.maplist if off is not None else [])      # 台帳に渡す(場所の名前の整理も、ほかの機能も、同じ台帳を引く)
         self._pm_key = key
         self._canon_cache = {}
@@ -1355,6 +1358,25 @@ class DmgCore(object):
             r = top[0] if top and top[1] * 3 >= sum(votes.values()) * 2 else w
         cc[where] = r
         return r
+
+    def place_labels(self):
+        """画面用: 記録の中の場所の名前 -> 「日本語の名前（元のID）」。日本語に直せないもの・もともと日本語のものは入れない(キーは記録のまま。見せ方だけ)。"""
+        ws = set(self.mob_seen)
+        for d in (self.stats, self.ails, self.acts):
+            for per in d.values():
+                ws.update(per)
+        for r in self.recent:
+            ws.add(r.get("md") or "")
+        for v in self.seen.values():
+            ws.add(v.get("where") or "")
+        out = {}
+        for w in ws:
+            if not w or w == "不明" or w.startswith("フィールド "):
+                continue
+            c = self.canon_where(w)
+            if c and c != w and c != "不明":
+                out[w] = "{} [{}]".format(c, w[3:] if w.startswith("MD ") else w)
+        return out
 
     def _raw_wheres(self, canon):
         """整えた名前 canon になる、記録の中の場所の名前すべて"""

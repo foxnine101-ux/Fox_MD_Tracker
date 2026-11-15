@@ -124,7 +124,7 @@ function renderSimDmg(chars) {
       <label>サイズ <select id="simsize">${selOpt([["", "わからない"], ["小", "小"], ["中", "中"], ["大", "大"]], SIM.size)}</select></label>
       <label>ボス <select id="simboss">${selOpt([["", "わからない"], ["1", "ボス"], ["0", "一般"]], SIM.boss)}</select></label></div>`;
   } else {
-    h += `<div class="opts"><label>場所 <select id="simmd">${selOpt(mds.map((x) => [x, x]), SIM.md)}</select></label>
+    h += `<div class="opts"><label>場所 <select id="simmd">${selOpt(mds.map((x) => [x, dmgPlace(x)]), SIM.md)}</select></label>
       <label>攻撃 <select id="simkey" style="max-width:420px">${selOpt(rows.map(([k, v]) => [k, `${k.split("|")[0]} の ${k.split("|")[1]}（最大 ${fmtN(v[2])}・${v[0]}回）`]), SIM.key)}</select></label></div>
       <div class="opts"><span class="muted">${esc(atk.who)} ${mobTag(atk.who)}　${kindTag(atk.kind)} ${eleTag(atk.ele)}</span>
         <label>属性 <select id="simeleov">${selOpt([["", `自動（${SIM.autoEle}）`]].concat(SIM_ELES.map((x) => [x, x])), SIM.eleOv)}</select></label></div>`;

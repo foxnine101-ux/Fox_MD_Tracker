@@ -499,6 +499,7 @@ def start_live_server(core, lock, cfg):
                     data = build_payload(core, history=300)
                     if DMG is not None:
                         data["dmg_recent"] = DMG.recent[-200:]
+                        data["dmg_places"] = DMG.place_labels()      # 場所の名前 -> 「日本語の名前（元のID）」(画面の見せ方だけ。記録のキーは変えない)
                         data["dmg_skills"] = DMG.seen_list()
                         data["dmg_kinds"] = DMG.kinds()
                         data["dmg_sets"] = DMG.sets

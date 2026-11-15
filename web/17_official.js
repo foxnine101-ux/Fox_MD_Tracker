@@ -22,7 +22,7 @@ function mobGroupsHtml() {
     <datalist id="mgnames">${names.map((n) => `<option value="${esc(n)}">`).join("")}</datalist>
     ${G.map((g, i) => {
       const k = mgKey(g), fulls = g.cands.filter((c) => c.total && c.match === c.total && c.known), sel = MG_SEL[k] !== undefined ? MG_SEL[k] : (g.auto || (fulls.length === 1 ? fulls[0].name : ""));      // 最初から選んでおくのは、決まっているときだけ(迷うときは自分で選ぶ)
-      return `<div class="mgcard" data-mgi="${i}"><div class="opts"><span class="tag">${esc(g.where)}</span> <b>ID ${g.ids.length} 体</b><span class="muted">${fmtN(g.hits)} 回</span>
+      return `<div class="mgcard" data-mgi="${i}"><div class="opts"><span class="tag">${esc(dmgPlace(g.where))}</span> <b>ID ${g.ids.length} 体</b><span class="muted">${fmtN(g.hits)} 回</span>
         <span>${g.skills.map(([s, n]) => `<span class="mgsk${g.named.includes(s) ? "" : " dim"}">${esc(s)} ×${n}</span>`).join("")}</span></div>
         <div class="mgtabs">${g.cands.length ? g.cands.map((c) => `<button class="mgtab${c.name === sel ? " on" : ""}${c.name === g.auto ? " auto" : ""}" data-mgi="${i}" data-name="${esc(c.name)}" title="${c.seen ? "この場所で見かけたモンスター" : "この場所の出現モンスター一覧にある"}${c.known ? "" : "（使うスキルの情報はまだ無い）"}">${esc(c.name)}<small>${c.total ? `技 ${c.match}/${c.total}` : ""}${c.seen ? " ・見かけた" : ""}</small></button>`).join("") : `<span class="muted">候補がありません（下の欄に名前を入れてください）</span>`}</div>
         <div class="opts"><input class="mglink" data-mgi="${i}" list="mgnames" placeholder="ほかの名前を入れる" value="${esc(sel)}" style="width:18em">
@@ -44,7 +44,7 @@ function bindMobGroups() {
     const card = b.closest(".mgcard"), name = card.querySelector("input.mglink").value.trim();
     if (!name) { card.querySelector("input.mglink").focus(); return; }
     const rem = !!(card.querySelector("[data-mgrem]") || {}).checked;
-    if (!(await askOnce("moblink", `「${g.where}」の名前が分からない相手 ${g.ids.length} 体（${g.named.slice(0, 3).join("・") || "技の手がかりなし"}）を、「${name}」にします。\n記録の名前が書きかわるので、元には戻せません。`, "紐付ける"))) return;
+    if (!(await askOnce("moblink", `「${dmgPlace(g.where)}」の名前が分からない相手 ${g.ids.length} 体（${g.named.slice(0, 3).join("・") || "技の手がかりなし"}）を、「${name}」にします。\n記録の名前が書きかわるので、元には戻せません。`, "紐付ける"))) return;
     await fetch("/api/moblink", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ where: g.where, ids: g.ids, name, remember: rem, skills: g.named }) });
     delete MG_SEL[mgKey(g)]; load();
   });
@@ -81,6 +81,7 @@ function dmgByGear(cs, w, W, G) {
   }
   return h;
 }
+function dmgPlace(w) { return (DATA.dmg_places || {})[w] || w; }      // 場所の名前の見せ方(「MD herbs2」→「隠された花園（保安区域） [herbs2]」)。記録のキーは変えない
 let DMG_CHAR_AUTO = true;                 // キャラを自分で選ぶまでは、いまログインしているキャラを出す
 function renderDmg(chars, now) {
   const withDmg = chars.filter((c) => Object.keys((DATA.chars[c] || {}).dmg || {}).length);
@@ -96,7 +97,7 @@ function renderDmg(chars, now) {
   const mds = Object.entries(merged).map(([w, W]) => [w, W, Math.max(...Object.values(W).map((v) => v[3]))]).sort((a, b) => b[2] - a[2]);
   if (DMG_MD && !merged[DMG_MD]) DMG_MD = "";
   let h = `<div class="opts"><label>キャラ <select id="dmc"><option value="">すべて</option>${withDmg.map((c) => `<option value="${esc(c)}" ${c === DMG_CHAR ? "selected" : ""}>${esc(cn(c))}</option>`).join("")}</select></label>
-    <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option ${w === DMG_MD ? "selected" : ""}>${esc(w)}</option>`).join("")}</select></label>
+    <label>場所 <select id="dmm"><option value="">すべて</option>${mds.map(([w]) => `<option value="${esc(w)}" ${w === DMG_MD ? "selected" : ""}>${esc(dmgPlace(w))}</option>`).join("")}</select></label>
     ${usedGear.size ? `<label>装備 <select id="dmgear"><option value="">すべて</option>${[...usedGear].filter((id) => G[id]).sort((a, b) => G[a].letter.localeCompare(G[b].letter, undefined, { numeric: true })).map((id) => `<option value="${esc(id)}" ${id === DMG_GEAR ? "selected" : ""}>${G[id].letter}: ${esc(G[id].name ? G[id].name + "（" + gearText(G[id].p) + "）" : gearText(G[id].p))}</option>`).join("")}</select></label>` : ""}
     ${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost" id="dmclear">${DMG_CHAR ? esc(cn(DMG_CHAR)) + " の" : "全部の"}記録を消す</button>` : ""}</div>`;
   h = officialHtml() + h;          // 名前が分からない攻撃者(mobGroupsHtml)は、表のいちばん下に出す
@@ -107,7 +108,7 @@ function renderDmg(chars, now) {
   for (const [w, W] of mds) {
     if (DMG_MD && w !== DMG_MD) continue;
     const E = resistMatch(RZ.entries, "", w) || resistFind(RZ.entries, w);
-    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(w)}</b><span class="muted">${Object.keys(W).length}種類・装備セットごと・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${statusHtml(DMG_CHAR ? [DMG_CHAR] : withDmg, w)}${dmgByGear(DMG_CHAR ? [DMG_CHAR] : withDmg, w, W, G)}</div>`;
+    h += `<div class="panel dm-box"><div class="dm-h"><b>${esc(dmgPlace(w))}</b><span class="muted">${Object.keys(W).length}種類・装備セットごと・最大ダメージ順</span>${E ? `<a href="#" class="dm-rz" data-rzn="${esc(E.name)}">耐性を見る</a>` : ""}</div>${dmgMix(W)}${statusHtml(DMG_CHAR ? [DMG_CHAR] : withDmg, w)}${dmgByGear(DMG_CHAR ? [DMG_CHAR] : withDmg, w, W, G)}</div>`;
   }
   const rec = (DATA.dmg_recent || []).filter((r) => (!DMG_CHAR || r.char === DMG_CHAR) && (!DMG_MD || r.md === DMG_MD) && (!DMG_GEAR || gearMain(r.gear) === DMG_GEAR)).slice(-60).reverse();
   if (usedGear.size) {
@@ -117,7 +118,7 @@ function renderDmg(chars, now) {
   }
   if (rec.length) {
     h += `<h2>最近受けた攻撃</h2><div class="panel tablewrap"><table class="dm-t"><thead><tr><th>時刻</th><th class="l">キャラ</th><th class="l">場所</th><th class="l">相手</th><th class="l">技</th><th class="l">種類</th><th class="l">属性</th><th>ダメージ</th><th>装備</th><th></th></tr></thead><tbody>`;
-    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(r.md)}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td><td>${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost simgo" data-simgo="${esc(JSON.stringify([r.char, r.md, r.src, r.skill]))}" title="この攻撃を選んだ状態で、計算機の「被ダメシミュ」を開きます（別の装備なら耐えられたか）">検証</button>` : ""}</td></tr>`;
+    for (const r of rec) h += `<tr><td class="muted">${when(r.t)}</td><td class="l">${esc(cn(r.char))}</td><td class="l muted">${esc(dmgPlace(r.md))}</td><td class="l">${esc(r.src)}${mobTag(r.src)}</td><td class="l">${esc(r.skill)}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l">${kindTag(r.kind ?? kindOf(r.skill)[0], r.est ? `距離${r.dist}セルから` : "")}</td><td class="l">${eleTag(r.ele ?? kindOf(r.skill)[1])}</td><td>${fmtN(r.dmg)}${r.hits > 1 ? ` <span class="muted">(${r.hits}ヒット)</span>` : ""}${r.crit ? ' <span class="tag">クリ</span>' : ""}</td><td>${gearTag(G, r.gear)}</td><td>${typeof LOCAL !== "undefined" && LOCAL ? `<button class="ghost simgo" data-simgo="${esc(JSON.stringify([r.char, r.md, r.src, r.skill]))}" title="この攻撃を選んだ状態で、計算機の「被ダメシミュ」を開きます（別の装備なら耐えられたか）">検証</button>` : ""}</td></tr>`;
     h += `</tbody></table></div>`;
   }
   h += `<p class="hint">自分のキャラが受けたダメージだけを、通信から記録しています（耐性で減ったあとの数字）。相手の名前は画面に出てきたときの名前（横の「人間・大型 闇4」などはラトリオのモンスターデータ。マウスを乗せると Lv・HP）、技の名前はラトリオのデータから。種類（物理・魔法など）と属性は通信に入っていないので、技の番号からスキルのデータ（rAthena）で出しています。モンスターの通常攻撃は物理・無属性。物理の近接/遠距離は当たったときの距離（3セルより遠いと遠距離）で決まるので、技だけで決まらないものは位置の通信から出した距離で決めています（<sup>*</sup>付き＝距離からの推定。ずれることもあります）。位置がわからなかったものは「物理」と出ます。状態変化で属性が変わっているときは反映されません。「受けた状態異常」は自分の頭の上のアイコンから数えていて、なる直前（3秒以内）に受けた技を原因としています（マウスを乗せると原因の内訳）。「ダメージの無い技」は脱衣・クァグマイアなど、自分に使われたけどダメージが無かった技です。</p>`;
@@ -145,7 +146,7 @@ function skillFixHtml() {
       <td class="l"><select class="skattr" data-sk="${r.id}" data-k="kind">${[["", `自動（${r.akind || "不明"}）`], ...SK_KINDS.map((x) => [x, x])].map(([v, l]) => `<option value="${esc(v)}" ${(r.efix.kind || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
       <td class="l"><select class="skattr" data-sk="${r.id}" data-k="ele">${[["", `自動（${r.aele || "不明"}）`], ...SK_ELES.map((x) => [x, x])].map(([v, l]) => `<option value="${esc(v)}" ${(r.efix.ele || "") === v ? "selected" : ""}>${esc(l)}</option>`).join("")}</select></td>
       <td>${fmtN(r.n)}</td><td>${fmtN(r.max)}</td>
-      <td class="l">${esc(r.src || "")}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(r.where || "")}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
+      <td class="l">${esc(r.src || "")}${r.lv > 0 ? ` <span class="muted">Lv${r.lv}</span>` : ""}</td><td class="l muted">${esc(dmgPlace(r.where || ""))}</td><td class="muted">${r.last ? when(r.last) : ""}</td></tr>`;
   }
   h += `</tbody></table></div><p class="hint">名前を付けると、これまでの記録の名前も付けかわります。種類・属性がデータと違っていたら（モンスターの技はサーバーごとに違うことがあります）、ここで選んで直せます。付けた名前・直した種類と属性はフォルダの「スキル名の手直し.json」に、通信の中身は「被ダメ_確認用データ.json」にたまります（名前や数字がおかしいときは、この2つを見せてもらえると直せます）。</p>`;
   return h;
