@@ -1371,7 +1371,7 @@ class DmgCore(object):
             ws.add(v.get("where") or "")
         out = {}
         for w in ws:
-            if not w or w == "不明" or w.startswith("フィールド "):
+            if not w.startswith("MD "):      # 英語の MD 名の日本語化は票が汚れていて当てにならない(例: security area)ので、「MD ID」の形だけ
                 continue
             c = self.canon_where(w)
             if c and c != w and c != "不明":
