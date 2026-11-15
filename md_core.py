@@ -558,6 +558,9 @@ class MDCore(object):
                 self.changed = True          # MDに入った/出た → ウェブの「いまいる場所」を更新
             if "@" in m and "@" not in prev:
                 self._queue(key, c, ("enter", m, now))
+            elif "@" in m and "@" in prev:
+                # MDの中のマップ移動(ファロスの階移動など)。入った時にしか出ない上の行では分からないので、毎回ログに出す
+                self._queue(key, c, ("move", m, prev, op, now))
             if op != OP_MAPMOVE:
                 # サーバー移動は新しい接続でも覚えておく(次の接続のために)
                 self._last_map = m
@@ -807,6 +810,10 @@ class MDCore(object):
             self.history.append({"char": name, "map": m, "md": conn_md, "t": int(now)})
             del self.history[:-HISTORY_MAX]
             self.log("[MD] {} がMDに入りました: {}".format(name, m))
+        elif kind == "move":
+            _, m, prev, op, now = item
+            self.log("[MD移動] {}: {} → {}{} (0x{:04X})".format(
+                name, prev, m, "(同じマップ)" if m == prev else "", op))
 
 
 def _fmt(t):
