@@ -1508,7 +1508,13 @@ def prune_equip_history():
                 sim = json.load(f)
         else:
             sim = {}
+        n_old = DMG.drop_legacy_sets()                   # 全部そろっていない古い形の記録は、先に消す(参照が無くなった履歴も、このあと片づく)
+        if n_old:
+            print("[被ダメ] 全部そろっていない古い装備の記録を {} 件消しました".format(n_old))
         blob = json.dumps(DMG.snapshot(), ensure_ascii=False) + json.dumps(sim, ensure_ascii=False)
+        if os.path.exists(SANDBAG_FILE):
+            with open(SANDBAG_FILE, "r", encoding="utf-8") as f:     # あるのに読めないときは例外 → 片づけない(サンドバックが使っている装備を消さないため)
+                json.load(f)
         blob += json.dumps(load_sandbag(), ensure_ascii=False)
         if CHARS.prune_sets(blob):
             save_chars()

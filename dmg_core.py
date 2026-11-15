@@ -372,6 +372,25 @@ class DmgCore(object):
                 s["char"] = new
         self.changed = True
 
+    def drop_legacy_sets(self):
+        """古い版が作った、全部の場所がそろっていない装備の記録(IDが「毒|地20…」のような中身の要約)を消す。いまの版は、全部そろった装備セットのときだけ記録する。
+        消した装備セットの数を返す(被ダメの総数・相手と技ごとの集計は変えない。装備セットごとの内訳だけが減る)。"""
+        def old(k):
+            return "|" in str(k)
+        gone = [k for k in self.sets if old(k)]
+        for k in gone:
+            del self.sets[k]
+        for per_char in self.gstats.values():
+            for sets in per_char.values():
+                for k in [k for k in sets if old(k)]:
+                    del sets[k]
+        for r in self.recent:
+            if old(r.get("gear")):
+                r["gear"] = ""
+        if gone:
+            self.changed = True
+        return len(gone)
+
     def remap_sets(self, mapping):
         """装備セットの ID を付けかえる(前の版の「キャラ:中身」→ 共通の 装備セット+シャドウセット)。同じになった行はまとめる。"""
         if not mapping:

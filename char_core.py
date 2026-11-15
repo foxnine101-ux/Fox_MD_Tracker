@@ -211,7 +211,7 @@ def load_id2name(folder=None):
     return out
 
 
-PRUNE_DAYS = 45       # この日数 着ていない・使われていない・記号なしの履歴は自動で片づける
+PRUNE_DAYS = 7        # この日数 着ていない・戦闘(被ダメ)にも計算機にも使われていない・記号なしの履歴は自動で片づける
 
 class CharCore(object):
     def __init__(self, md=None, id2name=None, log=None):
