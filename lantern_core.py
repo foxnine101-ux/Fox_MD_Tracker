@@ -132,6 +132,16 @@ REFERENCE_IDS = {norm(k): v for k, v in {
     "ジプニー内部08": "ma_zif08", "格闘場（観覧席）": "gon_test", "シュバルツバルト政府庁舎": "yuno_pre", "秘密居酒屋": "que_job01", "図書室（アカデミー）": "ac_library", "飛行船（国内線）": "airplane", "飛行船（国外線）": "airplane_01",
     "過去の王家の記憶の間": "prt_lib_q", "侵攻されたプロンテラ避難地": "prt_q", "ハートハンター軍事基地": "que_swat", "時の通路01": "dali", "ローグギルド": "in_rogue", "イベントホール": "paramk_"}.items()}
 
+# ゲームのクライアント側の表記。上の「参考」(他の人のまとめ)と綴りが違うもののうち、ID が確かなものを別名として足す。
+# 既存の名前は消さない(シートの名前と合わなくなるため)。
+REFERENCE_IDS.update({norm(k): v for k, v in {
+    "バリオ・マヒワガ": "ma_fild01", "スプレンディッドフィールド01": "spl_fild01", "スプレンディッドフィールド02": "spl_fild02",
+    "スプレンディッドフィールド03": "spl_fild03", "カミダル山麓01": "dic_fild01", "カミダル山麓02": "dic_fild02",
+    "フレイムケイブ": "moro_cav", "聖カピトーリナ修道院": "prt_monk", "沈没船の付近の島": "alb2trea",
+    "侵攻されたプロンテラ(避難地)": "prt_q", "シュバルツバルド政府庁舍": "yuno_pre",
+    "飛行船(シュバルツバルド国内線)": "airplane", "飛行船(シュバルツバルド国外線)": "airplane_01",
+}.items()})
+
 
 def resolve_ids(names, maplist, manual=None):
     """マップ名のリスト → {名前: {"id": ID か None, "how": "手"/"公式"/"推定"/""}}。
