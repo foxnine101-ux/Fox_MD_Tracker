@@ -81,7 +81,7 @@ const cn = (k) => String(k ?? "").replace(SRV_RE, "");
 const srvOf = (k) => (String(k ?? "").match(SRV_RE) || [])[1] || "";
 // 別のワールドに同じ名前のキャラがいるときだけ、ワールド名を添える(ワールドを絞らずに並べる画面で、どちらか分からなくなるため)
 const cnU = (k) => { const n = cn(k); return Object.keys((DATA && DATA.chars) || {}).some((o) => o !== k && cn(o) === n) && srvOf(k) ? `${n}（${serverLabel(srvOf(k))}）` : n; };
-let SERVER = "";            // プルダウンで選んだワールド(""= 全サーバー)。開き直す・別のワールドにログインすると全サーバーに戻る
+let SERVER = "";            // プルダウンで選んだワールド(""= いちばん最近ログインしたワールド)。開き直すと最新に戻る
 let LATEST_SEEN = "";       // 前に見た「最新ログインのワールド」(変わったら、選んでいたワールドから最新に切りかえる)
 function serverList() {        // 記録にあるサーバー(IPの順。"" = 未確認は最後)
   const L = [...new Set(Object.keys(DATA.chars || {}).map(srvOf))];
@@ -95,13 +95,13 @@ function latestServer() {      // いちばん最近ログインしたキャラ�
 function curServer() {
   const L = serverList(), latest = latestServer();
   if (latest !== LATEST_SEEN) { LATEST_SEEN = latest; SERVER = ""; }     // 別のワールドにログインした → 最新に切りかえ
-  return SERVER && L.includes(SERVER) ? SERVER : "*";      // "*" = 全サーバー
+  return SERVER && L.includes(SERVER) ? SERVER : latest;
 }
 // タブの名前: 自分で付けた名前 → ログインのときに届いたワールド名(この PC で見ているとき) → サーバー1, 2…
 const worldName = (ip) => ((DATA.servers || []).find((v) => v.ip === ip) || {}).name || "";
 const KNOWN_WORLD = { "18.182.57.231": "Noatun" };      // ログインで名前が届かなくても分かるワールド(露店専用。利用者が確認)
 const serverLabel = (ip) => ip ? ((SETTINGS.serverNames || {})[ip] || worldName(ip) || KNOWN_WORLD[ip] || `サーバー${serverList().filter(Boolean).indexOf(ip) + 1}`) : "未確認";
-const inServer = (k) => { if (serverList().length <= 1) return true; const c = curServer(); return c === "*" || srvOf(k) === c; };
+const inServer = (k) => serverList().length <= 1 || srvOf(k) === curServer();
 // 見出しのアカウントのプルダウン(ワールドの横)。"" = すべて、"?" = アカウント不明、そのほかはアカウントID
 let ACC_SET = store.get("md_acc");          // null = 自分で選んでいない → いまログインしているキャラのアカウント(分からなければ すべて)。"" = すべて、"?" = アカウント不明
 function curAcc() {
@@ -123,7 +123,7 @@ function renderServerTabs() {
   // 見出しのワールドのプルダウン。ふだんは最新ログインのワールド、選ぶとほかのワールドも見られる
   const L = serverList(), cur = curServer(), latest = latestServer();
   const box = $("#srvtabs");
-  const h = L.length > 1 ? `<select id="srvsel" title="表示するワールド（ふだんは全サーバー）"><option value="*" ${cur === "*" ? "selected" : ""}>全サーバー</option>${L.map((ip) => {
+  const h = L.length > 1 ? `<select id="srvsel" title="表示するワールド（ふだんは、いちばん最近ログインしたワールド）">${L.map((ip) => {
     return `<option value="${esc(ip)}" ${ip === cur ? "selected" : ""}>${esc(serverLabel(ip))}${ip === latest ? "（最新）" : ""}</option>`;
   }).join("")}</select>` : "";
   // アカウントのプルダウン(2つ以上のアカウントが分かっているときだけ)
@@ -133,7 +133,7 @@ function renderServerTabs() {
   const hh = ah + h;          // アカウントはワールドの左側
   if (box.dataset.h !== hh) { box.innerHTML = hh; box.dataset.h = hh; }      // 変わったときだけ描き直す(開いているプルダウンが閉じないように)
   const sel = $("#srvsel");
-  if (sel) sel.onchange = () => { SERVER = sel.value === "*" ? "" : sel.value; SEL.chars.clear(); render(); };
+  if (sel) sel.onchange = () => { SERVER = sel.value === latest ? "" : sel.value; SEL.chars.clear(); render(); };
   const asel = $("#accsel");
   if (asel) asel.onchange = () => { ACC_SET = asel.value; store.set("md_acc", ACC_SET); SEL.chars.clear(); render(); };
 }

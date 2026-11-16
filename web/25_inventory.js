@@ -163,7 +163,7 @@ function invAllTable() {      // 全部の持ち物・倉庫から探す(同じ�
 }
 
 // ---------- 家計簿(ゼニーの増減と、そのとき動いた品。ledger_core。/api/ledger。この PC だけ) ----------
-let LED = null, LED_T = -1, LED_LOADING = false, LED_SRV = "", LED_CHAR = "", LED_DAYS = +(store.get("md_leddays") || 7), LED_KIND = "";
+let LED = null, LED_T = -1, LED_LOADING = false, LED_SRV = "*", LED_CHAR = "", LED_DAYS = +(store.get("md_leddays") || 7), LED_KIND = "";
 function invNav(slots) {
   return `<div class="simnav" id="invnav"><button data-invsub="all" class="${INVSUB === "all" ? "on" : ""}" title="全キャラの持ち物とすべての倉庫から探す">全部から探す</button><button data-invsub="bag" class="${INVSUB === "bag" ? "on" : ""}">持ち物</button>${slots.map((s) => `<button data-invsub="${esc(s.id)}" class="${INVSUB === s.id ? "on" : ""}" ${s.st ? "" : `style="opacity:.55"`}>${esc(s.label)}</button>`).join("")}<button data-invsub="ledger" class="${INVSUB === "ledger" ? "on" : ""}" title="ゼニーの増減と、そのとき動いた品（露店・買取露店・メールなど）">家計簿</button></div>`;
 }
