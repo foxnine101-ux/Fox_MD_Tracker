@@ -219,7 +219,7 @@ def main(folder, rathena_path=None):
     for iid, info in JRO_FIX.items():
         out[iid] = info
     for iid, info in CLIENT_FIX.items():
-        out.setdefault(iid, {}).update(info)
+        out[iid] = {**out.get(iid, {}), **info}     # 同じ名前の別アイテムと中身を共有しないよう、新しい辞書にする
     json.dump(out, sys.stdout, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     sys.stderr.write(json.dumps({"件数": len(out), "rAthenaで補った": added, "手直し": len(JRO_FIX), "足した分": len(CLIENT_FIX), "内訳": stats},
                                 ensure_ascii=False) + "\n")
