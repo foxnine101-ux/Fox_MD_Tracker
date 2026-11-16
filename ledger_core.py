@@ -54,7 +54,7 @@ KINDS = {      # 種類 -> 画面の名前
     "mail": "メールで受け取った", "mail_item": "メールで品を受け取った",
     "npc_buy": "NPCで買った", "npc_sell": "NPCに売った", "trade": "取引",
     "buy": "買った", "sell": "売った", "other_in": "その他の収入", "other_out": "その他の支出",
-    "unseen": "見ていない間の増減",
+    "storage_fee": "倉庫の使用料", "unseen": "見ていない間の増減",
 }
 
 
@@ -457,6 +457,8 @@ class Ledger(object):
         if price:
             row["p"] = round(price, 2)
         ops = sorted({"{:04X}".format(o) for (t, o, ln, raw) in s["ring"] if t0 - 1.5 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB)})
+        if k == "other_out" and d in (-40, -50) and "00F2" in ops and "0B08" in ops:
+            k = row["k"] = "storage_fee"      # 倉庫を開くと 40〜50z かかる(jRO の実測。倉庫の使用数 00F2 と倉庫の一覧 0B08 が同時に来る)
         if ops and k.startswith("other"):
             row["ops"] = ops                   # 確認用: 何で動いたか分からなかったときの、前後の通信の種類
         self._add(row)
@@ -565,6 +567,7 @@ class Ledger(object):
             if days:
                 cut = time.time() - days * 86400
                 rows = [r for r in rows if r["t"] >= cut]
-            rows = list(reversed(rows))
+            rows = [dict(r, k="storage_fee") if r.get("k") == "other_out" and r.get("d") in (-40, -50) and "00F2" in (r.get("ops") or []) and "0B08" in (r.get("ops") or []) else r
+                    for r in reversed(rows)]      # 前の版で「その他の支出」になった倉庫の使用料も、画面では直して出す
             ids = {str(x[0]) for r in rows for x in r.get("it") or [] if x[0]}
             return {"rows": rows, "names": {i: self.id2name[i] for i in ids if i in self.id2name}, "kinds": KINDS, "t": self.t}
