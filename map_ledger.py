@@ -10,6 +10,7 @@
 同じ ID に名前が複数あるときは、実測・参考・クライアント表(人が確かめたもの) > 通信で学んだもの(MD の履歴) > 公式のマップ一覧 > 町の決まり の順で採用する。
 学んだもの・公式のものは、`learn()` で渡す(この PC のデータなので、起動中に入れかわる。配るデータではない)。
 """
+import re
 import lantern_core as L
 
 
@@ -121,17 +122,23 @@ def md_search(q, limit=60):
     """台帳にある MD のマップ(亜空 lg*・幻影 le*)を、名前・ID の部分一致で探す。[[ID, 名前], …]。
     公式のマップ一覧には載らない MD の名前を、画面のマップ検索にも出すための入口。"""
     k = L.norm(q or "")
-    out = []
     ids = {str(m).split("@", 1)[-1] for m in list(_BY_ID) + list(_LEARNED) + list(_OFFICIAL)}
+    hit = {"lg": [], "le": []}
     for base in sorted(ids):
-        if not (base.startswith("lg") or base.startswith("le")):
+        pre = base[:2]
+        if pre not in hit or not re.fullmatch(r"l[eg]\d+", base):     # letter(街)などの lg/le で始まる別のマップを除く
             continue
         name = name_of(base)
-        if name and (not k or k in L.norm(name) or k in base):
-            out.append([base, name])
-            if len(out) >= limit:
-                break
-    return out
+        if name and " " in name and (not k or k in L.norm(name) or k in base):
+            hit[pre].append([base, name])
+    if k:
+        return sorted(hit["lg"] + hit["le"])[:limit]        # 検索語があるときは、従来どおり ID 順
+    out = []                                    # 検索語が空のときだけ、亜空と幻影を交互に取る(片方だけで上限を使い切らないように)
+    for a, b in zip(hit["lg"], hit["le"]):
+        out += [a, b]
+    n = min(len(hit["lg"]), len(hit["le"]))
+    out += hit["lg"][n:] + hit["le"][n:]
+    return out[:limit]
 
 
 def size():

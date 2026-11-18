@@ -646,6 +646,8 @@ def start_live_server(core, lock, cfg):
                         import map_ledger
                         led = {}
                         for r in out["rows"]:
+                            if "@" in r[0]:
+                                continue            # 接頭辞つき(1@ 入口・3@〜5@ など)は、同じ ID でも別のマップ(例: 1@lg100=試練の門)。2@ も lg/le 以外では台帳と名前が食い違う(例: 2@ct_00 = 地下祭壇)ので、接頭辞つきには台帳の名前を付けない
                             nm = map_ledger.name_of(r[0])
                             if nm and nm != r[1]:
                                 led[r[0]] = nm
@@ -653,7 +655,7 @@ def start_live_server(core, lock, cfg):
                             out["ledger"] = led
                         extra = map_ledger.md_search((q.get("q") or [""])[0])
                         if extra:                   # 公式の結果に出ているマップは、台帳側では出さない(同じマップが二重に見えないように)
-                            have_ids = {str(r[0]).split("@")[-1] for r in out["rows"]}
+                            have_ids = {str(r[0]).split("@")[-1] for r in out["rows"] if "@" not in r[0] or r[0].split("@", 1)[0] == "2"}      # 台帳の名前は本体(接頭辞なし・2@)の名前。1@ など別のマップが出ているだけでは、本体を省かない
                             extra = [e for e in extra if e[0] not in have_ids]
                         if extra:
                             out["ledger_rows"] = extra
