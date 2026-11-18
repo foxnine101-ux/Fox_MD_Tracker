@@ -642,6 +642,23 @@ def start_live_server(core, lock, cfg):
                 q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
                 if path == "/api/maps":            # マップの一覧から探す
                     out = {"rows": OFFICIAL.map_search((q.get("q") or [""])[0]), "have": len(OFFICIAL.maplist)}
+                    try:                            # 台帳併記(候補1): 台帳の名前も一緒に返す(公式の結果は変えない。台帳が壊れても従来どおり返す)
+                        import map_ledger
+                        led = {}
+                        for r in out["rows"]:
+                            nm = map_ledger.name_of(r[0])
+                            if nm and nm != r[1]:
+                                led[r[0]] = nm
+                        if led:
+                            out["ledger"] = led
+                        extra = map_ledger.md_search((q.get("q") or [""])[0])
+                        if extra:                   # 公式の結果に出ているマップは、台帳側では出さない(同じマップが二重に見えないように)
+                            have_ids = {str(r[0]).split("@")[-1] for r in out["rows"]}
+                            extra = [e for e in extra if e[0] not in have_ids]
+                        if extra:
+                            out["ledger_rows"] = extra
+                    except Exception:
+                        pass
                 elif path == "/api/mapcur":        # いまいるマップ(通信から分かったもの) → 公式のマップの候補
                     with lock:
                         w = core.where()
@@ -652,6 +669,13 @@ def start_live_server(core, lock, cfg):
                     if cand:
                         _, n, v = cand[0]
                         out = {"char": n, "map": v["map"], "md": v.get("md", ""), "live": n in cur, "files": OFFICIAL.map_files_by_suffix(v["map"])}
+                        try:                        # 台帳併記(候補1): いまいるマップの台帳名(判定には使わない)
+                            import map_ledger
+                            nm = map_ledger.name_of(v["map"])
+                            if nm:
+                                out["ledger"] = nm
+                        except Exception:
+                            pass
                 else:                              # 取り込んだマップの中身と、読み込みの様子
                     f = (q.get("file") or [""])[0]
                     out = {"map": OFFICIAL.map_view(f) if f else None, "job": dict(OFFICIAL.map_job), "status": OFFICIAL.status()}

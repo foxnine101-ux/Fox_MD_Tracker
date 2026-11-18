@@ -126,15 +126,18 @@ async function mapvCur() {
   MAPV.cur = c;
   if (!c.map) { el.innerHTML = "いまいるマップ: <span class=\"muted\">まだ分かりません（ROにログインしてマップを移動すると出ます）</span>"; return; }
   const btn = (c.files || []).map(([f, n]) => `<button class="ghost" data-mvsel="${esc(f)}" title="${esc(f)}">${esc(n)} を見る</button>`).join(" ");
-  el.innerHTML = `いまいるマップ: <b>${esc(cn(c.char))}</b>${c.live ? "" : " <span class=\"muted\">（最後にいた場所）</span>"} <span class="tag">${esc(c.map)}</span> ${btn || "<span class=\"muted\">公式サイトのマップ一覧にまだ見つかりません。下の検索から（一覧が無ければ、どれか1つ読み込むと取れます）</span>"}`;
+  el.innerHTML = `いまいるマップ: <b>${esc(cn(c.char))}</b>${c.live ? "" : " <span class=\"muted\">（最後にいた場所）</span>"} <span class="tag">${esc(c.map)}</span>${c.ledger ? ` <b>${esc(c.ledger)}</b>` : ""} ${btn || "<span class=\"muted\">公式サイトのマップ一覧にまだ見つかりません。下の検索から（一覧が無ければ、どれか1つ読み込むと取れます）</span>"}`;
 }
 let MAPV_SEQ = 0;
+const mvLedgerRows = (r) => (r.ledger_rows && r.ledger_rows.length) ? `<div style="margin-top:4px"><span class="muted">台帳のマップ:</span> ` + r.ledger_rows.map(([id, n]) => `<span class="tag" title="${esc(id)}">${esc(n)}</span>`).join(" ") + `</div>` : "";
 async function mapvSearch() {
   const my = ++MAPV_SEQ;
   let r; try { r = await mapvJson("/api/maps?q=" + encodeURIComponent(MAPV.q)); } catch (e) { return; }
   const el = $("#mvres"); if (!el || my !== MAPV_SEQ) return;      // 遅れて届いた古い結果では上書きしない
-  if (!r.have) { el.innerHTML = `<span class="muted">マップの一覧がまだありません。どれか1つ「読み込む」と、いっしょに一覧も取り込みます。</span> <button class="ghost" data-mvsel="1@23inf">ファロス（入口）から試す</button>`; return; }
+  if (!r.have) { el.innerHTML = `<span class="muted">マップの一覧がまだありません。どれか1つ「読み込む」と、いっしょに一覧も取り込みます。</span> <button class="ghost" data-mvsel="1@23inf">ファロス（入口）から試す</button>` + mvLedgerRows(r); return; }
   el.innerHTML = r.rows.length ? r.rows.map(([f, n, have]) => `<button class="ghost" data-mvsel="${esc(f)}" title="${esc(f)}">${have ? "● " : ""}${esc(n)} <span class="muted">${esc(f)}</span></button>`).join(" ") + (r.rows.length >= 60 ? ` <span class="muted">…ほかにもあります（もう少し絞ってください）</span>` : "") : `<span class="muted">見つかりません。</span>`;
+  if (r.ledger) el.querySelectorAll("[data-mvsel]").forEach((b) => { const nm = r.ledger[b.dataset.mvsel]; if (nm) b.insertAdjacentHTML("beforeend", ` <span class="tag">${esc(nm)}</span>`); });
+  el.insertAdjacentHTML("beforeend", mvLedgerRows(r));
 }
 async function mapvSelect(f) {
   MAPV.file = f; MAPV.d = null; MAPV.sig = ""; MAPV.msg = "";

@@ -117,6 +117,23 @@ def id_of(name):
     return _OFF_BY_NAME.get(k) or next((i for i, n in _LEARNED.items() if L.norm(n) == k), None) or (r[0] if r else None)
 
 
+def md_search(q, limit=60):
+    """台帳にある MD のマップ(亜空 lg*・幻影 le*)を、名前・ID の部分一致で探す。[[ID, 名前], …]。
+    公式のマップ一覧には載らない MD の名前を、画面のマップ検索にも出すための入口。"""
+    k = L.norm(q or "")
+    out = []
+    ids = {str(m).split("@", 1)[-1] for m in list(_BY_ID) + list(_LEARNED) + list(_OFFICIAL)}
+    for base in sorted(ids):
+        if not (base.startswith("lg") or base.startswith("le")):
+            continue
+        name = name_of(base)
+        if name and (not k or k in L.norm(name) or k in base):
+            out.append([base, name])
+            if len(out) >= limit:
+                break
+    return out
+
+
 def size():
     """台帳に入っているマップ ID の数(同梱の分 + 学んだ分 + 公式の分。重なりは1つ)"""
     return len(set(_BY_ID) | set(_LEARNED) | set(_OFFICIAL))
