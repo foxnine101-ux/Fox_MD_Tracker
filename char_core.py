@@ -203,15 +203,22 @@ def load_id2name(folder=None, log=None):
     仮の名前("Item #…")と、名前が番号そのままのものは捨てる(捨てたら log に1行)。"""
     folder = folder or os.path.dirname(os.path.abspath(__file__))
     out = {}
+    bad = []
     for fn in ("id2name.json", "item_names_fix.json"):
         try:
             with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
-                out.update({k: v for k, v in json.load(f).items() if not k.startswith("_")})
+                data = json.load(f)
         except (OSError, ValueError):
-            pass
-    bad = [k for k, v in out.items() if str(v).startswith("Item #") or str(v) == str(k)]
-    for k in bad:
-        del out[k]
+            continue
+        for k, v in data.items():
+            if k.startswith("_"):
+                continue
+            # 表ごとに、読む時点で仮の名前を飛ばす(手直し表の仮の名前が本当の名前を上書きしないように)
+            if str(v).startswith("Item #") or str(v) == str(k):
+                if k not in bad:
+                    bad.append(k)
+                continue
+            out[k] = v
     if bad and log:
         log("[キャラ] アイテム名の表から、仮の名前(Item #…・番号と同じ名前)の {}件 を除きました: {}".format(
             len(bad), ",".join(sorted(bad)[:10])))
