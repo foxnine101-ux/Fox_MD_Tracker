@@ -197,17 +197,36 @@ def load_gear_info(folder=None):
         return {}
 
 
-def load_id2name(folder=None):
+def is_placeholder_name(name, key):
+    """仮の名前か。"Item #…" で始まる、または名前が番号(キー)そのまま。アイテム名の表を読む所で共通に使う。"""
+    return str(name).startswith("Item #") or str(name) == str(key)
+
+
+def load_id2name(folder=None, log=None):
     """アイテムID→日本語名の対応表。ratorio の items_part*.json から作ったもの(id2name.json)に、
-    ラトリオに無いアイテムの手直し表(item_names_fix.json)を重ねる。"""
+    ラトリオに無いアイテムの手直し表(item_names_fix.json)を重ねる。
+    仮の名前("Item #…")と、名前が番号そのままのものは捨てる(捨てたら log に1行)。"""
     folder = folder or os.path.dirname(os.path.abspath(__file__))
     out = {}
+    bad = []
     for fn in ("id2name.json", "item_names_fix.json"):
         try:
             with open(os.path.join(folder, fn), "r", encoding="utf-8") as f:
-                out.update({k: v for k, v in json.load(f).items() if not k.startswith("_")})
+                data = json.load(f)
         except (OSError, ValueError):
-            pass
+            continue
+        for k, v in data.items():
+            if k.startswith("_"):
+                continue
+            # 表ごとに、読む時点で仮の名前を飛ばす(手直し表の仮の名前が本当の名前を上書きしないように)
+            if is_placeholder_name(v, k):
+                if k not in bad:
+                    bad.append(k)
+                continue
+            out[k] = v
+    if bad and log:
+        log("[キャラ] アイテム名の表から、仮の名前(Item #…・番号と同じ名前)の {}件 を除きました: {}".format(
+            len(bad), ",".join(sorted(bad)[:10])))
     return out
 
 
@@ -216,10 +235,10 @@ PRUNE_DAYS = 7        # この日数 着ていない・戦闘(被ダメ)にも�
 class CharCore(object):
     def __init__(self, md=None, id2name=None, log=None):
         self.md = md                      # md_core.MDCore (キャラ名を借りる)。無くても動く
-        self.id2name = id2name if id2name is not None else load_id2name()
+        self.log = log or (lambda *a: None)
+        self.id2name = id2name if id2name is not None else load_id2name(log=self.log)
         self.gear_info = load_gear_info()
         self.opt_names = load_option_names()
-        self.log = log or (lambda *a: None)
         self.chars = {}
         self.sets = {}         # 装備セット(メイン10か所): ID -> {items, name, tag, first, last, worn, chars: {キャラ: {last, status}}}
         self.shadows = {}      # シャドウセット(6か所): 同じ形(タグは S1, S2…)
