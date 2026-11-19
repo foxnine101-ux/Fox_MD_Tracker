@@ -6,7 +6,7 @@
 
 ## 開発の進め方
 - **正は GitHub の main**。作業の最初に `git pull --rebase origin main`、区切りごとに push。別のセッション(フォーク)が先に進んでいることがある。`md_tracker.py` の `VERSION` もいま何版か読み直す
-- **作業の最初に動作ログを見る(利用者の決めたルール)**: 依頼が別の内容でも、まず Desktop の `動作ログ.txt` の末尾と、ID が絡む行(`マップ=`・MD 名・「不明」や `ID数字` のまま出ている名前・エラー)を確かめ、マップ ID・モンスター ID・名前の対応が台帳(`map_ledger`・`mob_ids.json` など)と食い違っていないか見てから答える。見つけたものは回答の最後に短く報告し、直せるものは直す
+- **作業の最初に動作ログを見る(利用者の決めたルール)**: 依頼が別の内容でも、まず本番フォルダ(`F:\Claude\Fox_MD_Tracker_Master`)の `動作ログ.txt` の末尾と、ID が絡む行(`マップ=`・MD 名・「不明」や `ID数字` のまま出ている名前・エラー)を確かめ、マップ ID・モンスター ID・名前の対応が台帳(`map_ledger`・`mob_ids.json` など)と食い違っていないか見てから答える。見つけたものは回答の最後に短く報告し、直せるものは直す
 - コミットは `git -c user.name=Claude -c user.email=noreply@anthropic.com commit`(既定のメールだと GitHub が push を拒否)。メッセージは日本語
 - 公開: `PYTHONIOENCODING=utf-8 python tools/release.py <版> "<日本語メッセージ>" --notes <公開メモ>`(検査 → VERSION → release_notes.md → コミット → push → Actions 成功まで待つ。`--dry-run` で検査だけ)。**公開メモは先頭が見出し行(「・…（v2.xx.x）」)、続きが「  - …」の箇条書き。メモのファイルはリポジトリの外(scratchpad)に置く**(`git add -A` で入る)。メッセージに絵文字を入れない(cp932 で落ちる)。細かい公開を重ねない(利用者の希望)。リリース前に critic に diff を見せる。場所探しは scout
 - 画面のテスト: `python tools/ui_test_server.py`(ポート 18788・保存は一時フォルダ・起動時に `web/*.js` を写すので JS を直したら起動し直す)。本物のデータは `--data <フォルダ>` で読むだけ、計算機の中身は `--ratorio <フォルダ>`。確認は新しいタブで。自動更新の確認は `tools/redraw_check.js`(`{kept:true, redrawn:true}` が正常)
