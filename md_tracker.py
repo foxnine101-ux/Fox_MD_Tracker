@@ -1689,7 +1689,9 @@ def load_item_fix():
     """アイテム名の手直し.json → {"番号": "名前"}"""
     try:
         with open(ITEM_FIX_FILE, "r", encoding="utf-8") as f:
-            return {str(k): str(v) for k, v in json.load(f).items() if str(k).isdigit() and str(v).strip()}
+            # 仮の名前("Item #…"・番号と同じ名前)は空値と同じに飛ばす(判定は char_core.is_placeholder_name)
+            return {str(k): str(v) for k, v in json.load(f).items() if str(k).isdigit() and str(v).strip()
+                    and not (char_core is not None and char_core.is_placeholder_name(v, k))}
     except FileNotFoundError:
         return {}
     except Exception as e:

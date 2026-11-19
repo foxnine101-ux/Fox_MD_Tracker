@@ -197,6 +197,11 @@ def load_gear_info(folder=None):
         return {}
 
 
+def is_placeholder_name(name, key):
+    """仮の名前か。"Item #…" で始まる、または名前が番号(キー)そのまま。アイテム名の表を読む所で共通に使う。"""
+    return str(name).startswith("Item #") or str(name) == str(key)
+
+
 def load_id2name(folder=None, log=None):
     """アイテムID→日本語名の対応表。ratorio の items_part*.json から作ったもの(id2name.json)に、
     ラトリオに無いアイテムの手直し表(item_names_fix.json)を重ねる。
@@ -214,7 +219,7 @@ def load_id2name(folder=None, log=None):
             if k.startswith("_"):
                 continue
             # 表ごとに、読む時点で仮の名前を飛ばす(手直し表の仮の名前が本当の名前を上書きしないように)
-            if str(v).startswith("Item #") or str(v) == str(k):
+            if is_placeholder_name(v, k):
                 if k not in bad:
                     bad.append(k)
                 continue
