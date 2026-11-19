@@ -25,7 +25,8 @@ import netutil
 import lantern_core
 
 HERE = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-sys.path.insert(0, HERE)
+if not getattr(sys, "frozen", False):
+    sys.path.insert(0, HERE)     # exe のときは足さない(同じ場所の .py=edition.py など が、同梱の部品より先に読まれて、公開版が開発版になり自動更新が止まるため)
 # 記録・設定・ラトリオなど「利用者のデータ」を置く場所。ふつうは exe(またはこのファイル)と同じ場所。
 # 環境変数 FOX_MD_HOME があればそこ(開発用: ソースから動かしても、リポジトリを汚さず、別の場所のデータで動く)。
 # 同梱の部品(id2name.json など)・アップデートの入れ替えは HERE のまま。
@@ -46,7 +47,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.85"
+VERSION = "2.58.86"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
