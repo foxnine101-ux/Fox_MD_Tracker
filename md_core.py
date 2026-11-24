@@ -768,7 +768,7 @@ class MDCore(object):
                 self._sync_missions(name, ch)
             if before is not None:
                 try:
-                    self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]))
+                    self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]), item[1] if kind == "del" else None)
                 except Exception as e:      # アニバの記録で本体を止めない
                     self.log("[アニバ] 記録に失敗: {}".format(e))
 
@@ -794,7 +794,7 @@ class MDCore(object):
         if seen or gone:
             ch["anniv"] = {"seen": seen, "gone": gone}
 
-    def _anniv_track(self, ch, before, kind, t):
+    def _anniv_track(self, ch, before, kind, t, dq=None):
         """24thの夏美・ファンシーの討伐クエストが「現れた」「消えた(=報告して終わった)」を、キャラごとに覚える。
         seen[クエスト番号] = 初めて見た時刻 / gone[クエスト番号] = {"t": 消えた時刻, "by": "del"(消える通信を見た) か "sync"(一覧から無くなっていた)}。
         一覧の取りこぼしで消えたように見えることもあるので、"sync" は画面で「推定」と出す。受け直して戻ってきたら gone は消す。"""
@@ -813,7 +813,10 @@ class MDCore(object):
             if k in gone:
                 del gone[k]
                 self.changed = True
-        for q in (before - now) & ANNIV_WATCH:
+        removed = (before - now) & ANNIV_WATCH
+        if kind == "del" and dq in ANNIV_WATCH:
+            removed.add(dq)      # 一覧に無いまま「消えた」通信が来ても、報告したことは残す
+        for q in removed:
             k = str(q)
             if k not in gone:
                 gone[k] = {"t": t, "by": "del" if kind == "del" else "sync"}

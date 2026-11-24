@@ -35,7 +35,8 @@ function anReached(c, M) {
 function anFancyAutoDone(chars) {
   const M = anFancyMissions(), s = new Set();
   let top = 0;
-  for (const c of chars) top = Math.max(top, anReached(c, M));
+  // 進み具合はキャラごと(アカウントごとかは未確認)なので、受けているキャラのうち一番遅いキャラに合わせる(遅いキャラの納品物を「残り」から消さないため)
+  for (const c of chars) { const r = anReached(c, M); if (r > 0) top = top ? Math.min(top, r) : r; }
   for (let m = 1; m < top; m++) s.add(m);
   return s;
 }
@@ -79,13 +80,13 @@ function renderAnniv(chars, now) {
     }
     return { c, cells, done, held, est, ct: q[AN_NAT_CT] || 0 };
   });
-  h += `<details class="panel evbox" open><summary><b>夏美の討伐クエスト</b><span class="evmeta">全キャラの合計で ${natDoneAny.size} / ${natN} 件が報告済み</span></summary>
+  h += `<details class="panel evbox" open><summary><b>夏美の討伐クエスト</b><span class="evmeta">どれかのキャラが報告した番号: ${natDoneAny.size} / ${natN}</span></summary>
     <div class="tablewrap"><table><thead><tr><th class="char evq">キャラ</th><th>報告済</th><th>受けている</th><th>今日の分</th><th>1〜${natN}（■ 報告済 / □ 受けている / ・ なし）</th></tr></thead><tbody>`;
   const natShow = natRows.filter((r) => r.done || r.held || r.ct > now);
   for (const r of natShow) {
     const g = r.cells.map((s, i) => `<span title="#${i + 1}${s === "done" ? " 報告済" : s === "est" ? " 報告済(推定)" : s === "held" ? " 受けている" : ""}" style="color:${s === "done" ? "var(--ok,#3a3)" : s === "est" ? "var(--wait,#c90)" : s === "held" ? "inherit" : "#999"}">${s === "done" || s === "est" ? "■" : s === "held" ? "□" : "・"}</span>`).join("");
     h += `<tr><td class="char evq">${esc(cn(r.c))}</td><td class="n">${r.done}${r.est ? `<span class="when">うち推定${r.est}</span>` : ""}</td><td class="n">${r.held}</td>`;
-    h += r.ct > now ? `<td class="cell wait">受注済<span class="when">${when(r.ct)} から</span></td>` : `<td class="cell none">ー</td>`;
+    h += r.ct > now ? `<td class="cell wait">今日は受注済<span class="when">次は ${when(r.ct)} 以降</span></td>` : `<td class="cell none">ー</td>`;
     h += `<td style="letter-spacing:1px;font-size:12px;white-space:nowrap">${g}</td></tr>`;
   }
   h += `</tbody></table></div>${natRows.length > natShow.length ? `<p class="hint" style="margin:6px 12px">討伐クエストの記録がないキャラ ${natRows.length - natShow.length} 人は省いています（まだ夏美から受けていないか、ログインを見ていません）。</p>` : ""}</details>`;
