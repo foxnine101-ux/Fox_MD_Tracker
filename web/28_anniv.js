@@ -9,6 +9,7 @@
 const AN_PH_RETRY = 134954;      // ファロス: 再入場可能時間
 const AN_NAT_CT = 130945;       // 夏美: 討伐クエスト再受注時間
 let AN_LAST = "";
+let AN_OPEN = (() => { try { return JSON.parse(store.get("md_anopen") || "{}"); } catch { return {}; } })();      // 閉じた枠を覚える(30秒ごとの描き直しで勝手に開かないように)
 
 function anInfo() { return (DATA && DATA.anniv) || null; }
 function anChar(c) {
@@ -69,7 +70,7 @@ function renderAnniv(chars, now) {
   let h = `<div class="opts"><span>24thアニバーサリーの進み具合を、ログインやマップ移動のたびにゲームが送ってくるクエスト一覧から自動でチェックします（チェックは手で付けなくて大丈夫）。</span></div>`;
 
   // ---- ファロス ----
-  h += `<details class="panel evbox" open><summary><b>ファロス・ライトハウス・アドベンチャー</b>`;
+  h += `<details class="panel evbox" data-an="ph" ${AN_OPEN.ph === false ? "" : "open"}><summary><b>ファロス・ライトハウス・アドベンチャー</b>`;
   const ph = chars.map((c) => ({ c, e: anChar(c).q[I.pharos] || 0, r: anChar(c).q[AN_PH_RETRY] || 0 }));
   const usedN = ph.filter((x) => x.e > now).length;
   h += `<span class="evmeta">今週入ったキャラ: ${usedN}（入っていないキャラ: ${chars.length - usedN}）</span></summary><div class="tablewrap"><table><thead><tr><th class="char evq">キャラ</th><th>今週</th><th>次に入れる</th></tr></thead><tbody>`;
@@ -97,7 +98,7 @@ function renderAnniv(chars, now) {
     }
     return { c, cells, done, held, est, ct: q[AN_NAT_CT] || 0 };
   });
-  h += `<details class="panel evbox" open><summary><b>夏美の討伐クエスト</b><span class="evmeta">どれかのキャラが報告した番号: ${natDoneAny.size} / ${natN}</span></summary>
+  h += `<details class="panel evbox" data-an="nat" ${AN_OPEN.nat === false ? "" : "open"}><summary><b>夏美の討伐クエスト</b><span class="evmeta">どれかのキャラが報告した番号: ${natDoneAny.size} / ${natN}</span></summary>
     <div class="tablewrap"><table><thead><tr><th class="char evq">キャラ</th><th>報告済</th><th>受けている</th><th>今日の分</th><th>1〜${natN}（■ 報告済 / □ 受けている / ・ なし）</th></tr></thead><tbody>`;
   const natShow = natRows.filter((r) => r.done || r.held || r.ct > now);
   for (const r of natShow) {
@@ -114,4 +115,5 @@ function renderAnniv(chars, now) {
   if (h === AN_LAST && v.querySelector("#anroot")) return true;      // 中身が前と同じ → 画面はそのまま
   AN_LAST = h;
   v.innerHTML = `<div id="anroot">${h}</div>`;
+  v.querySelectorAll("details[data-an]").forEach((d) => d.ontoggle = () => { AN_OPEN[d.dataset.an] = d.open; store.set("md_anopen", JSON.stringify(AN_OPEN)); });
 }

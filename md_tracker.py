@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.87"
+VERSION = "2.58.88"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -409,8 +409,10 @@ VIEW_SETTINGS_FILE = os.path.join(DATA_HOME, "表示の設定.json")   # ロー�
 
 
 def resource(name):
-    """同梱ファイル: exe/スクリプトの隣にあればそれ、無ければ exe の中(PyInstaller)。"""
-    for d in (HERE, getattr(sys, "_MEIPASS", None)):
+    """同梱ファイル。ソースから動かすときは スクリプトの隣 → 無ければ同梱。exe(公開版)は 同梱 → 無ければ exe の隣(古い写しを先に読まないため)。"""
+    pk = getattr(sys, "_MEIPASS", None)
+    # exe(公開版)は、同梱のものを先に使う。exe と同じフォルダに古い画面・データの写しが残っていても、それを読んで古い画面になったり新しい機能が出なくなったりしないように(11/25 アニバタブが出ない不具合)。ソースから動かすときは今までどおり隣のファイル
+    for d in ((pk, HERE) if getattr(sys, "frozen", False) else (HERE, pk)):
         if d and os.path.exists(os.path.join(d, name)):
             return os.path.join(d, name)
     return None
