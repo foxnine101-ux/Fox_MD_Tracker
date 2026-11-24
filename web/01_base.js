@@ -11,6 +11,7 @@ let PW = store.get("md_pw") || "";
 let DATA = null, SETTINGS = {}, TAB = store.get("md_tab") || "weekly";
 if (TAB === "equip") TAB = "chars";     // 前の版の「装備」タブは「キャラ」へ
 let EVSUB = store.get("md_evsub") || "event";      // イベントタブのサブタブ(event = イベントクエスト / nyar = ニャル様 / hw = ハロウィン)
+if (TAB === "event" && (EVSUB === "fancy" || EVSUB === "anniv")) { TAB = EVSUB === "fancy" ? "anfancy" : "anprog"; EVSUB = "event"; }     // 前の版でイベントの中にあった「ファンシー」「アニバ」は、バトルの横の「アニバ」タブへ
 if (TAB === "nyar" || TAB === "hw") { EVSUB = TAB; TAB = "event"; }     // 前の版の独立タブは「イベント」のサブタブへ
 let ONLY_OK = store.get("md_onlyok") === "1";
 

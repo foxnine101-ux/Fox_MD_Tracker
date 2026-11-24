@@ -103,7 +103,7 @@ async function invResolve() {      // 名前不明の番号を、公式ツール
     INV_RES.left = pend.size;
     const el = $("#invres"); if (el) el.textContent = `調べています… 残り ${pend.size} / ${INV_RES.total} 件`;
     if (pend.size) { setTimeout(tick, 4000); return; }
-    INV_RES.run = false; INV_T = -1; if (TAB === "inv") render();
+    INV_RES.run = false; INV_T = -1; if (TAB === "inv" || TAB === "anfancy") render();
   };
   setTimeout(tick, 3000);
 }
