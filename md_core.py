@@ -49,6 +49,22 @@ NYAR_EXP = [(270, 63280000000), (260, 42750000000), (250, 29250000000),
             (240, 20650000000), (230, 15450000000), (220, 11250000000)]
 NYAR_WEEK_LIMIT = 420   # 1キャラ・1アカウントとも 1週間に420回まで (火曜12:00リセット)
 
+# ---- 24thアニバーサリー(2026/11/24〜2027/01/12) ----
+# クエスト番号 → 何のクエストか。番号はゲームのクエスト表(OngoingQuestInfoList_True)で、討伐する相手の名前を公式の表と1つずつ突き合わせて確かめた
+# (夏美 30件・ファンシー 226件が全部一致。ミッション23と24は番号が飛ぶので個別に書く)。ここに入れるのは番号と順番だけ
+ANNIV_NAT_FIRST, ANNIV_NAT_COUNT = 90315, 30          # 夏美の討伐クエスト(公式の表の順に 1〜30)
+ANNIV_FANCY_RUNS = [(1, 90443, 90453), (2, 90454, 90462), (3, 90463, 90471), (4, 90472, 90480), (5, 90481, 90489),
+                    (6, 90490, 90498), (7, 90499, 90507), (8, 90508, 90516), (9, 90517, 90526), (10, 90527, 90538),
+                    (11, 90539, 90547), (12, 90548, 90557), (13, 90558, 90566), (14, 90567, 90575), (15, 90576, 90584),
+                    (16, 90585, 90594), (17, 90595, 90603), (18, 90604, 90612), (19, 90613, 90621), (20, 90622, 90630),
+                    (21, 90631, 90639), (22, 90640, 90648), (23, 91022, 91030), (24, 90649, 90650), (24, 90653, 90661)]
+ANNIV_PHAROS_ENTRY = 134953      # ファロス・ライトハウス・アドベンチャー 入場時間制限(期限 = 次の火曜12時)
+ANNIV_FANCY_Q = {}
+for _m, _a, _b in ANNIV_FANCY_RUNS:
+    for _q in range(_a, _b + 1):
+        ANNIV_FANCY_Q[_q] = _m
+ANNIV_WATCH = set(range(ANNIV_NAT_FIRST, ANNIV_NAT_FIRST + ANNIV_NAT_COUNT)) | set(ANNIV_FANCY_Q)
+
 
 def nyar_quest_count(title):
     """NLWDクエスト1つを報告したときの経験値獲得回数(公式の表より)。対象外なら 0。"""
@@ -361,6 +377,9 @@ class MDCore(object):
         self.char_ports |= set(data.get("char_ports", []))
         self.char_info = data.get("char_info", {})
         self.account_aids |= set(data.get("account_aids", []))   # ゲーム中に起動し直しても自分を見分けられるように
+        for c in self.chars.values():
+            if "anniv" not in c:
+                self._anniv_backfill(c)
 
     def forget_conn(self, key):
         """同じ(IP・ポートの組)で新しい接続が始まった。古い接続の記録(名前・場所・アカウント)を捨てる(新しい接続の読み取りに持ち越さない)。"""
@@ -396,7 +415,7 @@ class MDCore(object):
 
     def keep_no_ct(self, qid):
         """期限なしでも覚えるクエスト(ニャル様・イベント)"""
-        return qid in self.events or "NLWD" in self.title(qid)
+        return qid in self.events or qid in ANNIV_WATCH or "NLWD" in self.title(qid)
 
     def title(self, qid):
         return self.names.get(qid) or "クエスト{}".format(qid)
@@ -741,11 +760,64 @@ class MDCore(object):
     def _apply(self, name, item):
         kind = item[0]
         ch = self._char(name)
+        before = set(ch["quests"]) if kind in ("list", "sync", "add", "del") else None
         try:
             self._apply2(name, item, ch)
         finally:
             if kind in ("list", "add", "sync"):
                 self._sync_missions(name, ch)
+            if before is not None:
+                try:
+                    self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]))
+                except Exception as e:      # アニバの記録で本体を止めない
+                    self.log("[アニバ] 記録に失敗: {}".format(e))
+
+    def _anniv_backfill(self, ch):
+        """アニバの記録を付ける前から受けていた分: 同じかたまり(夏美の30件・ファンシーの1ミッション)のうち、一部だけ一覧にあるなら、無いものは報告して終わったとみなす(推定)。
+        かたまりは受けるときに全部いっぺんに付くため。1度だけ(anniv がまだ無いキャラ)。"""
+        have = set(ch.get("quests", {}))
+        groups = [list(range(ANNIV_NAT_FIRST, ANNIV_NAT_FIRST + ANNIV_NAT_COUNT))]
+        byM = {}
+        for q, m in ANNIV_FANCY_Q.items():
+            byM.setdefault(m, []).append(q)
+        groups += byM.values()
+        t = int(ch.get("seen", 0))
+        seen, gone = {}, {}
+        for g in groups:
+            if not (have & set(g)):
+                continue
+            for q in g:
+                if q in have:
+                    seen[str(q)] = t
+                else:
+                    gone[str(q)] = {"t": t, "by": "sync"}
+        if seen or gone:
+            ch["anniv"] = {"seen": seen, "gone": gone}
+
+    def _anniv_track(self, ch, before, kind, t):
+        """24thの夏美・ファンシーの討伐クエストが「現れた」「消えた(=報告して終わった)」を、キャラごとに覚える。
+        seen[クエスト番号] = 初めて見た時刻 / gone[クエスト番号] = {"t": 消えた時刻, "by": "del"(消える通信を見た) か "sync"(一覧から無くなっていた)}。
+        一覧の取りこぼしで消えたように見えることもあるので、"sync" は画面で「推定」と出す。受け直して戻ってきたら gone は消す。"""
+        now = set(ch["quests"])
+        an = ch.get("anniv")
+        if an is None and not (now & ANNIV_WATCH) and not (before & ANNIV_WATCH):
+            return
+        if an is None:
+            an = ch["anniv"] = {"seen": {}, "gone": {}}
+        seen, gone = an.setdefault("seen", {}), an.setdefault("gone", {})
+        for q in now & ANNIV_WATCH:
+            k = str(q)
+            if k not in seen:
+                seen[k] = t
+                self.changed = True
+            if k in gone:
+                del gone[k]
+                self.changed = True
+        for q in (before - now) & ANNIV_WATCH:
+            k = str(q)
+            if k not in gone:
+                gone[k] = {"t": t, "by": "del" if kind == "del" else "sync"}
+                self.changed = True
 
     def _apply2(self, name, item, ch):
         kind = item[0]

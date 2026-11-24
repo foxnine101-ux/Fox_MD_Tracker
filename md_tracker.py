@@ -370,6 +370,8 @@ def build_payload(core, history=100):
             chars[name]["jobName"] = char_core.job_name(info["job"])
         if ch.get("nyar"):
             chars[name]["nyar"] = ch["nyar"]
+        if ch.get("anniv"):
+            chars[name]["anniv"] = ch["anniv"]      # 24th: 夏美・ファンシーの討伐クエストの「現れた・消えた」
         if name in where:
             chars[name]["at"] = where[name]
         if DMG is not None:
@@ -391,7 +393,9 @@ def build_payload(core, history=100):
     titles = {str(q): core.title(q) for q in used}
     spans = {str(q): core.quest_meta.get(q, {}).get("span", 0) for q in used}
     return {"version": VERSION, "edition": EDITION, "updated": int(time.time()), "chars": chars,
-            "titles": titles, "spans": spans, "history": core.history[-history:], "accounts": sorted(core.account_aids)}
+            "titles": titles, "spans": spans, "history": core.history[-history:], "accounts": sorted(core.account_aids),
+            "anniv": {"nat": [md_core.ANNIV_NAT_FIRST, md_core.ANNIV_NAT_COUNT], "fancy": {str(q): m for q, m in md_core.ANNIV_FANCY_Q.items()},
+                      "pharos": md_core.ANNIV_PHAROS_ENTRY}}
 
 
 # ---------------------------------------------------------------
