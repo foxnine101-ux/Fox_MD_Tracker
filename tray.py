@@ -95,11 +95,17 @@ class Tray(object):
             webbrowser.open("file:///" + path)
 
     def notify(self, text, title="Fox_MD_Tracker"):
+        """右下のアイコンから Windows の通知を出す。出せたら True(出せなかった理由は last_error に残す。呼ぶ側が動作ログに書く)"""
+        self.last_error = ""
         try:
-            if self.icon is not None:
-                self.icon.notify(text, title)
-        except Exception:
-            pass
+            if self.icon is None:
+                self.last_error = "トレイのアイコンがまだありません"
+                return False
+            self.icon.notify(text, title)
+            return True
+        except Exception as e:
+            self.last_error = "{}: {}".format(type(e).__name__, e)
+            return False
 
     def run(self):
         """トレイを出す(終了が押されるまでここで待つ)。"""

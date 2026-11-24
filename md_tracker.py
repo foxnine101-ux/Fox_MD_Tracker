@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.89"
+VERSION = "2.58.90"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -715,6 +715,12 @@ def start_live_server(core, lock, cfg):
                 else:
                     st = UPD.check()
                 return self._send(200, json.dumps(st, ensure_ascii=False), "application/json; charset=utf-8")
+            if self.path.split("?")[0] == "/api/muscle-test" and self._local_only():      # マッスルマーチ: 通知の試し打ち(Windows の通知が出るか確かめる)
+                tray_ = globals().get("TRAY")
+                ok = bool(tray_) and tray_.notify("通知のテストです。これが出ていれば、マッスルマーチの通知も出ます", "マッスルマーチ")
+                err = "" if ok else (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません")
+                print("[マッスルマーチ] 通知のテスト: {}{}".format("出しました" if ok else "出せませんでした 理由=", err))
+                return self._send(200, json.dumps({"ok": ok, "err": err}, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/equipset" and self._local_only():
                 try:
                     n = int(self.headers.get("Content-Length") or 0)
@@ -2140,8 +2146,8 @@ def main():
                     on, pts = False, set(muscle_core.DEFAULT_POINTS)
                 tray_ = globals().get("TRAY")
                 for msg in mn.poll(time.time(), not on, pts):
-                    if tray_:
-                        tray_.notify(msg, "マッスルマーチ")
+                    ok = bool(tray_) and tray_.notify(msg, "マッスルマーチ")
+                    core.log("[マッスルマーチ] 通知 {}: {}{}".format("を出しました" if ok else "を出せませんでした", msg, "" if ok else " 理由=" + (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません(画面なしの動作)")))
             except Exception as e:
                 print("[マッスルマーチ通知] 失敗:", e)
     threading.Thread(target=_muscle_loop, daemon=True).start()

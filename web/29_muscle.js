@@ -40,6 +40,25 @@ function mmTick() {
 function mmBtnText() {
   return SETTINGS.mmNotify ? "🔔 通知オン（押すとミュート）" : "🔕 通知ミュート中（押すと通知オン）";
 }
+// 画面の上(「更新」の左)の通知スイッチ。どのタブからでも切りかえられる(SETTINGS.mmNotify。初期はミュート)
+function mmBellUpdate() {
+  const b = document.getElementById("mmbell");
+  if (!b) return;
+  const t = SETTINGS.mmNotify ? "🔔" : "🔕";
+  if (b.textContent !== t) b.textContent = t;
+  b.title = SETTINGS.mmNotify ? "マッスルマーチの通知: オン（押すとミュート）" : "マッスルマーチの通知: ミュート中（押すと通知オン）";
+  const m = document.getElementById("mmMute"); if (m && m.textContent !== mmBtnText()) m.textContent = mmBtnText();
+}
+function mmToggle() { SETTINGS.mmNotify = !SETTINGS.mmNotify; saveSettings(); mmBellUpdate(); }
+(() => { const b = document.getElementById("mmbell"); if (b) b.onclick = mmToggle; setInterval(mmBellUpdate, 700); })();
+async function mmTest(btn) {
+  btn.disabled = true; const o = btn.textContent; btn.textContent = "送っています…";
+  try {
+    const r = await fetch("/api/muscle-test", { method: "POST", headers: { "x-password": PW }, cache: "no-store" }).then((x) => x.json());
+    btn.textContent = r.ok ? "送りました（右下に出ましたか？）" : "出せませんでした: " + r.err;
+  } catch (e) { btn.textContent = "失敗: " + e.message; }
+  setTimeout(() => { btn.disabled = false; btn.textContent = o; }, 6000);
+}
 function renderMuscle(chars) {
   chars = chars || [];
   const H = mmHist(chars), W = new Set(mmWhen());
@@ -56,6 +75,7 @@ function renderMuscle(chars) {
     </div>
     <div style="margin-top:12px"><b>通知する時刻</b>（複数えらべます）<div style="margin:4px 0 8px">${MM_POINTS.map(([k, nm, at]) => `<label style="margin-right:14px;white-space:nowrap"><input type="checkbox" data-mmw="${k}" ${W.has(k) ? "checked" : ""}> ${esc(nm)}<span class="muted">（毎時 ${String(at / 60 | 0).padStart(2, "0")}:${String(at % 60).padStart(2, "0")}・20分ごと）</span></label>`).join("")}</div></div>
     <div><button id="mmMute" style="padding:8px 14px;font-size:14px;cursor:pointer">${esc(mmBtnText())}</button>
+      <button id="mmTest" class="ghost" style="margin-left:8px;padding:8px 12px">通知のテスト</button>
       <span class="muted" style="margin-left:8px">初期はミュート（上の時刻は、ミュートを外したときに鳴ります）。通知は右下のアイコンから出ます。</span></div>
     <div class="panel" style="padding:10px 14px;margin-top:12px;max-width:760px"><b>参加の記録</b>（会場 rag_fes1。訓練の報酬の経験値が届いたら1回と数えます）
       ${H.rows.length ? `<div class="tablewrap"><table><thead><tr><th class="char">キャラ</th><th>参加回数</th><th>Base経験値の累計</th><th>最後</th></tr></thead><tbody>${H.rows.map((r) => `<tr><td class="char">${esc(cn(r.c))}</td><td class="n">${fmtN(r.n)}</td><td class="n">${fmtN(r.exp)}</td><td>${esc(when(r.last))}</td></tr>`).join("")}</tbody></table></div>
@@ -74,7 +94,8 @@ function renderMuscle(chars) {
   });
   const dt = v.querySelector("details[data-mmh]"); if (dt) dt.ontoggle = () => store.set("md_mmhist", dt.open ? "1" : "0");
   const b = document.getElementById("mmMute");
-  b.onclick = () => { SETTINGS.mmNotify = !SETTINGS.mmNotify; saveSettings(); b.textContent = mmBtnText(); };
+  b.onclick = mmToggle;
+  const tb = document.getElementById("mmTest"); if (tb) tb.onclick = () => mmTest(tb);
   mmTick();
   if (!MM_TIMER) MM_TIMER = setInterval(mmTick, 500);
 }
