@@ -449,7 +449,7 @@ function renderNow() {
   if (TAB === "event") return renderEventTab(groups, chars, now);
   if (TAB === "anfancy") return void renderFancy(chars);
   if (TAB === "anprog") return void renderAnniv(chars, now);
-  if (TAB === "anmuscle") return void renderMuscle();
+  if (TAB === "anmuscle") return void renderMuscle(chars);
   if (TAB === "inv") return renderInventory(chars);
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);

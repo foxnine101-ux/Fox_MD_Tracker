@@ -10,6 +10,7 @@ const FANCY_KEY = "md_fancy_done_24";
 let FANCY_DONE = (() => { try { return JSON.parse(store.get(FANCY_KEY) || "{}"); } catch { return {}; } })();
 let FANCY_AUTO = new Set();      // 実機のクエスト一覧から自動でチェックずみと分かったミッション(描くたびに作りなおす)
 let FANCY_HIDE = store.get("md_fancy_hide") === "1", FANCY_LAST = "";      // FANCY_LAST = 前に描いた中身
+let FANCY_SUMOPEN = store.get("md_fancy_sumopen") === "1";      // 「まとめ納品」の開閉(初期は閉じる。描き直しても勝手に開閉しないよう覚える)      // FANCY_LAST = 前に描いた中身
 const FANCY_ID = new Map(FANCY.flatMap(([, its]) => its.map(([nm, , id]) => [nm, id])));
 const FANCY_HINT = new Map(FANCY.flatMap(([, its]) => its.map(([nm, , , w]) => [nm, w || ""])));
 function fancyId(nm, have) {      // 品の名前 → 番号(持っていればその番号、なければ一覧の番号)
@@ -53,7 +54,7 @@ function renderFancy(chars) {
   let h = `<div class="opts"><span>ファンシーパーティーの納品物を、表に出ているキャラの持ち物と、そのアカウントの倉庫から数えます（インベントリタブと同じ記録。ゲームで持ち物・倉庫を開くと最新になります）。ミッションごとに「討伐」(実機のクエスト一覧から自動)と「納品」(下のチェック＋持ち物・倉庫の数)をセットで見られます。討伐が次のミッションに進んでいたら、納品もチェックずみになります。</span></div>`;
   h += `<div class="panel" style="padding:10px 12px"><b>残り ${left.length} / ${FANCY.length} ミッション</b>　納品物 ${need.size} 種類のうち <b class="${short ? "warn" : "ok"}">${short} 種類が足りません</b>
     <label style="margin-left:12px"><input type="checkbox" id="fchide" ${FANCY_HIDE ? "checked" : ""}> 納品したミッションを隠す</label></div>`;
-  h += `<details class="panel evbox" open><summary><b>まとめ（残りのミッションに必要な数）</b></summary><div class="tablewrap"><table class="invt"><thead><tr><th>納品物</th><th class="n">必要</th><th class="n">ある</th><th class="n">足りない</th><th>入手</th></tr></thead><tbody>`;
+  h += `<details class="panel evbox" id="fcsum" ${FANCY_SUMOPEN ? "open" : ""}><summary><b>まとめ納品（残りのミッションに必要な数）</b></summary><div class="tablewrap"><table class="invt"><thead><tr><th>納品物</th><th class="n">必要</th><th class="n">ある</th><th class="n">足りない</th><th>入手</th></tr></thead><tbody>`;
   for (const [nm, n] of [...need].sort((a, b) => (Math.max(0, b[1] - got(b[0]).n) > 0) - (Math.max(0, a[1] - got(a[0]).n) > 0) || a[0].localeCompare(b[0], "ja"))) {
     const g = got(nm).n, lack = Math.max(0, n - g);
     h += `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(n)}</td><td class="n" title="${esc(tip(nm))}">${fmtN(g)}</td><td class="n">${lack ? `<span class="warn">${fmtN(lack)}</span>` : `<span class="ok">✔</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`;
@@ -63,9 +64,9 @@ function renderFancy(chars) {
     const auto = FANCY_AUTO.has(no) && !FANCY_DONE[no], done = !!FANCY_DONE[no] || auto;
     if (done && FANCY_HIDE) continue;
     const ok = its.every(([nm, n]) => got(nm).n >= n);
-    h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b></label> ${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}
+    h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
-      <div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>`;
+      <div class="tablewrap"><table class="invt"><tbody><tr><td><b>① 討伐</b></td><td colspan="3">${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</td></tr><tr><td colspan="4" class="muted">② 納品</td></tr>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>`;
   }
   h += `<p class="hint">入手のめやすは、まとめ表（2512アニバ）の書き方のままです（「イベントホール」「SPエンチャ」などは NPC・交換、ほかは落とすモンスターなど）。「入手」は RO公式ツールのページで、落とすモンスターと出るマップが見られます。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
   // 自動の読み直し(5秒ごと)・時計の描き直し(30秒ごと)で中身が変わらないときは、画面をさわらない。
@@ -74,6 +75,7 @@ function renderFancy(chars) {
   if (h === FANCY_LAST && v.querySelector("#fancyroot")) return true;
   FANCY_LAST = h;
   v.innerHTML = `<div id="fancyroot">${h}</div>`;
+  const sm = $("#fcsum"); if (sm) sm.ontoggle = () => { FANCY_SUMOPEN = sm.open; store.set("md_fancy_sumopen", sm.open ? "1" : "0"); };
   document.querySelectorAll("#view [data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn));
   const hide = $("#fchide"); if (hide) hide.onchange = () => { FANCY_HIDE = hide.checked; store.set("md_fancy_hide", FANCY_HIDE ? "1" : "0"); render(); };
   document.querySelectorAll("[data-fcdone]").forEach((b) => b.onchange = () => {

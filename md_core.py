@@ -22,6 +22,8 @@ import re
 import struct
 import time
 
+import muscle_core
+
 OP_CHARLIST = 0x0B72
 OP_CHAR_TO_MAP = 0x0071
 OP_CHAR_TO_MAP2 = 0x0AC5
@@ -203,6 +205,7 @@ class MDCore(object):
         self.char_info = {}     # キャラ名 -> {"gid", "lv", "job", "account"}
         self.stages = {}        # ニャル様クエストID -> 段階(進行中/完了/討伐)
         self.events = {}        # イベント用クエストID -> {"g": イベント名, "s": 種類}
+        self.muscle_cp = {}     # マッスルマーチ: キャラ → チェックポイントのクエストが最後に消えた時刻(保存しない)
         self.exp_stats = {}     # 確認用: 経験値通信 "種類/区分" -> [回数, 最大量]
         self.raw_tail = {}      # 接続 -> 前のかたまりの末尾(境目をまたぐ並びも探すため)  # キャラ選択サーバーのポート(途中から読み始めても判定できるように)
         self.conn = {}          # 接続 -> {"aid":, "name":, "pending": [...], "map":, "md":}
@@ -611,6 +614,31 @@ class MDCore(object):
             c["rep_exp"] = 0
         c["rep_exp"] = c.get("rep_exp", 0) + amount
         c["exp_last_t"] = now
+        self._muscle_record(c, name, amount, now)
+
+    def _muscle_record(self, c, name, amount, now):
+        """マッスルマーチの参加を数える。会場(rag_fes1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)に経験値が届いたら、そのサイクルの報酬とみなす。
+        同じサイクルの経験値は1回の参加にまとめる(1回の報酬が何十もの通信に分かれて届くため)。履歴はキャラごと(md_state.json)。Base経験値の合計だけ(アイテムの報酬は通信から読めていないので記録しない)。"""
+        if not name or amount <= 0 or c.get("map") != muscle_core.VENUE_MAP:
+            return
+        if now - self.muscle_cp.get(name, -999) > 90 or not muscle_core.is_hit_window(now):
+            return
+        ch = self._char(name)
+        m = ch.get("muscle")
+        if not isinstance(m, dict):
+            m = ch["muscle"] = {"n": 0, "exp": 0, "hist": []}
+        cycle = int(now) // muscle_core.CYCLE
+        h = m["hist"]
+        if h and h[-1].get("cycle") == cycle:
+            h[-1]["exp"] += amount
+            h[-1]["cnt"] += 1
+        else:
+            h.append({"t": int(now), "cycle": cycle, "exp": amount, "cnt": 1})
+            m["n"] += 1
+            del h[:-300]
+            self.log("[マッスルマーチ] {}: 参加 {}回目".format(name, m["n"]))
+        m["exp"] += amount
+        self.changed = True
 
     def _judge_report(self, c, rep):
         """報告で消えたクエストから、達成していた分だけを数える。
@@ -769,6 +797,14 @@ class MDCore(object):
                 self._sync_missions(name, ch)
             if before is not None:
                 try:
+                    now_q = set(ch["quests"])
+                    for q in sorted((now_q ^ before)):      # マッスルマーチの順走・逆走の見分け用(チェックポイントが現れる・消える順を動作ログに残す)
+                        t_ = self.title(q)
+                        if "チェックポイント" in t_:
+                            self.log("[マッスルマーチ] {}: {} {} 番号={} ({})".format(name, t_, "現れた" if q in now_q else "消えた", q, kind))
+                except Exception:
+                    pass
+                try:
                     self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]), item[1] if kind == "del" else None)
                 except Exception as e:      # アニバの記録で本体を止めない
                     self.log("[アニバ] 記録に失敗: {}".format(e))
@@ -878,6 +914,8 @@ class MDCore(object):
                     cc["report"] = rep
                     rep["dels"].append(qid)
                     rep["t"] = now
+            if "チェックポイント" in self.title(qid):
+                self.muscle_cp[name] = now          # マッスルマーチ: 参加の記録の目印(経験値が来る約8秒前に消える)
             if ch["quests"].pop(qid, None) is not None:
                 self.log("[MD] {}: {} が消えました(また入れる)".format(name, self.title(qid)))
         elif kind == "enter":

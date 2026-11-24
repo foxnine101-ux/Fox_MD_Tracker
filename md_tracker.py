@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.88"
+VERSION = "2.58.89"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -371,6 +371,8 @@ def build_payload(core, history=100):
             chars[name]["jobName"] = char_core.job_name(info["job"])
         if ch.get("nyar"):
             chars[name]["nyar"] = ch["nyar"]
+        if ch.get("muscle"):
+            chars[name]["muscle"] = ch["muscle"]      # 24th マッスルマーチ: 参加回数・経験値の累計・履歴
         if ch.get("anniv"):
             chars[name]["anniv"] = ch["anniv"]      # 24th: 夏美・ファンシーの討伐クエストの「現れた・消えた」
         if name in where:
@@ -2123,22 +2125,23 @@ def main():
                     return
         threading.Thread(target=_links_loop, daemon=True).start()
     def _muscle_loop():
-        """マッスルマーチの通知(24th)。訓練開始の1分前と開始に、右下のアイコンから Windows の通知を出す。画面を閉じていても鳴る。「表示の設定.json」の mmNotify が true のときだけ(初期はミュート)"""
+        """マッスルマーチの通知(24th)。選んだ時刻(訓練の1分前・開始など)に、右下のアイコンから Windows の通知を出す。画面を閉じていても鳴る。「表示の設定.json」の mmNotify が true のときだけ(初期はミュート)。どの時刻で鳴らすかは mmWhen(キーの一覧。無ければ「1分前」と「開始」)"""
         mn = muscle_core.MuscleNotifier()
         while not stop.wait(1):
             try:
-                t = int(time.time()) % muscle_core.CYCLE
-                if not (muscle_core.PRE_FROM <= t < muscle_core.START_TO):
+                if not muscle_core.in_notify_window(time.time()):
                     continue      # 通知の時刻でなければ設定ファイルは読まない
                 try:
                     with open(VIEW_SETTINGS_FILE, "r", encoding="utf-8") as f:
-                        on = bool(json.load(f).get("mmNotify"))
+                        vs = json.load(f)
+                    on = bool(vs.get("mmNotify"))
+                    pts = muscle_core.wanted_points(vs.get("mmWhen"))
                 except (OSError, ValueError, AttributeError):
-                    on = False
-                msg = mn.poll(time.time(), not on)
+                    on, pts = False, set(muscle_core.DEFAULT_POINTS)
                 tray_ = globals().get("TRAY")
-                if msg and tray_:
-                    tray_.notify(msg, "マッスルマーチ")
+                for msg in mn.poll(time.time(), not on, pts):
+                    if tray_:
+                        tray_.notify(msg, "マッスルマーチ")
             except Exception as e:
                 print("[マッスルマーチ通知] 失敗:", e)
     threading.Thread(target=_muscle_loop, daemon=True).start()
