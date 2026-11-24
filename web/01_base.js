@@ -324,10 +324,10 @@ function when(t) {
 }
 
 // ---------- 画面 ----------
-const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["battle", "バトル"], ["chars", "キャラ"], ["simu", "シミュ"], ["event", "イベント"], ["inv", "インベントリ"]];   // 入場履歴・設定は見出しの歯車(⚙)のメニューから。ニャル様・ハロウィンは「イベント」のサブタブ
+const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["battle", "バトル"], ["anniv", "アニバ"], ["chars", "キャラ"], ["simu", "シミュ"], ["event", "イベント"], ["inv", "インベントリ"]];   // 入場履歴・設定は見出しの歯車(⚙)のメニューから。ニャル様・ハロウィンは「イベント」のサブタブ
 // まとめたタブ: 見出しには「バトル」「シミュ」だけを出し、中の画面は今までの名前(TAB = "resist" など)のまま。
 // ほかの画面からの飛び先(TAB = "gsets" / "dmg" / "sim" …)はそのまま動き、どのまとめに入るかは TAB_GROUPS で決まる
-const TAB_GROUPS = { battle: [["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["gsets", "装備セット"]], simu: [["sim", "計算機"], ["calc", "ラトリオ"]] };
+const TAB_GROUPS = { anniv: [["anfancy", "ファンシー"], ["anprog", "夏美・ファロス"]], battle: [["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["gsets", "装備セット"]], simu: [["sim", "計算機"], ["calc", "ラトリオ"]] };
 const tabGroupOf = (k) => Object.keys(TAB_GROUPS).find((g) => TAB_GROUPS[g].some(([x]) => x === k)) || "";
 function tabResolve() {      // 見出しの「バトル」「シミュ」を押した = そのまとめで最後に見ていた画面へ
   const g = TAB_GROUPS[TAB];
@@ -427,6 +427,7 @@ function renderNow() {
   const tord = SETTINGS.tabOrder || [];
   const trank = (k) => { const r = [k, ...(TAB_GROUPS[k] || []).map(([x]) => x)].map((x) => tord.indexOf(x)).filter((i) => i >= 0); return r.length ? Math.min(...r) : 99; };      // まとめる前の並び(耐性・計算機の位置)も引き継ぐ
   const tabs = TABS.slice().sort((x, y) => trank(x[0]) - trank(y[0]));     // 並びは自分で変えられる(つかんで左右に動かす)
+  if (!tord.includes("anniv")) { const i = tabs.findIndex((t) => t[0] === "anniv"), b = tabs.findIndex((t) => t[0] === "battle"); if (i >= 0 && b >= 0) { const [a] = tabs.splice(i, 1); tabs.splice(tabs.findIndex((t) => t[0] === "battle") + 1, 0, a); } }      // 並びを変えていないときは「アニバ」をバトルの横に
   $("#tabs").innerHTML = tabs.map(([k, l]) => {
     const n = ["weekly", "daily"].includes(k) ? countOk(k) : 0;
     return `<button data-tab="${k}" class="${TAB === k || grp === k ? "on" : ""}" title="つかんで左右に動かすと、並びを変えられます"><span class="grip tgrip">${l}</span>${n ? `<span class="count">行ける${n}</span>` : ""}</button>`;
@@ -445,6 +446,8 @@ function renderNow() {
   if (TAB === "history") return renderHistory();
   if (TAB === "mapview") return renderMapView();
   if (TAB === "event") return renderEventTab(groups, chars, now);
+  if (TAB === "anfancy") return void renderFancy(chars);
+  if (TAB === "anprog") return void renderAnniv(chars, now);
   if (TAB === "inv") return renderInventory(chars);
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);

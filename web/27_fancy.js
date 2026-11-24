@@ -50,7 +50,7 @@ function renderFancy(chars) {
   const need = new Map();
   for (const [, its] of left) for (const [nm, n] of its) need.set(nm, (need.get(nm) || 0) + n);
   const short = [...need].filter(([nm, n]) => got(nm).n < n).length;
-  let h = `<div class="opts"><span>ファンシーパーティーの納品物を、表に出ているキャラの持ち物と、そのアカウントの倉庫から数えます（インベントリタブと同じ記録。ゲームで持ち物・倉庫を開くと最新になります）。一覧は24thの公式情報です。実機のクエスト一覧から「納品まで終わった」と分かったミッションは、「アニバ」タブの自動チェックでチェックずみになります。</span></div>`;
+  let h = `<div class="opts"><span>ファンシーパーティーの納品物を、表に出ているキャラの持ち物と、そのアカウントの倉庫から数えます（インベントリタブと同じ記録。ゲームで持ち物・倉庫を開くと最新になります）。ミッションごとに「討伐」(実機のクエスト一覧から自動)と「納品」(下のチェック＋持ち物・倉庫の数)をセットで見られます。討伐が次のミッションに進んでいたら、納品もチェックずみになります。</span></div>`;
   h += `<div class="panel" style="padding:10px 12px"><b>残り ${left.length} / ${FANCY.length} ミッション</b>　納品物 ${need.size} 種類のうち <b class="${short ? "warn" : "ok"}">${short} 種類が足りません</b>
     <label style="margin-left:12px"><input type="checkbox" id="fchide" ${FANCY_HIDE ? "checked" : ""}> 納品したミッションを隠す</label></div>`;
   h += `<details class="panel evbox" open><summary><b>まとめ（残りのミッションに必要な数）</b></summary><div class="tablewrap"><table class="invt"><thead><tr><th>納品物</th><th class="n">必要</th><th class="n">ある</th><th class="n">足りない</th><th>入手</th></tr></thead><tbody>`;
@@ -63,7 +63,7 @@ function renderFancy(chars) {
     const auto = FANCY_AUTO.has(no) && !FANCY_DONE[no], done = !!FANCY_DONE[no] || auto;
     if (done && FANCY_HIDE) continue;
     const ok = its.every(([nm, n]) => got(nm).n >= n);
-    h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b></label>
+    h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b></label> ${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
       <div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>`;
   }
@@ -71,7 +71,7 @@ function renderFancy(chars) {
   // 自動の読み直し(5秒ごと)・時計の描き直し(30秒ごと)で中身が変わらないときは、画面をさわらない。
   // さわると、押しかけたチェック・ボタンが作り直されてクリックが抜けたり、数の説明(カーソルを合わせて出る)が消えたりする
   const v = $("#view");
-  if (h === FANCY_LAST && v.querySelector("#fancyroot") && v.querySelector("#evnav")) return true;
+  if (h === FANCY_LAST && v.querySelector("#fancyroot")) return true;
   FANCY_LAST = h;
   v.innerHTML = `<div id="fancyroot">${h}</div>`;
   document.querySelectorAll("#view [data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn));

@@ -1,5 +1,5 @@
 "use strict";
-// ---------- アニバ(イベントタブのサブタブ「アニバ」): 24thアニバーサリーを、実機のクエスト一覧から自動でチェックする ----------
+// ---------- アニバ(タブ「アニバ」。バトルの横。サブタブ: ファンシー / 夏美・ファロス): 24thアニバーサリーを、実機のクエスト一覧から自動でチェックする ----------
 // 見るもの(どれもゲームがクエスト一覧として送ってくる通信から。サーバーに問い合わせたりはしない):
 //   ・夏美の討伐クエスト(30件) … 一覧から消えた = 報告して終わった。受注CT(130945)= 今日の分は受けた
 //   ・ファンシーの討伐クエスト(ミッション1〜24) … ミッションNの討伐が一覧に出た = 1〜N-1 は終わっている(納品まで済んで次へ進んだ)
@@ -41,13 +41,30 @@ function anFancyAutoDone(chars) {
   return s;
 }
 
+// ファンシーの「ミッションN」の討伐の状況(ミッションの納品とセットで見せる用): 自動でチェック
+function anHuntHtml(m, chars) {
+  const qs = anFancyMissions().get(m) || [];
+  if (!qs.length) return "";
+  let best = null;
+  for (const c of chars) {
+    const { q, gone } = anChar(c);
+    const dn = qs.filter((id) => id in gone).length, hd = qs.filter((id) => id in q).length;
+    if ((dn || hd) && (!best || dn * 1000 + hd > best.sc)) best = { c, dn, hd, sc: dn * 1000 + hd };
+  }
+  const auto = typeof FANCY_AUTO !== "undefined" && FANCY_AUTO.has(m);
+  let t, cls;
+  if (auto || (best && best.dn === qs.length)) { t = `討伐 ✔ 済み${best && !auto ? `（${cn(best.c)}）` : ""}`; cls = "ok"; }
+  else if (best) { t = `討伐 ${best.dn} / ${qs.length} 報告済み（${cn(best.c)}・受けている ${best.hd}）`; cls = "evon"; }
+  else { t = "討伐 まだ受けていません"; cls = "muted"; }
+  return `<span class="${cls}" style="margin-left:10px" title="実機のクエスト一覧から自動">${esc(t)}</span>`;
+}
+
 function renderAnniv(chars, now) {
   const I = anInfo();
   if (!I || !chars.length) {
     $("#view").innerHTML = `<div class="panel empty">${I ? "表に出ているキャラがいません。" : "まだ記録がありません。Fox_MD_Trackerを起動したままROにログインすると出ます。"}</div>`;
     return;
   }
-  const M = anFancyMissions();
   const natFirst = I.nat[0], natN = I.nat[1];
   let h = `<div class="opts"><span>24thアニバーサリーの進み具合を、ログインやマップ移動のたびにゲームが送ってくるクエスト一覧から自動でチェックします（チェックは手で付けなくて大丈夫）。</span></div>`;
 
@@ -91,24 +108,10 @@ function renderAnniv(chars, now) {
   }
   h += `</tbody></table></div>${natRows.length > natShow.length ? `<p class="hint" style="margin:6px 12px">討伐クエストの記録がないキャラ ${natRows.length - natShow.length} 人は省いています（まだ夏美から受けていないか、ログインを見ていません）。</p>` : ""}</details>`;
 
-  // ---- ファンシー ----
-  const tops = chars.map((c) => ({ c, t: anReached(c, M) }));
-  const top = Math.max(0, ...tops.map((x) => x.t));
-  h += `<details class="panel evbox" open><summary><b>ファンシーパーティー（討伐）</b><span class="evmeta">${top ? (top > 1 ? `いまミッション ${top}（1〜${top - 1} は納品まで終わっています）` : "いまミッション 1（まだ納品まで終わったものはありません）") : "まだ受けているミッションがありません"}</span></summary>
-    <div class="tablewrap"><table><thead><tr><th class="char evq">キャラ</th><th>いまのミッション</th><th>討伐 報告済 / 件数</th></tr></thead><tbody>`;
-  for (const x of tops) {
-    const { q, gone } = anChar(x.c);
-    if (!x.t) continue;
-    const qs = M.get(x.t) || [];
-    const dn = qs.filter((id) => id in gone).length, hd = qs.filter((id) => id in q).length;
-    h += `<tr><td class="char evq">${esc(cn(x.c))}</td><td class="cell ${x.t === top ? "evon" : "wait"}">ミッション ${x.t}</td><td class="cell ${dn === qs.length ? "okc" : "wait"}">${dn} / ${qs.length}<span class="when">受けている ${hd}</span></td></tr>`;
-  }
-  h += `</tbody></table></div><p class="hint" style="margin:6px 12px">ミッションを受けていないキャラは省いています。ミッションNの討伐が一覧に出たら、1〜N-1 は納品まで終わったとみなして、「ファンシー」タブのチェックに自動で付けます。</p></details>`;
-
   h += `<p class="hint">推定 = 「消える通信」ではなく、次のログインの一覧から無くなっていたもの（受注を放棄しても同じになります）。バルムント・ブレイン・タワー・ホーンテッドの回数は、ゲームの一覧からは分からないので自動では数えません。</p>`;
 
   const v = $("#view");
-  if (h === AN_LAST && v.querySelector("#anroot") && v.querySelector("#evnav")) return true;      // 中身が前と同じ → 画面はそのまま
+  if (h === AN_LAST && v.querySelector("#anroot")) return true;      // 中身が前と同じ → 画面はそのまま
   AN_LAST = h;
   v.innerHTML = `<div id="anroot">${h}</div>`;
 }
