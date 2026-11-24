@@ -207,6 +207,7 @@ class MDCore(object):
         self.raw_tail = {}      # 接続 -> 前のかたまりの末尾(境目をまたぐ並びも探すため)  # キャラ選択サーバーのポート(途中から読み始めても判定できるように)
         self.conn = {}          # 接続 -> {"aid":, "name":, "pending": [...], "map":, "md":}
         self.history = []       # MD入場の記録
+        self._unk_logged = set()    # 名前の表に無いクエストを動作ログに出した番号(1回ずつ)
         self.quest_meta = {}    # qid -> {"title":, "span": 最大の残り秒}
         self.changed = False
 
@@ -835,6 +836,9 @@ class MDCore(object):
                         ch["quests"][qid] = {"end": 0, "since": ch["quests"].get(qid, {}).get("since") or int(now), "nlwd": 1}
                     else:
                         ch["quests"].pop(qid, None)
+                        if qid not in self.names and qid not in self._unk_logged and qid > 90000:
+                            self._unk_logged.add(qid)      # クライアントの表に無いクエスト(夏美の納品などが出てくるかもしれない)。番号を動作ログに残す
+                            self.log("[アニバ] {}: 名前の表に無いクエスト {} (討伐数 {}件)".format(name, qid, _hc))
                     continue   # 期限の無いクエストは関係なし
                 ref = qnow or now
                 self._meta(qid, end - ref)
