@@ -39,6 +39,7 @@ import market_core          # 相場(公式ツールの露店の取引履歴。�
 import zatta_core           # 身内の共有相場(RO相場自動記録が貯めたもの)を受け取るだけ
 import ledger_core          # 家計簿(ゼニーの増減と動いた品。この PC だけ)
 import md_core
+import muscle_core         # マッスルマーチ(24th)の20分サイクルと通知のタイミング
 import quest_names
 import server_core          # どのサーバー(ワールド)の通信か。記録しないサーバーを読み飛ばす
 import ratorio_core         # ROラトリオHub(計算機)をフォークから取り込んで配る
@@ -2119,6 +2120,26 @@ def main():
                 if stop.wait(6 * 3600):
                     return
         threading.Thread(target=_links_loop, daemon=True).start()
+    def _muscle_loop():
+        """マッスルマーチの通知(24th)。訓練開始の1分前と開始に、右下のアイコンから Windows の通知を出す。画面を閉じていても鳴る。「表示の設定.json」の mmNotify が true のときだけ(初期はミュート)"""
+        mn = muscle_core.MuscleNotifier()
+        while not stop.wait(1):
+            try:
+                t = int(time.time()) % muscle_core.CYCLE
+                if not (muscle_core.PRE_FROM <= t < muscle_core.START_TO):
+                    continue      # 通知の時刻でなければ設定ファイルは読まない
+                try:
+                    with open(VIEW_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                        on = bool(json.load(f).get("mmNotify"))
+                except (OSError, ValueError, AttributeError):
+                    on = False
+                msg = mn.poll(time.time(), not on)
+                tray_ = globals().get("TRAY")
+                if msg and tray_:
+                    tray_.notify(msg, "マッスルマーチ")
+            except Exception as e:
+                print("[マッスルマーチ通知] 失敗:", e)
+    threading.Thread(target=_muscle_loop, daemon=True).start()
     if GUI:
         global TRAY
         import tray

@@ -328,7 +328,7 @@ function when(t) {
 const TABS = [["weekly", "週次"], ["daily", "デイリー"], ["other", "クエスト"], ["battle", "バトル"], ["anniv", "アニバ"], ["chars", "キャラ"], ["simu", "シミュ"], ["event", "イベント"], ["inv", "インベントリ"]];   // 入場履歴・設定は見出しの歯車(⚙)のメニューから。ニャル様・ハロウィンは「イベント」のサブタブ
 // まとめたタブ: 見出しには「バトル」「シミュ」だけを出し、中の画面は今までの名前(TAB = "resist" など)のまま。
 // ほかの画面からの飛び先(TAB = "gsets" / "dmg" / "sim" …)はそのまま動き、どのまとめに入るかは TAB_GROUPS で決まる
-const TAB_GROUPS = { anniv: [["anfancy", "ファンシー"], ["anprog", "夏美・ファロス"]], battle: [["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["gsets", "装備セット"]], simu: [["sim", "計算機"], ["calc", "ラトリオ"]] };
+const TAB_GROUPS = { anniv: [["anfancy", "ファンシー"], ["anprog", "夏美・ファロス"], ["anmuscle", "マッスルマーチ"]], battle: [["resist", "耐性"], ["dmg", "被ダメ"], ["mons", "モンスター"], ["gsets", "装備セット"]], simu: [["sim", "計算機"], ["calc", "ラトリオ"]] };
 const tabGroupOf = (k) => Object.keys(TAB_GROUPS).find((g) => TAB_GROUPS[g].some(([x]) => x === k)) || "";
 function tabResolve() {      // 見出しの「バトル」「シミュ」を押した = そのまとめで最後に見ていた画面へ
   const g = TAB_GROUPS[TAB];
@@ -449,6 +449,7 @@ function renderNow() {
   if (TAB === "event") return renderEventTab(groups, chars, now);
   if (TAB === "anfancy") return void renderFancy(chars);
   if (TAB === "anprog") return void renderAnniv(chars, now);
+  if (TAB === "anmuscle") return void renderMuscle();
   if (TAB === "inv") return renderInventory(chars);
   if (TAB === "resist") return renderResist(chars, now);
   if (TAB === "dmg") return renderDmg(chars, now);
