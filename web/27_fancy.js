@@ -40,6 +40,21 @@ function fancyCount(chars) {      // 品の名前 → {n: 合計, where: [[場�
   }
   return have;
 }
+// ミッションの討伐リスト(まとめ表「ファ討」。データは 30_fancy_hunt.js)。左に出す。メモは前提クエスト名・おすすめの相手など(まとめ表の備考のまま)
+function fancyQuestCell(memo) {      // メモ欄: 前提クエスト・入場クエストがあれば、スキップできる石片の個数つきで出す
+  const q = (typeof FANCY_QUEST !== "undefined") && FANCY_QUEST.get(memo);
+  if (!q) return `<span class="muted">${esc(memo)}</span>`;
+  const tip = [q.q, q.note, "石片は「石片収集家」(ギムレットの部屋)に渡してスキップします。前提のクエストが未完了なら、その分の石片も要ります。"].filter(Boolean).join(" / ");
+  const sk = q.s == null ? `<span class="muted">石片スキップ不可(表に無い)</span>` : `<span class="warn">石片 ${fmtN(q.s)}個でスキップ可${q.note.startsWith("推定") ? "(推定)" : ""}</span>`;
+  return `<span title="${esc(tip)}">前提: ${esc(memo)}</span> ${sk}`;
+}
+function fancyHuntHtml(no) {
+  const rows = (typeof FANCY_HUNT !== "undefined" && FANCY_HUNT.get(no)) || [];
+  if (!rows.length) return `<div class="muted">討伐の表がありません。</div>`;
+  const medal = rows.reduce((a, r) => a + r.m, 0);
+  const hasQ = rows.some((r) => typeof FANCY_QUEST !== "undefined" && FANCY_QUEST.has(r.memo));
+  return `<div class="tablewrap"><table class="invt"><thead><tr><th>相手</th><th class="n">数</th><th>転送先</th><th class="n">メダル</th><th>前提クエ・メモ</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.n)}</td><td class="n">${fmtN(r.c)}</td><td>${esc(r.w)}</td><td class="n">${fmtN(r.m)}</td><td>${fancyQuestCell(r.memo)}</td></tr>`).join("")}</tbody></table></div><div class="muted" style="font-size:12px">討伐メダル 合計 ${fmtN(medal)} 枚（まとめ表）${hasQ && typeof FANCY_QUEST_LIST_URL !== "undefined" ? `　<a href="${FANCY_QUEST_LIST_URL}" target="_blank" rel="noopener" title="前提クエストの手順を調べる(外部サイト)">クエスト案内所</a>` : ""}</div>`;
+}
 function renderFancy(chars) {
   if (!INV || INV_T !== ((DATA && DATA.inv_t) || 0)) invLoad();
   if (!INV) { $("#view").innerHTML = `<div class="panel empty">読み込んでいます…</div>`; return; }
@@ -66,7 +81,8 @@ function renderFancy(chars) {
     const ok = its.every(([nm, n]) => got(nm).n >= n);
     h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
-      <div class="tablewrap"><table class="invt"><tbody><tr><td><b>① 討伐</b></td><td colspan="3">${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</td></tr><tr><td colspan="4" class="muted">② 納品</td></tr>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>`;
+      <div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
+      <div class="fchr"><div class="fchh"><b>② 討伐</b>${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</div>${fancyHuntHtml(no)}</div></div></div>`;
   }
   h += `<p class="hint">入手のめやすは、まとめ表（2512アニバ）の書き方のままです（「イベントホール」「SPエンチャ」などは NPC・交換、ほかは落とすモンスターなど）。「入手」は RO公式ツールのページで、落とすモンスターと出るマップが見られます。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
   // 自動の読み直し(5秒ごと)・時計の描き直し(30秒ごと)で中身が変わらないときは、画面をさわらない。

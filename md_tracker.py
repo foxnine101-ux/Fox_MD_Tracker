@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.90"
+VERSION = "2.58.91"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -372,7 +372,7 @@ def build_payload(core, history=100):
         if ch.get("nyar"):
             chars[name]["nyar"] = ch["nyar"]
         if ch.get("muscle"):
-            chars[name]["muscle"] = ch["muscle"]      # 24th マッスルマーチ: 参加回数・経験値の累計・履歴
+            chars[name]["muscle"] = json.loads(json.dumps(ch["muscle"]))      # 24th マッスルマーチ: 参加回数・経験値の累計・履歴
         if ch.get("anniv"):
             chars[name]["anniv"] = ch["anniv"]      # 24th: 夏美・ファンシーの討伐クエストの「現れた・消えた」
         if name in where:
@@ -719,7 +719,7 @@ def start_live_server(core, lock, cfg):
                 tray_ = globals().get("TRAY")
                 ok = bool(tray_) and tray_.notify("通知のテストです。これが出ていれば、マッスルマーチの通知も出ます", "マッスルマーチ")
                 err = "" if ok else (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません")
-                print("[マッスルマーチ] 通知のテスト: {}{}".format("出しました" if ok else "出せませんでした 理由=", err))
+                print("[マッスルマーチ] 通知のテスト: {}{}".format("送りました(画面に出るかは Windows の設定しだい)" if ok else "送れませんでした 理由=", err))
                 return self._send(200, json.dumps({"ok": ok, "err": err}, ensure_ascii=False), "application/json; charset=utf-8")
             if self.path.split("?")[0] == "/api/equipset" and self._local_only():
                 try:
@@ -2147,7 +2147,7 @@ def main():
                 tray_ = globals().get("TRAY")
                 for msg in mn.poll(time.time(), not on, pts):
                     ok = bool(tray_) and tray_.notify(msg, "マッスルマーチ")
-                    core.log("[マッスルマーチ] 通知 {}: {}{}".format("を出しました" if ok else "を出せませんでした", msg, "" if ok else " 理由=" + (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません(画面なしの動作)")))
+                    core.log("[マッスルマーチ] 通知 {}: {}{}".format("を送りました(画面に出るかは Windows の設定しだい)" if ok else "を送れませんでした", msg, "" if ok else " 理由=" + (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません(画面なしの動作)")))
             except Exception as e:
                 print("[マッスルマーチ通知] 失敗:", e)
     threading.Thread(target=_muscle_loop, daemon=True).start()

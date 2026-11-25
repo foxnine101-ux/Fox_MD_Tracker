@@ -106,6 +106,9 @@
   .wait { color: var(--wait); }
   .soon { color: var(--soon); }
   .none { color: var(--line); }
+  .fchs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr); gap: 14px; margin-top: 6px; align-items: start; }
+  .fchh { margin-bottom: 4px; }
+  @media (max-width: 900px) { .fchs { grid-template-columns: 1fr; } }
   .evbox { margin-bottom: 12px; overflow: hidden; }
   .evbox > summary { cursor: pointer; padding: 10px 12px; list-style: revert; }
   .evmeta { color: var(--muted); font-size: 12px; margin-left: 8px; }
@@ -163,7 +166,7 @@
       <span class="srvtabs" id="srvtabs"></span>
       <span class="whochar" id="whochar"></span>
       <span style="flex:1"></span>
-      <button class="ghost" id="mmbell" title="マッスルマーチの通知のオン/ミュート">🔕</button>
+      <button class="ghost" id="mmbell" title="マッスルマーチの通知のオン/ミュート">🔕 ミュート中</button>
       <button class="ghost" id="reload">更新</button>
       <button class="ghost gear" id="gear" title="イベント・入場履歴・設定">⚙</button>
       <button class="ghost" id="logout">ログアウト</button>
@@ -204,6 +207,7 @@
 <script src="web/27_fancy.js"></script>
 <script src="web/28_anniv.js"></script>
 <script src="web/29_muscle.js"></script>
+<script src="web/30_fancy_hunt.js"></script>
 <script src="web/23_boot.js"></script>
 </body>
 </html>

@@ -43,6 +43,7 @@ OP_NPC_TALK = 0x00B4    # NPCの会話文 (op, 長さ, NPCのID, 文章)
 OP_PING_AID = 0x0187
 OP_PARAM = 0x00B0       # ステータスの値が変わった (varID u16, 値 i32)。11 = BaseLv
 OP_LONGPARAM2 = 0x0ACB  # 大きい値が変わった (varID u16, 値 i64)。1 = Base経験値
+OP_ITEM_ADD = 0x0B41    # 持ち物への追加 (+2 持ち物の番号 u16・+4 個数 u16・+6 アイテム番号 u32。70バイト)。マッスルマーチのコインなどの報酬を数える
 OP_EXP_GAIN = 0x0ACC    # 経験値をもらった (AID u32, 量 i64, varID u16, 種類 u16[1=クエスト])
 
 # ---- ニャル様のラッキーお散歩デイズ (2026/09/29メンテ後〜10/20メンテ前) ----
@@ -132,7 +133,7 @@ WANT_OPS = {
     OP_CHARLIST, OP_CHAR_TO_MAP, OP_CHAR_TO_MAP2, OP_AID, OP_NAME, OP_NAME_ALL,
     OP_QUEST_LIST, OP_QUEST_LIST_OLD, OP_QUEST_ADD, OP_QUEST_ADD_OLD, OP_QUEST_DEL,
     OP_MAPMOVE, OP_SERVERMOVE, OP_SERVERMOVE2, OP_MD_INFO, OP_PING_AID,
-    OP_PARAM, OP_LONGPARAM2, OP_EXP_GAIN, OP_NPC_TALK,
+    OP_PARAM, OP_LONGPARAM2, OP_EXP_GAIN, OP_NPC_TALK, OP_ITEM_ADD,
 }
 
 CHAR_ENTRY = 175
@@ -537,6 +538,10 @@ class MDCore(object):
                         info["lv"] = val
                         self.changed = True
             return
+        if op == OP_ITEM_ADD and len(pkt) >= 70:
+            _idx, cnt, itid = struct.unpack_from("<HHI", pkt, 2)
+            self._muscle_item(c, self.name_for(key), itid, cnt, now)
+            return
         if op == OP_EXP_GAIN and len(pkt) >= 18:
             aid, amount, var, kind = struct.unpack_from("<IqHH", pkt, 2)
             # 経験値の通信は自分あてだけ → ここのIDは自分のアカウントID(途中から起動しても覚えられる)
@@ -616,29 +621,58 @@ class MDCore(object):
         c["exp_last_t"] = now
         self._muscle_record(c, name, amount, now)
 
-    def _muscle_record(self, c, name, amount, now):
-        """マッスルマーチの参加を数える。会場(rag_fes1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)に経験値が届いたら、そのサイクルの報酬とみなす。
-        同じサイクルの経験値は1回の参加にまとめる(1回の報酬が何十もの通信に分かれて届くため)。履歴はキャラごと(md_state.json)。Base経験値の合計だけ(アイテムの報酬は通信から読めていないので記録しない)。"""
-        if not name or amount <= 0 or c.get("map") != muscle_core.VENUE_MAP:
-            return
+    def _muscle_entry(self, c, name, now):
+        """マッスルマーチの報酬の記録(キャラ・サイクルごとに1件)を返す。条件に合わなければ None。
+        条件: 会場(rag_fes1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)。
+        同じサイクルの報酬は1回の参加にまとめる(経験値は順位に応じて何十もの通信に分かれて届くため)。履歴はキャラごと(md_state.json)。"""
+        if not name or c.get("map") != muscle_core.VENUE_MAP:
+            return None
         if now - self.muscle_cp.get(name, -999) > 90 or not muscle_core.is_hit_window(now):
-            return
+            return None
         ch = self._char(name)
         m = ch.get("muscle")
         if not isinstance(m, dict):
             m = ch["muscle"] = {"n": 0, "exp": 0, "hist": []}
+        m.setdefault("items", {})
         cycle = int(now) // muscle_core.CYCLE
         h = m["hist"]
-        if h and h[-1].get("cycle") == cycle:
-            h[-1]["exp"] += amount
-            h[-1]["cnt"] += 1
-        else:
-            h.append({"t": int(now), "cycle": cycle, "exp": amount, "cnt": 1})
+        if not (h and h[-1].get("cycle") == cycle):
+            h.append({"t": int(now), "cycle": cycle, "exp": 0, "cnt": 0, "items": {}})
             m["n"] += 1
             del h[:-300]
             self.log("[マッスルマーチ] {}: 参加 {}回目".format(name, m["n"]))
-        m["exp"] += amount
         self.changed = True
+        return m
+
+    def _muscle_record(self, c, name, amount, now):
+        """マッスルマーチの参加を数える(経験値)。Base経験値の合計だけ。"""
+        if amount <= 0:
+            return
+        m = self._muscle_entry(c, name, now)
+        if m is None:
+            return
+        e = m["hist"][-1]
+        e["exp"] += amount
+        e["cnt"] += 1
+        m["exp"] += amount
+
+    def _muscle_item(self, c, name, itid, cnt, now):
+        """マッスルマーチの報酬のアイテム(コインなど)を数える。経験値と同じ条件(_muscle_entry)のときだけ。累計は m["items"]、サイクルごとは履歴の items(アイテム番号 → 個数)。"""
+        if not itid or cnt <= 0:
+            return
+        m = self._muscle_entry(c, name, now)
+        if m is None:
+            return
+        k = str(itid)
+        e = m["hist"][-1]
+        e.setdefault("items", {})
+        e["items"][k] = e["items"].get(k, 0) + cnt
+        m["items"][k] = m["items"].get(k, 0) + cnt
+        self.log("[マッスルマーチ] {}: 報酬のアイテム {} ×{}".format(name, self.names_item(itid), cnt))
+
+    def names_item(self, itid):
+        """動作ログ用: アイテム番号の表示(名前の表は画面側が持っているので番号だけ)"""
+        return "ID{}".format(itid)
 
     def _judge_report(self, c, rep):
         """報告で消えたクエストから、達成していた分だけを数える。
@@ -890,6 +924,8 @@ class MDCore(object):
                 self.log("[MD] {}: 届いた一覧が不自然に少ない(期限つき0件)ので、これまでの記録 {}件 は消さずに残します".format(name, len(gone)))
                 gone = []
             for qid in gone:
+                if "チェックポイント" in self.title(qid):
+                    self.muscle_cp[name] = now          # マッスルマーチ: 「消える」通信を取りこぼして一覧の読み直しで消えた場合も、参加の目印にする
                 del ch["quests"][qid]
             self.log("[MD] {}: クエスト一覧を受信 (CT付き {}件)".format(name, len(ch["quests"])))
         elif kind == "add":
