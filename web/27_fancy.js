@@ -10,6 +10,7 @@ const FANCY_KEY = "md_fancy_done_24";
 let FANCY_DONE = (() => { try { return JSON.parse(store.get(FANCY_KEY) || "{}"); } catch { return {}; } })();
 let FANCY_AUTO = new Set();      // 実機のクエスト一覧から自動でチェックずみと分かったミッション(描くたびに作りなおす)
 let FANCY_HIDE = store.get("md_fancy_hide") === "1", FANCY_LAST = "";      // FANCY_LAST = 前に描いた中身
+let FANCY_OPEN = (() => { try { return JSON.parse(store.get("md_fancy_open") || "{}"); } catch { return {}; } })();      // ミッションの中身を手で開いた(true)・閉じた(false)印。無ければ「終わったミッションは閉じる」
 let FANCY_SUMOPEN = store.get("md_fancy_sumopen") === "1";      // 「まとめ納品」の開閉(初期は閉じる。描き直しても勝手に開閉しないよう覚える)      // FANCY_LAST = 前に描いた中身
 const FANCY_ID = new Map(FANCY.flatMap(([, its]) => its.map(([nm, , id]) => [nm, id])));
 const FANCY_HINT = new Map(FANCY.flatMap(([, its]) => its.map(([nm, , , w]) => [nm, w || ""])));
@@ -100,10 +101,12 @@ function renderFancy(chars) {
     const auto = FANCY_AUTO.has(no) && !FANCY_DONE[no], done = !!FANCY_DONE[no] || auto;
     if (done && FANCY_HIDE) continue;
     const ok = its.every(([nm, n], i) => got(nm).n >= n || DV.has(no + "|" + i));
+    const finished = done || its.every((_, i) => DV.has(no + "|" + i));      // 終わったミッション(納品ずみ・手でチェック・自動チェック)は閉じる
+    const isOpen = no in FANCY_OPEN ? !!FANCY_OPEN[no] : !finished;
     h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
-      <div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n], i) => { const g = got(nm).n, dv = DV.get(no + "|" + i); return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${dv ? `<span class="ok">納品ずみ（${esc(cn(dv))}）</span>` : done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
-      <div class="fchr"><div class="fchh"><b>② 討伐</b>${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</div>${fancyHuntHtml(no)}</div></div></div>`;
+      <details data-fcm="${no}" data-def="${finished ? "0" : "1"}" ${isOpen ? "open" : ""}><summary class="muted" style="cursor:pointer;margin-top:4px">${finished ? "終わっています（開くと内容が見られます）" : "納品と討伐"}</summary><div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n], i) => { const g = got(nm).n, dv = DV.get(no + "|" + i); return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${dv ? `<span class="ok">納品ずみ（${esc(cn(dv))}）</span>` : done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
+      <div class="fchr"><div class="fchh"><b>② 討伐</b>${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</div>${fancyHuntHtml(no)}</div></div></details></div>`;
   }
   h += `<p class="hint">入手のめやすは、まとめ表（2512アニバ）の書き方のままです（「イベントホール」「SPエンチャ」などは NPC・交換、ほかは落とすモンスターなど）。「入手」は RO公式ツールのページで、落とすモンスターと出るマップが見られます。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
   // 自動の読み直し(5秒ごと)・時計の描き直し(30秒ごと)で中身が変わらないときは、画面をさわらない。
@@ -112,6 +115,7 @@ function renderFancy(chars) {
   if (h === FANCY_LAST && v.querySelector("#fancyroot")) return true;
   FANCY_LAST = h;
   v.innerHTML = `<div id="fancyroot">${h}</div>`;
+  document.querySelectorAll("details[data-fcm]").forEach((d) => d.ontoggle = () => { if (d.open === (d.dataset.def === "1")) delete FANCY_OPEN[d.dataset.fcm]; else FANCY_OPEN[d.dataset.fcm] = d.open; store.set("md_fancy_open", JSON.stringify(FANCY_OPEN)); });
   const sm = $("#fcsum"); if (sm) sm.ontoggle = () => { FANCY_SUMOPEN = sm.open; store.set("md_fancy_sumopen", sm.open ? "1" : "0"); };
   document.querySelectorAll("#view [data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn));
   const hide = $("#fchide"); if (hide) hide.onchange = () => { FANCY_HIDE = hide.checked; store.set("md_fancy_hide", FANCY_HIDE ? "1" : "0"); render(); };
