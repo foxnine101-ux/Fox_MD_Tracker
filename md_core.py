@@ -210,6 +210,7 @@ class MDCore(object):
         self.char_info = {}     # キャラ名 -> {"gid", "lv", "job", "account"}
         self.stages = {}        # ニャル様クエストID -> 段階(進行中/完了/討伐)
         self.events = {}        # イベント用クエストID -> {"g": イベント名, "s": 種類}
+        self.muscle_diag_until = 0.0     # マッスルマーチ: チェックポイントが消えてからこの時刻まで、報酬の前後の通信を動作ログに出す(md_tracker が見る)
         self.deliv_pend = {}    # ファンシーの納品: キャラ → [[時刻, アイテム番号, 個数]](品が消えて、経験値の確認待ち。保存しない)
         self.muscle_cp = {}     # マッスルマーチ: キャラ → チェックポイントのクエストが最後に消えた時刻(保存しない)
         self.exp_stats = {}     # 確認用: 経験値通信 "種類/区分" -> [回数, 最大量]
@@ -959,6 +960,7 @@ class MDCore(object):
             for qid in gone:
                 if "チェックポイント" in self.title(qid):
                     self.muscle_cp[name] = now          # マッスルマーチ: 「消える」通信を取りこぼして一覧の読み直しで消えた場合も、参加の目印にする
+                    self.muscle_diag_until = self.now() + 30
                 del ch["quests"][qid]
             self.log("[MD] {}: クエスト一覧を受信 (CT付き {}件)".format(name, len(ch["quests"])))
         elif kind == "add":
@@ -985,6 +987,7 @@ class MDCore(object):
                     rep["t"] = now
             if "チェックポイント" in self.title(qid):
                 self.muscle_cp[name] = now          # マッスルマーチ: 参加の記録の目印(経験値が来る約8秒前に消える)
+                self.muscle_diag_until = self.now() + 30
             if ch["quests"].pop(qid, None) is not None:
                 self.log("[MD] {}: {} が消えました(また入れる)".format(name, self.title(qid)))
         elif kind == "enter":

@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.94"
+VERSION = "2.58.95"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1304,6 +1304,20 @@ class _Scanner(gp.StreamScanner):
                 _TAKE_SEEN.add((op, len(pkt)))
                 _TAKE_LOGS[0] += 1
                 print("[倉庫] 取り出しの前後の、ふだん見ない通信 {:04X} {}バイト: {}".format(op, len(pkt), pkt[:48].hex()))
+        if len(pkt) >= 2 and time.time() < getattr(self.core, "muscle_diag_until", 0):      # マッスルマーチの報酬の前後(チェックポイントが消えてから30秒): 持ち物に入った品と、ふだん見ない通信を動作ログに残す(コインがどの通信で届くか調べる確認用)
+            try:
+                op3 = pkt[0] | (pkt[1] << 8)
+                if _MM_DIAG["until"] != self.core.muscle_diag_until:
+                    _MM_DIAG.update(until=self.core.muscle_diag_until, seen=set(), n=0)
+                if op3 == 0x0B41 and len(pkt) >= 10 and _MM_DIAG["n"] < 60:
+                    _MM_DIAG["n"] += 1
+                    print("[マッスルマーチ] 報酬の前後: 持ち物に品が入った(0B41) アイテム{} ×{} 番号{} 先頭: {}".format(struct.unpack_from("<I", pkt, 6)[0], struct.unpack_from("<H", pkt, 4)[0], struct.unpack_from("<H", pkt, 2)[0], pkt[:40].hex()))
+                elif op3 not in _MM_NOISE and (op3, len(pkt)) not in _MM_DIAG["seen"] and _MM_DIAG["n"] < 60:
+                    _MM_DIAG["seen"].add((op3, len(pkt)))
+                    _MM_DIAG["n"] += 1
+                    print("[マッスルマーチ] 報酬の前後: ふだん見ない通信 {:04X} {}バイト: {}".format(op3, len(pkt), pkt[:64].hex()))
+            except Exception:
+                pass
         if CHARS is not None and _ZENY_LOGS[0] < 30 and len(pkt) >= 6:      # 確認用: 覚えているゼニーの値が、ログイン時にどの通信で届くか探す(すべての通信を見る)
             try:
                 for nm, v in CHARS.known_zeny():
@@ -1395,6 +1409,8 @@ def log_op_census():
     print("[通信の種類] 使っていない: " + (fmt(b) or "なし"))
 
 
+_MM_DIAG = {"until": 0.0, "seen": set(), "n": 0}      # マッスルマーチの報酬の前後の確認用(1回の走りで最大60行)
+_MM_NOISE = {0x00B0, 0x00B4, 0x0ACB, 0x0ACC, 0x09FD, 0x09FE, 0x09FF, 0x0229, 0x01DE, 0x0983, 0x09CB, 0x0095, 0x0A30, 0x0ADF, 0x0087, 0x0088, 0x01FF, 0x007F, 0x08C8, 0x0187, 0x0091, 0x0092, 0x0AC7}      # 絶えず流れる通信(動き・出現・名前・経験値の値)は除く
 _OP_TOTAL, _TAKE_WIN, _TAKE_SEEN, _TAKE_LOGS = {}, [0.0], set(), [0]      # 通信の種類ごとの回数・取り出しの直後の窓・記録ずみ・記録の回数(取り出しの前後の通信の確認用)
 CHARS = None   # char_core.CharCore (あれば)
 MARKET = None  # market_core.Market
