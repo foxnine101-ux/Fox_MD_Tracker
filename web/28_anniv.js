@@ -42,6 +42,13 @@ function anFancyAutoDone(chars) {
   return s;
 }
 
+// ファンシーのミッションNの討伐が全部終わったか(どれかのキャラで、討伐クエストが全部「消えた」 = 報告ずみ。または到達ミッション未満)。ミッションを自動で閉じる判定に使う
+function anHuntDone(m, chars) {
+  if (typeof FANCY_AUTO !== "undefined" && FANCY_AUTO.has(m)) return true;
+  const qs = anFancyMissions().get(m) || [];
+  if (!qs.length) return false;
+  return chars.some((c) => { const { gone } = anChar(c); return qs.every((id) => id in gone); });
+}
 // ファンシーの「ミッションN」の討伐の状況(ミッションの納品とセットで見せる用): 自動でチェック
 function anHuntHtml(m, chars) {
   const qs = anFancyMissions().get(m) || [];

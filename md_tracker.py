@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.93"
+VERSION = "2.58.94"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -2139,6 +2139,7 @@ def main():
             try:
                 if not muscle_core.in_notify_window(time.time()):
                     continue      # 通知の時刻でなければ設定ファイルは読まない
+                vs = {}
                 try:
                     with open(VIEW_SETTINGS_FILE, "r", encoding="utf-8") as f:
                         vs = json.load(f)
@@ -2147,8 +2148,15 @@ def main():
                 except (OSError, ValueError, AttributeError):
                     on, pts = False, set(muscle_core.DEFAULT_POINTS)
                 tray_ = globals().get("TRAY")
+                snd = vs.get("mmSound", True) if isinstance(vs, dict) else True      # 通知と一緒に音も鳴らす(初期はオン。Windows の集中モードなどで通知の表示が隠れても気づけるように)
                 for msg in mn.poll(time.time(), not on, pts):
                     ok = bool(tray_) and tray_.notify(msg, "マッスルマーチ")
+                    if snd and os.name == "nt":
+                        try:
+                            import winsound
+                            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+                        except Exception as e:
+                            core.log("[マッスルマーチ] 音を鳴らせませんでした: {}".format(e))
                     core.log("[マッスルマーチ] 通知 {}: {}{}".format("を送りました(画面に出るかは Windows の設定しだい)" if ok else "を送れませんでした", msg, "" if ok else " 理由=" + (getattr(tray_, "last_error", "") if tray_ else "トレイが起動していません(画面なしの動作)")))
             except Exception as e:
                 print("[マッスルマーチ通知] 失敗:", e)

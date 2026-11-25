@@ -101,7 +101,8 @@ function renderFancy(chars) {
     const auto = FANCY_AUTO.has(no) && !FANCY_DONE[no], done = !!FANCY_DONE[no] || auto;
     if (done && FANCY_HIDE) continue;
     const ok = its.every(([nm, n], i) => got(nm).n >= n || DV.has(no + "|" + i));
-    const finished = done || its.every((_, i) => DV.has(no + "|" + i));      // 終わったミッション(納品ずみ・手でチェック・自動チェック)は閉じる
+    const huntDone = typeof anHuntDone === "function" && anHuntDone(no, chars);
+    const finished = done || (its.every((_, i) => DV.has(no + "|" + i)) && huntDone);      // 終わったミッション(手でチェック・自動チェック・納品も討伐も済み)は閉じる。納品だけ済んだ段階では閉じない
     const isOpen = no in FANCY_OPEN ? !!FANCY_OPEN[no] : !finished;
     h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>

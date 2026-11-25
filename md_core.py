@@ -656,9 +656,9 @@ class MDCore(object):
 
     def _muscle_entry(self, c, name, now):
         """マッスルマーチの報酬の記録(キャラ・サイクルごとに1件)を返す。条件に合わなければ None。
-        条件: 会場(rag_fes1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)。
+        条件: 会場(rag_fes1 / jro22ani1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)。
         同じサイクルの報酬は1回の参加にまとめる(経験値は順位に応じて何十もの通信に分かれて届くため)。履歴はキャラごと(md_state.json)。"""
-        if not name or c.get("map") != muscle_core.VENUE_MAP:
+        if not name or c.get("map") not in muscle_core.VENUE_MAPS:
             return None
         if now - self.muscle_cp.get(name, -999) > 90 or not muscle_core.is_hit_window(now):
             return None
