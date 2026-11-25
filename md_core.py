@@ -54,6 +54,8 @@ NYAR_WEEK_LIMIT = 420   # 1キャラ・1アカウントとも 1週間に420回�
 
 # ファンシーの納品物: アイテム番号 → 納品の個数(ミッションによって違う)。web/27_fancy.js の FANCY と同じ。次の周年で変わったら作りなおす
 ANNIV_FANCY_ITEMS = {511: (15, 20), 512: (20,), 514: (5,), 515: (10, 20), 516: (10, 20), 517: (20, 25), 519: (10, 20), 520: (5,), 521: (15,), 539: (10,), 548: (10,), 567: (10,), 568: (5, 10), 574: (1,), 576: (10,), 577: (10, 15, 20), 579: (30,), 580: (15,), 581: (10,), 582: (10, 30), 587: (5,), 619: (1,), 736: (3, 10), 737: (10,), 905: (20,), 966: (5, 10), 1023: (50,), 1035: (10,), 1036: (10,), 1037: (10,), 6049: (1,), 6073: (5,), 6096: (10,), 6112: (2,), 6211: (5,), 6217: (10,), 6250: (15,), 6259: (5,), 6261: (20,), 6262: (20,), 6263: (3,), 6573: (10,), 6574: (2,), 7063: (15,), 7068: (5,), 7115: (15,), 7123: (10,), 7164: (10,), 7194: (10,), 7265: (5,), 7266: (15,), 7286: (10,), 7326: (15,), 7452: (10,), 7456: (10,), 7457: (5, 10, 20), 7482: (10,), 7511: (10,), 11516: (20,), 11520: (5,), 11616: (10, 20), 12049: (1,), 12050: (1,), 12076: (2,), 12344: (3,), 12436: (5,), 12573: (5,), 12638: (1,), 12814: (5,), 22985: (1,), 25127: (10,), 25128: (10,), 25129: (10,), 25130: (10,), 25131: (10,), 25766: (10,), 25896: (10,), 25899: (10,), 1000093: (1,), 1000094: (1,), 1000095: (1,), 1000096: (1,), 1000097: (1,), 1000824: (10,), 1001085: (15,), 1001232: (15,), 1001987: (10,)}
+MUSCLE_SUPPORT_ITEMS = frozenset(range(101710, 101716))      # マッスルマーチ中に拾う支援物資(帰還の羽・ブルーブル・イエローブル・フラッシュ爆弾・ブラックホール・マッスルスター)。報酬ではない(2026-11-25 動作ログで確認)
+MUSCLE_ITEM_WAIT = 60          # 報酬のアイテムは経験値のあとに届く(実測: 経験値の約8秒後)。経験値からこの秒数以内のものだけ数える
 DELIV_MIN_EXP = 100000000      # 納品のごほうびの経験値の1通信の最小(動作ログの実測: 納品1回 = 1,050,000,000 ×数十通信。Lv239)
 DELIV_WAIT = 6                 # 品が消えてから、この秒数以内に経験値が来たら納品とみなす(実測は約1秒)
 # ---- 24thアニバーサリー(2026/11/24〜2027/01/12) ----
@@ -391,6 +393,7 @@ class MDCore(object):
         for c in self.chars.values():
             if "anniv" not in c:
                 self._anniv_backfill(c)
+            self._muscle_clean(c)
 
     def forget_conn(self, key):
         """同じ(IP・ポートの組)で新しい接続が始まった。古い接続の記録(名前・場所・アカウント)を捨てる(新しい接続の読み取りに持ち越さない)。"""
@@ -655,7 +658,18 @@ class MDCore(object):
         self.changed = True
         self.log("[ファンシー] {}: 納品 アイテム{} ×{}".format(name, itid, cnt))
 
-    def _muscle_entry(self, c, name, now):
+    @staticmethod
+    def _muscle_clean(ch):
+        """v2.58.91〜95 は、走っている間に拾う支援物資(101710〜101715)も報酬として数えていた。保存ずみの記録から外す。"""
+        m = ch.get("muscle")
+        if not isinstance(m, dict):
+            return
+        for d in [m.get("items")] + [h.get("items") for h in m.get("hist", [])]:
+            if isinstance(d, dict):
+                for k in [k for k in d if k.isdigit() and int(k) in MUSCLE_SUPPORT_ITEMS]:
+                    del d[k]
+
+    def _muscle_entry(self, c, name, now, create=True):
         """マッスルマーチの報酬の記録(キャラ・サイクルごとに1件)を返す。条件に合わなければ None。
         条件: 会場(rag_fes1 / jro22ani1)で、訓練の時間帯に、チェックポイントのクエストが消えた直後(90秒以内)。
         同じサイクルの報酬は1回の参加にまとめる(経験値は順位に応じて何十もの通信に分かれて届くため)。履歴はキャラごと(md_state.json)。"""
@@ -671,6 +685,8 @@ class MDCore(object):
         cycle = int(now) // muscle_core.CYCLE
         h = m["hist"]
         if not (h and h[-1].get("cycle") == cycle):
+            if not create:
+                return None
             h.append({"t": int(now), "cycle": cycle, "exp": 0, "cnt": 0, "items": {}})
             m["n"] += 1
             del h[:-300]
@@ -688,17 +704,20 @@ class MDCore(object):
         e = m["hist"][-1]
         e["exp"] += amount
         e["cnt"] += 1
+        e["tx"] = int(now)          # 最後に経験値が届いた時刻(アイテムの報酬は、この後に届く)
         m["exp"] += amount
 
     def _muscle_item(self, c, name, itid, cnt, now):
         """マッスルマーチの報酬のアイテム(コインなど)を数える。経験値と同じ条件(_muscle_entry)のときだけ。累計は m["items"]、サイクルごとは履歴の items(アイテム番号 → 個数)。"""
-        if not itid or cnt <= 0:
+        if not itid or cnt <= 0 or itid in MUSCLE_SUPPORT_ITEMS:
             return
-        m = self._muscle_entry(c, name, now)
+        m = self._muscle_entry(c, name, now, create=False)      # 経験値(参加の記録)が先にあるときだけ。走っている間に拾う品は報酬ではない
         if m is None:
             return
         k = str(itid)
         e = m["hist"][-1]
+        if now - e.get("tx", 0) > MUSCLE_ITEM_WAIT or e.get("cnt", 0) <= 0:
+            return
         e.setdefault("items", {})
         e["items"][k] = e["items"].get(k, 0) + cnt
         m["items"][k] = m["items"].get(k, 0) + cnt

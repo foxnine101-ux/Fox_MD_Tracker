@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.95"
+VERSION = "2.58.96"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -1312,10 +1312,6 @@ class _Scanner(gp.StreamScanner):
                 if op3 == 0x0B41 and len(pkt) >= 10 and _MM_DIAG["n"] < 60:
                     _MM_DIAG["n"] += 1
                     print("[マッスルマーチ] 報酬の前後: 持ち物に品が入った(0B41) アイテム{} ×{} 番号{} 先頭: {}".format(struct.unpack_from("<I", pkt, 6)[0], struct.unpack_from("<H", pkt, 4)[0], struct.unpack_from("<H", pkt, 2)[0], pkt[:40].hex()))
-                elif op3 not in _MM_NOISE and (op3, len(pkt)) not in _MM_DIAG["seen"] and _MM_DIAG["n"] < 60:
-                    _MM_DIAG["seen"].add((op3, len(pkt)))
-                    _MM_DIAG["n"] += 1
-                    print("[マッスルマーチ] 報酬の前後: ふだん見ない通信 {:04X} {}バイト: {}".format(op3, len(pkt), pkt[:64].hex()))
             except Exception:
                 pass
         if CHARS is not None and _ZENY_LOGS[0] < 30 and len(pkt) >= 6:      # 確認用: 覚えているゼニーの値が、ログイン時にどの通信で届くか探す(すべての通信を見る)
