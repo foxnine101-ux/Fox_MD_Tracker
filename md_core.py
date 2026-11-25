@@ -213,6 +213,7 @@ class MDCore(object):
         self.stages = {}        # ニャル様クエストID -> 段階(進行中/完了/討伐)
         self.events = {}        # イベント用クエストID -> {"g": イベント名, "s": 種類}
         self.muscle_diag_until = 0.0     # マッスルマーチ: チェックポイントが消えてからこの時刻まで、報酬の前後の通信を動作ログに出す(md_tracker が見る)
+        self.fancy_hunt_t = {}   # ファンシーの討伐を報告した(討伐クエストが消えた)最後の時刻 キャラ → 秒(保存しない。マッスルマーチの経験値と取り違えないため)
         self.deliv_pend = {}    # ファンシーの納品: キャラ → [[時刻, アイテム番号, 個数]](品が消えて、経験値の確認待ち。保存しない)
         self.muscle_cp = {}     # マッスルマーチ: キャラ → チェックポイントのクエストが最後に消えた時刻(保存しない)
         self.exp_stats = {}     # 確認用: 経験値通信 "種類/区分" -> [回数, 最大量]
@@ -629,7 +630,7 @@ class MDCore(object):
         c["rep_exp"] = c.get("rep_exp", 0) + amount
         c["exp_last_t"] = now
         self._muscle_record(c, name, amount, now)
-        self._deliv_confirm(name, amount, now)
+        self._deliv_confirm(c, name, amount, now)
 
     def note_item_used(self, name, itid, cnt, now):
         """持ち物から品が消えた(07FA 理由0。char_core から呼ぶ)。ファンシーの納品物で、個数が納品の数と同じなら、経験値が来るかの確認待ちに入れる。"""
@@ -639,11 +640,14 @@ class MDCore(object):
         pend.append([now, itid, cnt])
         self.deliv_pend[name] = pend[-8:]
 
-    def _deliv_confirm(self, name, amount, now):
+    def _deliv_confirm(self, c, name, amount, now):
         """品が消えた直後(DELIV_WAIT 秒以内)に大きな経験値が来たら、ファンシーの納品1回とみなして記録する。1回の納品で経験値は何十もの通信に分かれて届くので、確認待ちの1件を1回だけ使う。
         記録は ch["deliv"] = [{"t", "id", "n"}](300件まで・md_state.json)。どのミッションの納品かは画面が順番から決める。"""
         pend = self.deliv_pend.get(name)
         if not name or not pend or amount < DELIV_MIN_EXP:
+            return
+        if c.get("map") in muscle_core.VENUE_MAPS:      # マッスルマーチの会場の中の経験値は、納品の報酬ではない(事前に納品物を用意して、走りながら使う場合の取り違え防止)
+            pend.clear()
             return
         pend[:] = [e for e in pend if now - e[0] <= DELIV_WAIT]
         if not pend:
@@ -697,6 +701,8 @@ class MDCore(object):
     def _muscle_record(self, c, name, amount, now):
         """マッスルマーチの参加を数える(経験値)。Base経験値の合計だけ。"""
         if amount <= 0:
+            return
+        if now - self.fancy_hunt_t.get(name, -999) <= 15:      # ファンシーの討伐報告の経験値は、マッスルマーチの報酬ではない(報告を先に済ませて、走りながら…の取り違え防止)
             return
         m = self._muscle_entry(c, name, now)
         if m is None:
@@ -892,7 +898,7 @@ class MDCore(object):
                 except Exception:
                     pass
                 try:
-                    self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]), item[1] if kind == "del" else None)
+                    self._anniv_track(ch, before, kind, int(item[2] if kind == "del" else item[-1]), item[1] if kind == "del" else None, name)
                 except Exception as e:      # アニバの記録で本体を止めない
                     self.log("[アニバ] 記録に失敗: {}".format(e))
 
@@ -918,7 +924,7 @@ class MDCore(object):
         if seen or gone:
             ch["anniv"] = {"seen": seen, "gone": gone}
 
-    def _anniv_track(self, ch, before, kind, t, dq=None):
+    def _anniv_track(self, ch, before, kind, t, dq=None, name=None):
         """24thの夏美・ファンシーの討伐クエストが「現れた」「消えた(=報告して終わった)」を、キャラごとに覚える。
         seen[クエスト番号] = 初めて見た時刻 / gone[クエスト番号] = {"t": 消えた時刻, "by": "del"(消える通信を見た) か "sync"(一覧から無くなっていた)}。
         一覧の取りこぼしで消えたように見えることもあるので、"sync" は画面で「推定」と出す。受け直して戻ってきたら gone は消す。"""
@@ -940,6 +946,8 @@ class MDCore(object):
         removed = (before - now) & ANNIV_WATCH
         if kind == "del" and dq in ANNIV_WATCH:
             removed.add(dq)      # 一覧に無いまま「消えた」通信が来ても、報告したことは残す
+        if name and any(q in ANNIV_FANCY_Q for q in removed):
+            self.fancy_hunt_t[name] = self.now()
         for q in removed:
             k = str(q)
             if k not in gone:
