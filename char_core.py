@@ -1019,7 +1019,12 @@ class CharCore(object):
                     reason, idx, amt, "装備の一覧にある" if is_eq else "装備の一覧に無い", "" if getattr(self, "_key", None) in self._synced else "・この接続は一覧を受け取っていない"))
             if reason == 4:
                 self._store_deposit(idx, amt)
-            self._item_sub(idx, amt)
+            iid = self._item_sub(idx, amt)
+            if reason == 0 and iid and self.md is not None:      # ファンシーの納品の確認用(消えた品と個数を md_core へ。経験値が続けば納品)
+                try:
+                    self.md.note_item_used(self._name(), iid, amt, now07)
+                except Exception:
+                    pass
             self._gone(idx, reason)
 
         elif op in STORAGE_OPS:                          # 倉庫まわりの通信(本物の形の確認用。最初の数回だけ中身を記録する)
@@ -1485,12 +1490,14 @@ class CharCore(object):
         ch = self._ch()
         for x in ch.get("items") or []:
             if x.get("index") == idx:
+                iid = x.get("itemId")
                 x["count"] = x.get("count", 0) - (amt or 1)
                 if x["count"] <= 0:
                     ch["items"].remove(x)
                 ch["items_t"] = int(time.time())
                 self.changed = True
-                return
+                return iid
+        return None
 
     def inv_view(self):
         """画面用(インベントリ): {"chars": {キャラ: {items, eq, t}}, "stores": 持ち主 -> {キー: {…}}, "names": {番号: 名前}}。装備は着ている物+持ち物の装備"""

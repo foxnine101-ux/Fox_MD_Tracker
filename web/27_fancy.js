@@ -55,33 +55,54 @@ function fancyHuntHtml(no) {
   const hasQ = rows.some((r) => typeof FANCY_QUEST !== "undefined" && FANCY_QUEST.has(r.memo));
   return `<div class="tablewrap"><table class="invt"><thead><tr><th>相手</th><th class="n">数</th><th>転送先</th><th class="n">メダル</th><th>前提クエ・メモ</th></tr></thead><tbody>${rows.map((r) => `<tr><td>${esc(r.n)}</td><td class="n">${fmtN(r.c)}</td><td>${esc(r.w)}</td><td class="n">${fmtN(r.m)}</td><td>${fancyQuestCell(r.memo)}</td></tr>`).join("")}</tbody></table></div><div class="muted" style="font-size:12px">討伐メダル 合計 ${fmtN(medal)} 枚（まとめ表）${hasQ && typeof FANCY_QUEST_LIST_URL !== "undefined" ? `　<a href="${FANCY_QUEST_LIST_URL}" target="_blank" rel="noopener" title="前提クエストの手順を調べる(外部サイト)">クエスト案内所</a>` : ""}</div>`;
 }
+// 実機の「納品」の記録(DATA.chars[キャラ].deliv = [{t, id, n}]。品が納品の数ちょうど消えて、すぐ経験値が来たもの)を、ミッションの納品物に当てはめる。
+// 同じ品が複数のミッションにある(ニンジン20はミッション1と21)ので、時刻の古い記録から、ミッション1→24 の順に1つずつ使う。戻り値: "ミッション番号|納品物の位置" → キャラ名
+function fancyDelivered(chars) {
+  const out = new Map();
+  for (const c of chars) {
+    const list = (((DATA && DATA.chars) || {})[c] || {}).deliv;
+    if (!Array.isArray(list) || !list.length) continue;
+    const pool = list.slice().sort((a, b) => a.t - b.t);
+    const used = new Set();
+    for (const [no, its] of FANCY) {
+      its.forEach(([, n, id], i) => {
+        if (out.has(no + "|" + i)) return;
+        const k = pool.findIndex((r, j) => !used.has(j) && r.id === id && r.n === n);
+        if (k >= 0) { used.add(k); out.set(no + "|" + i, c); }
+      });
+    }
+  }
+  return out;
+}
 function renderFancy(chars) {
   if (!INV || INV_T !== ((DATA && DATA.inv_t) || 0)) invLoad();
   if (!INV) { $("#view").innerHTML = `<div class="panel empty">読み込んでいます…</div>`; return; }
   const have = fancyCount(chars);
   const got = (nm) => (have.get(nm) || { n: 0, where: [] });
   const tip = (nm) => got(nm).where.map(([w, n]) => `${w} ×${fmtN(n)}`).join("\n") || "持ち物・倉庫に見当たりません";
+  const whereTd = (nm) => { const w = got(nm).where; return `<td style="font-size:12px;max-width:260px">${w.length ? w.map(([l, n]) => `<span style="white-space:nowrap">${esc(l)} ×${fmtN(n)}</span>`).join("、 ") : `<span class="muted">なし</span>`}</td>`; };
   FANCY_AUTO = (typeof anFancyAutoDone === "function") ? anFancyAutoDone(chars) : new Set();      // 「アニバ」タブ(28)の自動チェック
+  const DV = fancyDelivered(chars);      // 納品ずみ(実機の記録から自動)
   const left = FANCY.filter(([no]) => !(FANCY_DONE[no] || FANCY_AUTO.has(no)));
   const need = new Map();
-  for (const [, its] of left) for (const [nm, n] of its) need.set(nm, (need.get(nm) || 0) + n);
+  for (const [no, its] of left) its.forEach(([nm, n], i) => { if (!DV.has(no + "|" + i)) need.set(nm, (need.get(nm) || 0) + n); });
   const short = [...need].filter(([nm, n]) => got(nm).n < n).length;
   let h = `<div class="opts"><span>ファンシーパーティーの納品物を、表に出ているキャラの持ち物と、そのアカウントの倉庫から数えます（インベントリタブと同じ記録。ゲームで持ち物・倉庫を開くと最新になります）。ミッションごとに「討伐」(実機のクエスト一覧から自動)と「納品」(下のチェック＋持ち物・倉庫の数)をセットで見られます。討伐が次のミッションに進んでいたら、納品もチェックずみになります。</span></div>`;
   h += `<div class="panel" style="padding:10px 12px"><b>残り ${left.length} / ${FANCY.length} ミッション</b>　納品物 ${need.size} 種類のうち <b class="${short ? "warn" : "ok"}">${short} 種類が足りません</b>
     <label style="margin-left:12px"><input type="checkbox" id="fchide" ${FANCY_HIDE ? "checked" : ""}> 納品したミッションを隠す</label></div>`;
-  h += `<details class="panel evbox" id="fcsum" ${FANCY_SUMOPEN ? "open" : ""}><summary><b>まとめ納品（残りのミッションに必要な数）</b></summary><div class="tablewrap"><table class="invt"><thead><tr><th>納品物</th><th class="n">必要</th><th class="n">ある</th><th class="n">足りない</th><th>入手</th></tr></thead><tbody>`;
+  h += `<details class="panel evbox" id="fcsum" ${FANCY_SUMOPEN ? "open" : ""}><summary><b>まとめ納品（残りのミッションに必要な数）</b></summary><div class="tablewrap"><table class="invt"><thead><tr><th>納品物</th><th class="n">必要</th><th class="n">ある</th><th class="n">足りない</th><th>ある場所</th><th>入手</th></tr></thead><tbody>`;
   for (const [nm, n] of [...need].sort((a, b) => (Math.max(0, b[1] - got(b[0]).n) > 0) - (Math.max(0, a[1] - got(a[0]).n) > 0) || a[0].localeCompare(b[0], "ja"))) {
     const g = got(nm).n, lack = Math.max(0, n - g);
-    h += `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(n)}</td><td class="n" title="${esc(tip(nm))}">${fmtN(g)}</td><td class="n">${lack ? `<span class="warn">${fmtN(lack)}</span>` : `<span class="ok">✔</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`;
+    h += `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(n)}</td><td class="n" title="${esc(tip(nm))}">${fmtN(g)}</td><td class="n">${lack ? `<span class="warn">${fmtN(lack)}</span>` : `<span class="ok">✔</span>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`;
   }
   h += `</tbody></table></div></details>`;
   for (const [no, its] of FANCY) {
     const auto = FANCY_AUTO.has(no) && !FANCY_DONE[no], done = !!FANCY_DONE[no] || auto;
     if (done && FANCY_HIDE) continue;
-    const ok = its.every(([nm, n]) => got(nm).n >= n);
+    const ok = its.every(([nm, n], i) => got(nm).n >= n || DV.has(no + "|" + i));
     h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
-      <div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n]) => { const g = got(nm).n; return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td><td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
+      <div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n], i) => { const g = got(nm).n, dv = DV.get(no + "|" + i); return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${dv ? `<span class="ok">納品ずみ（${esc(cn(dv))}）</span>` : done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
       <div class="fchr"><div class="fchh"><b>② 討伐</b>${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</div>${fancyHuntHtml(no)}</div></div></div>`;
   }
   h += `<p class="hint">入手のめやすは、まとめ表（2512アニバ）の書き方のままです（「イベントホール」「SPエンチャ」などは NPC・交換、ほかは落とすモンスターなど）。「入手」は RO公式ツールのページで、落とすモンスターと出るマップが見られます。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;

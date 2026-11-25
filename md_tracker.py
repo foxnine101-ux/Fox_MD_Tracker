@@ -48,7 +48,7 @@ try:
 except Exception:
     char_core = None
 
-VERSION = "2.58.91"
+VERSION = "2.58.92"
 try:
     from edition import DEV   # 開発版かどうか(ビルドで書きかわる)
 except Exception:
@@ -371,6 +371,8 @@ def build_payload(core, history=100):
             chars[name]["jobName"] = char_core.job_name(info["job"])
         if ch.get("nyar"):
             chars[name]["nyar"] = ch["nyar"]
+        if ch.get("deliv"):
+            chars[name]["deliv"] = json.loads(json.dumps(ch["deliv"]))      # 24th ファンシーの納品の記録(品・個数・時刻)
         if ch.get("muscle"):
             chars[name]["muscle"] = json.loads(json.dumps(ch["muscle"]))      # 24th マッスルマーチ: 参加回数・経験値の累計・履歴
         if ch.get("anniv"):
