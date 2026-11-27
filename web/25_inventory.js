@@ -224,7 +224,9 @@ function renderLedger(chars) {
   const cut = LED_DAYS ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() / 1000 - (LED_DAYS - 1) * 86400; })() : 0;
   const rows0 = inSrv.filter((r) => (!LED_CHAR || r.c === LED_CHAR) && r.t >= cut);
   const rows = rows0.filter((r) => !LED_KIND || r.k === LED_KIND);
-  const real = rows0.filter((r) => r.k !== "unseen");
+  const isKw = (r) => r.k === "kawase_in" || r.k === "kawase_out";
+  const real = rows0.filter((r) => r.k !== "unseen" && !(ALLW && isKw(r)));      // 全ワールドでは、為替はワールド間の移し替えなので収入・支出に入れない(足すと二重になる)
+  const kwRows = ALLW ? rows0.filter(isKw) : [], kwSum = kwRows.reduce((a, r) => a + r.d, 0);
   const inc = real.reduce((a, r) => a + (r.d > 0 ? r.d : 0), 0), out = real.reduce((a, r) => a + (r.d < 0 ? -r.d : 0), 0);
   const byK = new Map();
   for (const r of rows0) { const e = byK.get(r.k) || { n: 0, z: 0 }; e.n++; e.z += r.d; byK.set(r.k, e); }
@@ -234,10 +236,10 @@ function renderLedger(chars) {
   const bar = `<div class="invbar">${srvs.length > 1 ? `<select id="ledsrv">${srvs.map((s) => opt(s, LED_SRV, serverLabel(s))).join("")}${opt("*", LED_SRV, noaIn ? "全ワールド（B鯖換算）" : "全ワールド")}</select>` : ""}<select id="ledchar">${opt("", LED_CHAR, "全キャラ")}${cl.map((c) => opt(c, LED_CHAR, ALLW ? `${cn(c)}（${serverLabel(srvOf(c))}）` : cn(c))).join("")}</select><select id="leddays">${[[1, "今日"], [7, "7日"], [30, "30日"], [0, "全部"]].map(([v, l]) => `<option value="${v}" ${v === LED_DAYS ? "selected" : ""}>${l}</option>`).join("")}</select></div>`;
   const note = `<div class="muted" style="margin-bottom:6px">ツールを動かしているあいだの、ゼニーの増減と、そのとき動いた品の記録です（この PC だけに保存）。「何で」は前後の通信からの見立てです。${ALLW && noaIn ? "ノアトゥーンの金額は B鯖換算（×1000）にして足しています。" : "ワールドごとに分けています。「全ワールド」を選ぶと、ノアトゥーンを B鯖換算（×1000）にして合わせて出します。"}</div>`;
   const big = (l, n, c) => `<div style="min-width:120px">${l}<b class="${c}" style="display:block;font-size:18px">${ledZ(n)} z</b></div>`;
-  const sum = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0">${big("収入", inc, "ok")}${big("支出", -out, "warn")}${big("差し引き", inc - out, ledCls(inc - out))}${noaNow ? `<div style="min-width:120px" class="muted">B鯖換算（×1000）<b class="${ledCls(inc - out)}" style="display:block;font-size:18px">${ledZ((inc - out) * 1000)} z</b></div>` : ""}</div>`;
+  const sum = `<div style="display:flex;gap:18px;flex-wrap:wrap;margin:8px 0">${big("収入", inc, "ok")}${big("支出", -out, "warn")}${big("差し引き", inc - out, ledCls(inc - out))}${kwRows.length ? `<div style="min-width:120px" class="muted" title="為替の換金と購入の差し引きです。収入・支出には入れていません">為替の移し替え<b class="${ledCls(kwSum)}" style="display:block;font-size:18px">${ledZ(kwSum)} z</b></div>` : ""}${noaNow ? `<div style="min-width:120px" class="muted">B鯖換算（×1000）<b class="${ledCls(inc - out)}" style="display:block;font-size:18px">${ledZ((inc - out) * 1000)} z</b></div>` : ""}</div>`;
   const kinds = [...byK].sort((a, b) => Math.abs(b[1].z) - Math.abs(a[1].z));
   const kt = `<div class="tablewrap"><table class="invt"><thead><tr><th>何で</th><th class="n">回数</th><th class="n">金額</th></tr></thead><tbody>${kinds.map(([k, e]) =>
-    `<tr data-ledk="${esc(k)}" style="cursor:pointer${LED_KIND === k ? ";background:var(--line)" : ""}" title="押すと明細をこれだけにします"><td>${esc(K[k] || k)}${k === "unseen" ? `<span class="sub">（収入・支出に入れない）</span>` : ""}</td><td class="n">${fmtN(e.n)}</td><td class="n ${ledCls(e.z)}">${ledZ(e.z)}</td></tr>`).join("")}</tbody></table></div>`;
+    `<tr data-ledk="${esc(k)}" style="cursor:pointer${LED_KIND === k ? ";background:var(--line)" : ""}" title="押すと明細をこれだけにします"><td>${esc(K[k] || k)}${k === "unseen" || (ALLW && (k === "kawase_in" || k === "kawase_out")) ? `<span class="sub">（収入・支出に入れない）</span>` : ""}</td><td class="n">${fmtN(e.n)}</td><td class="n ${ledCls(e.z)}">${ledZ(e.z)}</td></tr>`).join("")}</tbody></table></div>`;
   const days = [...byDay].sort((a, b) => b[0].localeCompare(a[0]));
   const dt = days.length > 1 ? `<div class="tablewrap" style="margin-top:8px"><table class="invt"><thead><tr><th>日</th><th class="n">収入</th><th class="n">支出</th><th class="n">差し引き</th></tr></thead><tbody>${days.slice(0, 60).map(([d, e]) =>
     `<tr><td>${esc(d.slice(5).replace("-", "/"))}</td><td class="n ok">${ledZ(e.i)}</td><td class="n warn">${ledZ(-e.o)}</td><td class="n ${ledCls(e.i - e.o)}">${ledZ(e.i - e.o)}</td></tr>`).join("")}</tbody></table></div>` : "";

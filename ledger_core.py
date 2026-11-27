@@ -55,7 +55,11 @@ KINDS = {      # 種類 -> 画面の名前
     "npc_buy": "NPCで買った", "npc_sell": "NPCに売った", "trade": "取引",
     "buy": "買った", "sell": "売った", "other_in": "その他の収入", "other_out": "その他の支出",
     "storage_fee": "倉庫の使用料", "unseen": "見ていない間の増減",
+    "kawase_in": "為替を換金", "kawase_out": "為替を買った",
 }
+W_STORAGE_FEE = 100                    # W倉庫を開くと 100z(jRO の実測: -100z の10件すべてで、同じ時に種類4の倉庫の一覧が届いた)
+KAWASE_IDS = (25567, 25568)            # 1小為替・1000小為替(ゼニーを為替にして、W倉庫で別のワールドへ運ぶ)
+KAWASE_FROM = ("sell", "buy", "npc_sell", "npc_buy", "other_in", "other_out")   # 露店・買取露店での売り買いは相場の商いなので、そのまま
 
 
 class Ledger(object):
@@ -204,12 +208,16 @@ class Ledger(object):
                 s["ev"].append({"t": now, "id": it[0], "n": -(amt or 1), "r": it[1]})
             return
         if op in OP_LIST and len(pkt) >= 5:
+            if op in (0x0B09, 0x0B39) and pkt[4] == 4:
+                s["ctx"]["wsto"] = now         # W倉庫の一覧(使用料の見分けに使う)
             self._cart_list(s, op, pkt, now)
             return
         self._raw(op, pkt)
         if op in OP_VEND_SOLD and len(pkt) >= 6:
             idx, amt = struct.unpack_from("<HH", pkt, 2)
             z = struct.unpack_from("<I", pkt, 14)[0] if op == 0x09E5 and len(pkt) >= 18 else None
+            if not amt:
+                return                         # 個数 0 は売上ではない(jRO の 0137 は、ログイン直後の長いデータの切り分けずれでも出る)
             it = s["vend"].get(idx) or s["cart"].get(idx)
             s["hint"].append({"t": now, "k": "vend_sell", "id": it[0] if it else None, "n": -(amt or 1), "r": it[1] if it else 0, "z": z, "idx": idx})
         elif op == OP_CART_DEL and len(pkt) >= 8:
@@ -395,7 +403,9 @@ class Ledger(object):
         price = None
         if tx.get("mailitem"):
             k = "mail_item"
-        elif "vend_sell" in hk:
+        elif d == -W_STORAGE_FEE and ctx.get("wsto") and abs(ctx["wsto"] - t0) <= WIN:
+            k, its = "storage_fee", []
+        elif "vend_sell" in hk and d > 0:
             k = "vend_sell"
             its = [[h["id"], h["n"], h["r"]] for h in hints if h["k"] == "vend_sell"]
         elif d > 0 and not hk and [h for h in s["cartout"] if 0 <= t0 - h["t"] <= CART_SEC and not h.get("used")]:
@@ -457,10 +467,10 @@ class Ledger(object):
         if price:
             row["p"] = round(price, 2)
         ops = sorted({"{:04X}".format(o) for (t, o, ln, raw) in s["ring"] if t0 - 1.5 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB)})
-        if k == "other_out" and d in (-40, -50) and "00F2" in ops and "0B08" in ops:
-            k = row["k"] = "storage_fee"      # 倉庫を開くと 40〜50z かかる(jRO の実測。倉庫の使用数 00F2 と倉庫の一覧 0B08 が同時に来る)
         if ops and k.startswith("other"):
             row["ops"] = ops                   # 確認用: 何で動いたか分からなかったときの、前後の通信の種類
+        row = self._relabel(row)
+        k, its, price = row["k"], row.get("it") or [], row.get("p")
         self._add(row)
         self._nlog += 1
         if self._nlog <= 300:
@@ -473,6 +483,21 @@ class Ledger(object):
             for (t, o, ln, raw) in s["ring"]:
                 if t0 - 10 <= t <= t0 + WIN and o not in (0x00B1, 0x0ACB):
                     self.log("[家計簿]   確認用 {:+.1f}秒 {:04X} {}バイト: {}".format(t - t0, o, ln, raw.hex()))
+
+    @staticmethod
+    def _relabel(r):
+        """種類の見直し(新しい記録にも、前の版の記録を画面に出すときにも使う。保存してある記録は書きかえない)。"""
+        k, d, its = r.get("k"), r.get("d") or 0, r.get("it") or []
+        ops = set(r.get("ops") or [])
+        # 前の版の W倉庫の使用料: 切り分けずれの 0137 で「露店で売れた」(売れてゼニーは減らない)・NPC の会話を閉じた直後の一覧で「その他の支出」
+        if d == -W_STORAGE_FEE and (k == "vend_sell" or (k == "other_out" and {"00B6", "0B09", "0B0B"} <= ops and not ops & {"0091", "0092", "0AC7"})):
+            return {x: v for x, v in dict(r, k="storage_fee").items() if x not in ("it", "p")}
+        # 倉庫を開くと 40〜50z(jRO の実測。倉庫の使用数 00F2 と倉庫の一覧 0B08 が同時に来る)
+        if k == "other_out" and d in (-40, -50) and {"00F2", "0B08"} <= ops:
+            return dict(r, k="storage_fee")
+        if k in KAWASE_FROM and d and its and all(x[0] in KAWASE_IDS for x in its):
+            return dict(r, k="kawase_in" if d > 0 else "kawase_out")
+        return r
 
     @staticmethod
     def _match_shop(entries, z):
@@ -567,7 +592,6 @@ class Ledger(object):
             if days:
                 cut = time.time() - days * 86400
                 rows = [r for r in rows if r["t"] >= cut]
-            rows = [dict(r, k="storage_fee") if r.get("k") == "other_out" and r.get("d") in (-40, -50) and "00F2" in (r.get("ops") or []) and "0B08" in (r.get("ops") or []) else r
-                    for r in reversed(rows)]      # 前の版で「その他の支出」になった倉庫の使用料も、画面では直して出す
+            rows = [self._relabel(r) for r in reversed(rows)]      # 前の版の記録の倉庫の使用料・為替も、画面では直して出す
             ids = {str(x[0]) for r in rows for x in r.get("it") or [] if x[0]}
             return {"rows": rows, "names": {i: self.id2name[i] for i in ids if i in self.id2name}, "kinds": KINDS, "t": self.t}
