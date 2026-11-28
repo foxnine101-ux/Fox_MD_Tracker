@@ -1025,6 +1025,10 @@ class CharCore(object):
                     self.md.note_item_used(self._name(), iid, amt, now07)
                 except Exception:
                     pass
+            if reason == 0 and not iid:      # 確認用: どの品か分からず、納品の確認に回せなかった消費(納品の自動記録が抜けた原因を探す)
+                self._diag_unk = getattr(self, "_diag_unk", 0) + 1
+                if self._diag_unk <= 100:
+                    self.log("[ファンシー] 品の分からない消費 番号={} 個数={} {}".format(idx, amt, "持ち物の一覧あり" if getattr(self, "_key", None) in self._items_synced else "持ち物の一覧なし"))
             self._gone(idx, reason)
 
         elif op in STORAGE_OPS:                          # 倉庫まわりの通信(本物の形の確認用。最初の数回だけ中身を記録する)

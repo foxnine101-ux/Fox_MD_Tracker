@@ -58,8 +58,12 @@ function fancyHuntHtml(no) {
 }
 // 実機の「納品」の記録(DATA.chars[キャラ].deliv = [{t, id, n}]。品が納品の数ちょうど消えて、すぐ経験値が来たもの)を、ミッションの納品物に当てはめる。
 // 同じ品が複数のミッションにある(ニンジン20はミッション1と21)ので、時刻の古い記録から、ミッション1→24 の順に1つずつ使う。戻り値: "ミッション番号|納品物の位置" → キャラ名
+// 自動の記録が抜けたときの手動の印(この PC の画面だけ・"ミッション番号|納品物の位置")。手動の分を先に埋めるので、実機の記録はほかのミッションに回る。
+const FANCY_ITEM_KEY = "md_fancy_item_24", FANCY_HAND = "手動";
+let FANCY_ITEM = {};
+try { FANCY_ITEM = JSON.parse(store.get(FANCY_ITEM_KEY) || "{}") || {}; } catch (e) {}
 function fancyDelivered(chars) {
-  const out = new Map();
+  const out = new Map(Object.keys(FANCY_ITEM).map((k) => [k, FANCY_HAND]));
   for (const c of chars) {
     const list = (((DATA && DATA.chars) || {})[c] || {}).deliv;
     if (!Array.isArray(list) || !list.length) continue;
@@ -106,7 +110,7 @@ function renderFancy(chars) {
     const isOpen = no in FANCY_OPEN ? !!FANCY_OPEN[no] : !finished;
     h += `<div class="panel" style="padding:8px 12px;${done ? "opacity:.55" : ""}"><label><input type="checkbox" data-fcdone="${no}" ${done ? "checked" : ""} ${auto ? "disabled" : ""}> <b>ミッション${no}</b><span class="muted">（討伐 ＋ 納品）</span></label>
       <span class="muted" style="margin-left:8px">${auto ? "納品した（実機のクエスト一覧から自動）" : done ? "納品した" : ok ? `<span class="ok">全部そろっています</span>` : "足りない品があります"}</span>
-      <details data-fcm="${no}" data-def="${finished ? "0" : "1"}" ${isOpen ? "open" : ""}><summary class="muted" style="cursor:pointer;margin-top:4px">${finished ? "終わっています（開くと内容が見られます）" : "納品と討伐"}</summary><div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n], i) => { const g = got(nm).n, dv = DV.get(no + "|" + i); return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${dv ? `<span class="ok">納品ずみ（${esc(cn(dv))}）</span>` : done ? "" : g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
+      <details data-fcm="${no}" data-def="${finished ? "0" : "1"}" ${isOpen ? "open" : ""}><summary class="muted" style="cursor:pointer;margin-top:4px">${finished ? "終わっています（開くと内容が見られます）" : "納品と討伐"}</summary><div class="fchs"><div class="fchl"><div class="fchh"><b>① 納品</b></div><div class="tablewrap"><table class="invt"><tbody>${its.map(([nm, n], i) => { const g = got(nm).n, dv = DV.get(no + "|" + i); return `<tr><td title="${esc(tip(nm))}">${esc(nm)}</td><td class="n">${fmtN(g)} / ${fmtN(n)}</td><td>${dv ? `<span class="ok">納品ずみ（${esc(cn(dv))}）</span>${dv === FANCY_HAND ? ` <button data-fcitem="${no}|${i}" title="手で付けた印を消す">取消</button>` : ""}` : done ? "" : `${g >= n ? `<span class="ok">✔</span>` : `<span class="warn">あと ${fmtN(n - g)}</span>`} <button data-fcitem="${no}|${i}" title="ゲームで納品したのに自動で付かないとき、手で納品ずみにする">納品した</button>`}</td>${whereTd(nm)}<td>${fancyLinks(nm, have)}</td></tr>`; }).join("")}</tbody></table></div></div>
       <div class="fchr"><div class="fchh"><b>② 討伐</b>${typeof anHuntHtml === "function" ? anHuntHtml(no, chars) : ""}</div>${fancyHuntHtml(no)}</div></div></details></div>`;
   }
   h += `<p class="hint">入手のめやすは、まとめ表（2512アニバ）の書き方のままです（「イベントホール」「SPエンチャ」などは NPC・交換、ほかは落とすモンスターなど）。「入手」は RO公式ツールのページで、落とすモンスターと出るマップが見られます。「相場」は露店の取引履歴です。数にカーソルを合わせると、どこに何個あるかが出ます。ミッションの印はこの PC の画面にだけ覚えます。倉庫は、ゲームで一度開いたものだけ数えます。</p>`;
@@ -120,6 +124,11 @@ function renderFancy(chars) {
   const sm = $("#fcsum"); if (sm) sm.ontoggle = () => { FANCY_SUMOPEN = sm.open; store.set("md_fancy_sumopen", sm.open ? "1" : "0"); };
   document.querySelectorAll("#view [data-mk]").forEach((b) => b.onclick = () => mktOpen(b.dataset.mk, b.dataset.mkn));
   const hide = $("#fchide"); if (hide) hide.onchange = () => { FANCY_HIDE = hide.checked; store.set("md_fancy_hide", FANCY_HIDE ? "1" : "0"); render(); };
+  document.querySelectorAll("[data-fcitem]").forEach((b) => b.onclick = () => {
+    const k = b.dataset.fcitem;
+    if (FANCY_ITEM[k]) delete FANCY_ITEM[k]; else FANCY_ITEM[k] = 1;
+    store.set(FANCY_ITEM_KEY, JSON.stringify(FANCY_ITEM)); render();
+  });
   document.querySelectorAll("[data-fcdone]").forEach((b) => b.onchange = () => {
     if (b.checked) FANCY_DONE[b.dataset.fcdone] = 1; else delete FANCY_DONE[b.dataset.fcdone];
     store.set(FANCY_KEY, JSON.stringify(FANCY_DONE)); render();

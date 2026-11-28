@@ -641,6 +641,7 @@ class MDCore(object):
         pend = [e for e in self.deliv_pend.get(name, []) if now - e[0] <= DELIV_WAIT]
         pend.append([now, itid, cnt])
         self.deliv_pend[name] = pend[-8:]
+        self.log("[ファンシー] {}: 納品物が持ち物から消えた アイテム{} ×{}(このあと経験値が来れば納品)".format(name, itid, cnt))
 
     def _deliv_confirm(self, c, name, amount, now):
         """品が消えた直後(DELIV_WAIT 秒以内)に大きな経験値が来たら、ファンシーの納品1回とみなして記録する。1回の納品で経験値は何十もの通信に分かれて届くので、確認待ちの1件を1回だけ使う。
